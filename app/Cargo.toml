@@ -1,0 +1,11 @@
+[package]
+name = "printcountpay-app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+arboard.workspace = true
+iced.workspace = true
+printcountpay-core = { path = "../core" }
+tracing.workspace = true
+tracing-subscriber.workspace = true

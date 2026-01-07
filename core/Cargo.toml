@@ -1,0 +1,8 @@
+[package]
+name = "printcountpay-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ron.workspace = true
+thiserror.workspace = true

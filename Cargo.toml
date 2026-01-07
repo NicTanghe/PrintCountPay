@@ -1,6 +1,16 @@
-[package]
-name = "printcountpay"
+[workspace]
+members = ["core", "app"]
+resolver = "2"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
+[workspace.dependencies]
+arboard = "3.4.1"
+iced = { version = "0.12.1", features = ["tokio"] }
+ron = "0.8.1"
+serde = { version = "1.0.210", features = ["derive"] }
+thiserror = "2.0.11"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
