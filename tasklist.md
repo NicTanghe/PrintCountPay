@@ -10,9 +10,13 @@ Status: todo
 
 Cargo workspace:
 
-core/ — SNMP, discovery, counters, persistence
+core/ - SNMP, discovery, counters, persistence
 
-app/ — Iced GUI
+ui/ - Iced UI components/state
+
+app/ - App entrypoint (wires core + ui)
+
+docs/ - Usage and architecture notes
 
 CI:
 
@@ -153,7 +157,7 @@ Epic C — SNMP layer (instrumented)
 C1. SNMP client abstraction
 
 Depends: A2
-Status: todo
+Status: done
 
 SNMP v2c
 
@@ -176,7 +180,7 @@ Timeouts never block UI
 C2. Ricoh identification & capability probing
 
 Depends: C1, B1
-Status: todo
+Status: done
 
 Identify Ricoh via sysObjectID / sysDescr
 
@@ -191,7 +195,7 @@ Unmapped models clearly marked
 C3. Counter resolution logic
 
 Depends: C2
-Status: todo
+Status: done
 
 Prefer BW + Color
 

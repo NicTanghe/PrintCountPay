@@ -12,6 +12,11 @@ pub enum Error {
         address: String,
         timeout_ms: u64,
     },
+    #[error("SNMP failure for {address}")]
+    SnmpFailure {
+        address: String,
+        details: String,
+    },
     #[error("Unsupported Ricoh model: {model}")]
     UnsupportedModel {
         model: String,
@@ -73,6 +78,9 @@ impl Error {
             Error::SnmpTimeout { address, .. } => {
                 format!("SNMP request timed out for {address}.")
             }
+            Error::SnmpFailure { address, .. } => {
+                format!("SNMP error for {address}.")
+            }
             Error::UnsupportedModel { model, .. } => {
                 format!("Unsupported Ricoh model: {model}.")
             }
@@ -101,6 +109,9 @@ impl Error {
                 address,
                 timeout_ms,
             } => format!("SNMP timeout after {timeout_ms}ms for {address}."),
+            Error::SnmpFailure { address, details } => {
+                format!("SNMP failure for {address}: {details}")
+            }
             Error::UnsupportedModel {
                 model,
                 sys_object_id,

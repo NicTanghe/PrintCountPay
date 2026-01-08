@@ -1,5 +1,5 @@
 [workspace]
-members = ["core", "app"]
+members = ["core", "ui", "app"]
 resolver = "2"
 
 [workspace.package]
@@ -11,6 +11,8 @@ arboard = "3.4.1"
 iced = { version = "0.12.1", features = ["tokio"] }
 ron = "0.8.1"
 serde = { version = "1.0.210", features = ["derive"] }
+snmp = "0.2"
 thiserror = "2.0.11"
+tokio = { version = "1.49.0", features = ["rt", "time"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }

@@ -2085,11 +2085,9 @@ checksum = "e8cf8e6a8aa66ce33f63993ffc4ea4271eb5b0530a9002db8455ea6050c77bfa"
 name = "printcountpay-app"
 version = "0.1.0"
 dependencies = [
- "arboard",
- "iced",
  "printcountpay-core",
+ "printcountpay-ui",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -2097,7 +2095,23 @@ name = "printcountpay-core"
 version = "0.1.0"
 dependencies = [
  "ron",
+ "serde",
+ "snmp",
  "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "printcountpay-ui"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "iced",
+ "printcountpay-core",
+ "ron",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2385,6 +2399,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
+ "serde_derive",
 ]
 
 [[package]]
@@ -2536,6 +2551,12 @@ checksum = "dd538fb6910ac1099850255cf94a94df6551fbdd602454387d0adb2d1ca6dead"
 dependencies = [
  "serde",
 ]
+
+[[package]]
+name = "snmp"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff2a575449a5c487091e541c0cb4ccd83620167fd52363f816fe28f6f357fc00"
 
 [[package]]
 name = "softbuffer"

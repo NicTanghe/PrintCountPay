@@ -1,9 +1,12 @@
 [package]
-name = "printcountpay-app"
+name = "printcountpay-ui"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
+arboard.workspace = true
+iced.workspace = true
 printcountpay-core = { path = "../core" }
-printcountpay-ui = { path = "../ui" }
+ron.workspace = true
 tracing.workspace = true
+tracing-subscriber.workspace = true
