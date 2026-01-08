@@ -8,6 +8,7 @@ edition = "2024"
 
 [workspace.dependencies]
 arboard = "3.4.1"
+get_if_addrs = "0.5.3"
 iced = { version = "0.12.1", features = ["tokio"] }
 ron = "0.8.1"
 serde = { version = "1.0.210", features = ["derive"] }

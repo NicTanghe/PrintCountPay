@@ -213,7 +213,7 @@ Epic D — Network discovery
 D1. Network scan engine
 
 Depends: C1
-Status: todo
+Status: done
 
 Auto subnet detection
 
@@ -230,7 +230,7 @@ Cancel stops activity immediately
 D2. Discovery UI
 
 Depends: D1, A4
-Status: todo
+Status: done
 
 Subnet list
 
@@ -425,23 +425,11 @@ App restores printers automatically
 
 Missing file handled gracefully with warning
 
-Epic H — Export
+Epic H - Export (removed)
 H1. CSV export
 
 Depends: E2
-Status: todo
-
-Snapshot / delta export
-
-ISO timestamps
-
-Explicit BW / Color
-
-Acceptance
-
-Opens cleanly in Excel
-
-Missing values explicit
+Status: dropped (RON only)
 
 Constraints (explicit)
 
@@ -468,6 +456,5 @@ C2 + C3
 E1 + E2          (live counters)
 F2               (error visibility polish)
 G2               (saving configs)
-H1               (export)
 Polish: Ricoh model mappings, UX, performance tuning
 

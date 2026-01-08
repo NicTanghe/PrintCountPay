@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -12,9 +12,9 @@ use ron::de::from_str;
 use ron::ser::{to_string_pretty, PrettyConfig};
 
 use printcountpay_core::{
-    resolve_counters, targets, CounterOidSet, Oid, PrinterId, PrinterRecord, PrinterStatus,
-    SnmpAddress, SnmpConfig, SnmpRequest, SnmpResponse, SnmpV2cClient, SnmpVarBind,
-    SnmpWalkRequest,
+    default_discovery_cidr, probe_printer, resolve_counters, targets, CidrRange, CounterOidSet, Oid,
+    PrinterId, PrinterRecord, PrinterStatus, SnmpAddress, SnmpConfig, SnmpRequest, SnmpResponse,
+    SnmpV2cClient, SnmpVarBind, SnmpWalkRequest,
 };
 
 use crate::logging::{apply_log_level, LogEntry, LogLevel, LogStore, ReloadHandle};
@@ -26,6 +26,7 @@ const PRT_MARKER_LIFECOUNT_ROOT: [u32; 11] = [1, 3, 6, 1, 2, 1, 43, 10, 2, 1, 4]
 const PRT_MARKER_LIFECOUNT_1: [u32; 13] = [1, 3, 6, 1, 2, 1, 43, 10, 2, 1, 4, 1, 1];
 const PRT_MARKER_LIFECOUNT_2: [u32; 13] = [1, 3, 6, 1, 2, 1, 43, 10, 2, 1, 4, 1, 2];
 const PRT_MARKER_LIFECOUNT_3: [u32; 13] = [1, 3, 6, 1, 2, 1, 43, 10, 2, 1, 4, 1, 3];
+const DISCOVERY_CONCURRENCY: usize = 24;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -46,6 +47,11 @@ pub enum Message {
     ToggleTarget(String, bool),
     CopyDiagnostics,
     AddMockSnmp,
+    DiscoveryCidrChanged(String),
+    DiscoveryCommunityChanged(String),
+    StartDiscovery,
+    StopDiscovery,
+    DiscoveryProbeFinished(DiscoveryProbeResult),
     SelectTab(Tab),
     SelectPrinterTab(PrinterTab),
     SelectPrinter(PrinterId),
@@ -86,6 +92,19 @@ enum SnmpPollStatus {
     },
 }
 
+#[derive(Debug, Clone)]
+pub struct DiscoveryProbeResult {
+    run_id: u64,
+    outcome: DiscoveryOutcome,
+}
+
+#[derive(Debug, Clone)]
+pub enum DiscoveryOutcome {
+    Printer(PrinterRecord),
+    NotPrinter,
+    Error(SnmpErrorInfo),
+}
+
 pub struct Flags {
     pub log_store: LogStore,
     pub reload_handle: ReloadHandle,
@@ -102,6 +121,17 @@ pub struct PrintCountApp {
     mock_snmp_count: u32,
     active_tab: Tab,
     printer_tab: PrinterTab,
+    discovery_cidr: String,
+    discovery_community: String,
+    discovery_status: Option<String>,
+    discovery_active: bool,
+    discovery_queue: VecDeque<SnmpAddress>,
+    discovery_in_flight: usize,
+    discovery_total: usize,
+    discovery_scanned: usize,
+    discovery_found: usize,
+    discovery_errors: usize,
+    discovery_run_id: u64,
     printers: Vec<PrinterRecord>,
     selected_printer: Option<PrinterId>,
     poll_states: HashMap<PrinterId, SnmpPollStatus>,
@@ -136,6 +166,13 @@ impl Application for PrintCountApp {
         let printers = seed_printers();
         let counter_oids = default_counter_oids();
         let (oids_bw_text, oids_color_text, oids_total_text) = format_counter_oids(&counter_oids);
+        let (discovery_cidr, discovery_status) = match default_discovery_cidr() {
+            Some(cidr) => (cidr, None),
+            None => (
+                "".to_string(),
+                Some("Local subnet not detected. Enter a CIDR to scan.".to_string()),
+            ),
+        };
         let mut poll_states = HashMap::new();
         for record in &printers {
             poll_states.insert(record.id.clone(), SnmpPollStatus::Idle);
@@ -153,6 +190,17 @@ impl Application for PrintCountApp {
                 mock_snmp_count: 0,
                 active_tab: Tab::Printers,
                 printer_tab: PrinterTab::Polling,
+                discovery_cidr,
+                discovery_community: "public".to_string(),
+                discovery_status,
+                discovery_active: false,
+                discovery_queue: VecDeque::new(),
+                discovery_in_flight: 0,
+                discovery_total: 0,
+                discovery_scanned: 0,
+                discovery_found: 0,
+                discovery_errors: 0,
+                discovery_run_id: 0,
                 printers,
                 selected_printer: None,
                 poll_states,
@@ -207,6 +255,20 @@ impl Application for PrintCountApp {
                 );
                 Command::none()
             }
+            Message::DiscoveryCidrChanged(value) => {
+                self.discovery_cidr = value;
+                Command::none()
+            }
+            Message::DiscoveryCommunityChanged(value) => {
+                self.discovery_community = value;
+                Command::none()
+            }
+            Message::StartDiscovery => self.start_discovery(),
+            Message::StopDiscovery => {
+                self.stop_discovery();
+                Command::none()
+            }
+            Message::DiscoveryProbeFinished(result) => self.handle_discovery_result(result),
             Message::SelectTab(tab) => {
                 self.active_tab = tab;
                 Command::none()
@@ -380,6 +442,76 @@ impl PrintCountApp {
             .into()
     }
 
+    fn discovery_controls_view(&self) -> Element<'_, Message> {
+        let cidr_input = text_input("192.168.1.0/24", &self.discovery_cidr)
+            .on_input(Message::DiscoveryCidrChanged)
+            .padding(6)
+            .size(12)
+            .width(Length::Fill);
+        let community_input = text_input("public", &self.discovery_community)
+            .on_input(Message::DiscoveryCommunityChanged)
+            .padding(6)
+            .size(12)
+            .width(Length::Fill);
+
+        let action_button = if self.discovery_active {
+            button("Stop").on_press(Message::StopDiscovery)
+        } else {
+            button("Start").on_press(Message::StartDiscovery)
+        };
+
+        let status = self
+            .discovery_status
+            .as_deref()
+            .unwrap_or("Idle - ready to scan.");
+        let progress = if self.discovery_total > 0 {
+            format!(
+                "Scanned {}/{} | Found {} | Errors {}",
+                self.discovery_scanned,
+                self.discovery_total,
+                self.discovery_found,
+                self.discovery_errors
+            )
+        } else {
+            "Scanned 0/0 | Found 0 | Errors 0".to_string()
+        };
+
+        let content = column![
+            text("Discovery")
+                .size(16)
+                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+            column![
+                text("CIDR range")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                cidr_input,
+            ]
+            .spacing(4),
+            column![
+                text("Community")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                community_input,
+            ]
+            .spacing(4),
+            row![action_button]
+                .spacing(8)
+                .align_items(Alignment::Center),
+            text(status)
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            text(progress)
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+        ]
+        .spacing(6);
+
+        container(content)
+            .padding(8)
+            .style(theme::Container::Box)
+            .into()
+    }
+
     fn printers_tab_view(&self) -> Element<'_, Message> {
         let list = self.printer_list_view();
         let details = self.printer_details_view();
@@ -410,15 +542,16 @@ impl PrintCountApp {
             .width(Length::Fill);
 
         let content = column![
+            self.discovery_controls_view(),
             text("Found printers")
                 .size(20)
                 .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-            text("Demo list (discovery not wired yet).")
+            text("Discovery results appear here.")
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
             scroll
         ]
-        .spacing(8);
+        .spacing(12);
 
         container(content)
             .padding(12)
@@ -980,6 +1113,154 @@ impl PrintCountApp {
         output
     }
 
+    fn start_discovery(&mut self) -> Command<Message> {
+        let cidr = self.discovery_cidr.trim();
+        if cidr.is_empty() {
+            self.discovery_status = Some("CIDR is empty.".to_string());
+            return Command::none();
+        }
+
+        let range = match CidrRange::parse(cidr) {
+            Ok(range) => range,
+            Err(error) => {
+                self.discovery_status = Some(format!("Invalid CIDR: {error}"));
+                return Command::none();
+            }
+        };
+
+        let mut queue = VecDeque::new();
+        for ip in range.iter() {
+            queue.push_back(SnmpAddress::with_default_port(ip.to_string()));
+        }
+
+        if queue.is_empty() {
+            self.discovery_status = Some("CIDR contains no usable hosts.".to_string());
+            return Command::none();
+        }
+
+        self.discovery_run_id = self.discovery_run_id.wrapping_add(1);
+        self.discovery_active = true;
+        self.discovery_queue = queue;
+        self.discovery_total = self.discovery_queue.len();
+        self.discovery_scanned = 0;
+        self.discovery_found = 0;
+        self.discovery_errors = 0;
+        self.discovery_in_flight = 0;
+        self.discovery_status = Some(format!(
+            "Discovery started ({} hosts).",
+            self.discovery_total
+        ));
+
+        self.spawn_discovery_tasks()
+    }
+
+    fn stop_discovery(&mut self) {
+        self.discovery_active = false;
+        self.discovery_queue.clear();
+        self.discovery_in_flight = 0;
+        self.discovery_run_id = self.discovery_run_id.wrapping_add(1);
+        self.discovery_status = Some("Discovery stopped.".to_string());
+    }
+
+    fn handle_discovery_result(&mut self, result: DiscoveryProbeResult) -> Command<Message> {
+        if result.run_id != self.discovery_run_id {
+            return Command::none();
+        }
+
+        self.discovery_in_flight = self.discovery_in_flight.saturating_sub(1);
+        self.discovery_scanned = self.discovery_scanned.saturating_add(1);
+
+        match result.outcome {
+            DiscoveryOutcome::Printer(record) => {
+                self.discovery_found = self.discovery_found.saturating_add(1);
+                self.upsert_printer(record);
+            }
+            DiscoveryOutcome::NotPrinter => {}
+            DiscoveryOutcome::Error(error) => {
+                self.discovery_errors = self.discovery_errors.saturating_add(1);
+                self.discovery_status = Some(format!(
+                    "Last error: {} ({})",
+                    error.summary, error.detail
+                ));
+            }
+        }
+
+        if self.discovery_queue.is_empty() && self.discovery_in_flight == 0 {
+            self.discovery_active = false;
+            self.discovery_status = Some(format!(
+                "Discovery complete: {} printers found.",
+                self.discovery_found
+            ));
+            return Command::none();
+        }
+
+        self.spawn_discovery_tasks()
+    }
+
+    fn spawn_discovery_tasks(&mut self) -> Command<Message> {
+        if !self.discovery_active {
+            return Command::none();
+        }
+
+        let mut commands = Vec::new();
+        while self.discovery_in_flight < DISCOVERY_CONCURRENCY {
+            let Some(address) = self.discovery_queue.pop_front() else {
+                break;
+            };
+
+            let run_id = self.discovery_run_id;
+            let community = self.discovery_community.trim().to_string();
+            let community = (!community.is_empty()).then_some(community);
+            let config = self.snmp_config.clone();
+
+            self.discovery_in_flight += 1;
+            commands.push(Command::perform(
+                async move {
+                    let result = probe_printer(address, community, config).await;
+                    let outcome = match result {
+                        Ok(Some(record)) => DiscoveryOutcome::Printer(record),
+                        Ok(None) => DiscoveryOutcome::NotPrinter,
+                        Err(error) => DiscoveryOutcome::Error(SnmpErrorInfo {
+                            summary: error.user_summary(),
+                            detail: error.technical_detail(),
+                        }),
+                    };
+                    DiscoveryProbeResult { run_id, outcome }
+                },
+                Message::DiscoveryProbeFinished,
+            ));
+        }
+
+        Command::batch(commands)
+    }
+
+    fn upsert_printer(&mut self, record: PrinterRecord) {
+        let host = record
+            .snmp_address
+            .as_ref()
+            .map(|addr| addr.host.as_str());
+
+        if let Some(existing) = self.printers.iter_mut().find(|printer| {
+            printer
+                .snmp_address
+                .as_ref()
+                .map(|addr| addr.host.as_str())
+                == host
+        }) {
+            existing.ip_or_hostname = record.ip_or_hostname;
+            existing.model = record.model;
+            existing.sys_object_id = record.sys_object_id;
+            existing.snmp_address = record.snmp_address;
+            existing.community = record.community;
+            existing.status = record.status;
+            existing.last_seen = record.last_seen;
+        } else {
+            self.poll_states
+                .insert(record.id.clone(), SnmpPollStatus::Idle);
+            self.printers.push(record);
+        }
+    }
+
     fn poll_selected_printer(&mut self) -> Command<Message> {
         let Some(printer_id) = self.selected_printer.clone() else {
             return Command::none();
@@ -1299,26 +1580,5 @@ fn snmp_oids(counter_oids: &CounterOidSet) -> Vec<Oid> {
 }
 
 fn seed_printers() -> Vec<PrinterRecord> {
-    vec![
-        PrinterRecord {
-            id: PrinterId::new("demo-ricoh-1"),
-            ip_or_hostname: Some("192.168.1.10".to_string()),
-            model: Some("Ricoh IM C3000".to_string()),
-            sys_object_id: None,
-            snmp_address: Some(SnmpAddress::with_default_port("192.168.1.10")),
-            community: None,
-            status: PrinterStatus::Unknown,
-            last_seen: None,
-        },
-        PrinterRecord {
-            id: PrinterId::new("demo-ricoh-2"),
-            ip_or_hostname: Some("192.168.1.11".to_string()),
-            model: Some("Ricoh IM 4000".to_string()),
-            sys_object_id: None,
-            snmp_address: Some(SnmpAddress::with_default_port("192.168.1.11")),
-            community: None,
-            status: PrinterStatus::Unknown,
-            last_seen: None,
-        },
-    ]
+    Vec::new()
 }
