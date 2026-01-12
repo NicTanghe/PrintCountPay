@@ -71,6 +71,8 @@ pub enum Message {
     SelectPrinterTab(PrinterTab),
     SelectPrinter(PrinterId),
     PollSelectedSnmp,
+    PollExportPathChanged(String),
+    ExportPollData,
     SnmpPolled {
         printer_id: PrinterId,
         result: Result<SnmpResponse, SnmpErrorInfo>,
@@ -157,6 +159,8 @@ pub struct PrintCountApp {
     selected_printer: Option<PrinterId>,
     poll_states: HashMap<PrinterId, SnmpPollStatus>,
     poll_in_flight: HashSet<PrinterId>,
+    poll_export_path: String,
+    poll_export_status: Option<String>,
     snmp_config: SnmpConfig,
     counter_oids: CounterOidSet,
     oids_path: String,
@@ -233,6 +237,8 @@ impl Application for PrintCountApp {
                 selected_printer: None,
                 poll_states,
                 poll_in_flight: HashSet::new(),
+                poll_export_path: "polling_export.txt".to_string(),
+                poll_export_status: None,
                 snmp_config: SnmpConfig::default(),
                 counter_oids,
                 oids_path: "counter_oids.ron".to_string(),
@@ -342,6 +348,14 @@ impl Application for PrintCountApp {
                 self.poll_selected_printer()
             }
             Message::PollSelectedSnmp => self.poll_selected_printer(),
+            Message::PollExportPathChanged(value) => {
+                self.poll_export_path = value;
+                Command::none()
+            }
+            Message::ExportPollData => {
+                self.export_poll_data();
+                Command::none()
+            }
             Message::SnmpPolled { printer_id, result } => {
                 self.poll_in_flight.remove(&printer_id);
                 let received_at = now_epoch_seconds();
@@ -916,6 +930,7 @@ impl PrintCountApp {
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
             self.poll_state_view(state, in_flight),
             self.counters_view(state, in_flight),
+            self.poll_export_controls_view(),
         ]
         .spacing(8);
 
@@ -1037,20 +1052,15 @@ impl PrintCountApp {
     }
 
     fn poll_state_view(&self, state: &SnmpPollStatus, in_flight: bool) -> Element<'_, Message> {
-        let mut content = column![].spacing(6);
-        if in_flight {
-            content = content.push(
-                text("Polling SNMP...")
-                    .size(12)
-                    .style(theme::Text::Color(Color::from_rgb8(0x3b, 0x82, 0xf6))),
-            );
-        }
-
-        let body: Element<'_, Message> = match state {
-            SnmpPollStatus::Idle => text("Waiting for next poll.")
-                .size(14)
-                .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a)))
-                .into(),
+        let indicator = self.polling_indicator("Polling SNMP...", in_flight);
+        let (last_poll, body): (String, Element<'_, Message>) = match state {
+            SnmpPollStatus::Idle => (
+                "Last poll: n/a".to_string(),
+                text("Waiting for next poll.")
+                    .size(14)
+                    .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a)))
+                    .into(),
+            ),
             SnmpPollStatus::Ok {
                 received_at,
                 varbinds,
@@ -1087,46 +1097,59 @@ impl PrintCountApp {
                     .height(Length::Fill)
                     .width(Length::Fill);
 
-                column![
-                    text(format!("Last poll: {}", received_at))
+                let body = column![
+                    text(format!("Varbinds: {shown_varbinds}/{total_varbinds}"))
                         .size(12)
                         .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-                    text(format!(
-                        "Varbinds: {shown_varbinds}/{total_varbinds}"
-                    ))
-                    .size(12)
-                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
                     list
                 ]
                 .spacing(6)
-                .into()
+                .into();
+
+                (format!("Last poll: {}", received_at), body)
             }
             SnmpPollStatus::Error {
                 received_at,
                 summary,
                 detail,
-            } => column![
-                text(format!("Last poll: {}", received_at))
-                    .size(12)
-                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-                text(format!("Error: {}", summary))
-                    .size(13)
-                    .style(theme::Text::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f))),
-                text(detail)
-                    .size(12)
-                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-            ]
-            .spacing(4)
-            .into(),
+            } => (
+                format!("Last poll: {}", received_at),
+                column![
+                    text(format!("Error: {}", summary))
+                        .size(13)
+                        .style(theme::Text::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f))),
+                    text(detail)
+                        .size(12)
+                        .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                ]
+                .spacing(4)
+                .into(),
+            ),
         };
 
-        content.push(body).into()
+        let header = row![
+            text(last_poll)
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a)))
+                .width(Length::Fill),
+            indicator,
+        ]
+        .spacing(12)
+        .align_items(Alignment::Center);
+
+        column![header, body].spacing(6).into()
     }
 
     fn counters_view(&self, state: &SnmpPollStatus, in_flight: bool) -> Element<'_, Message> {
-        let header = text("Counters")
-            .size(18)
-            .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12)));
+        let header = row![
+            text("Counters")
+                .size(18)
+                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12)))
+                .width(Length::Fill),
+            self.polling_indicator("Polling counters...", in_flight),
+        ]
+        .spacing(12)
+        .align_items(Alignment::Center);
 
         let body: Element<'_, Message> = match state {
             SnmpPollStatus::Ok {
@@ -1175,15 +1198,58 @@ impl PrintCountApp {
                 .into(),
         };
 
-        let mut content = column![header].spacing(6);
-        if in_flight {
-            content = content.push(
-                text("Polling counters...")
+        let content = column![header, body].spacing(6);
+
+        container(content)
+            .padding(8)
+            .style(theme::Container::Box)
+            .into()
+    }
+
+    fn polling_indicator(&self, label: &str, in_flight: bool) -> Element<'_, Message> {
+        let color = if in_flight {
+            Color::from_rgb8(0x3b, 0x82, 0xf6)
+        } else {
+            Color::TRANSPARENT
+        };
+
+        text(label)
+            .size(12)
+            .style(theme::Text::Color(color))
+            .into()
+    }
+
+    fn poll_export_controls_view(&self) -> Element<'_, Message> {
+        let status = self.poll_export_status.as_deref().unwrap_or("Ready.");
+        let path_input = text_input("polling_export.txt", &self.poll_export_path)
+            .on_input(Message::PollExportPathChanged)
+            .padding(6)
+            .size(12)
+            .width(Length::Fill);
+
+        let path_controls = row![
+            path_input,
+            button("Export").on_press(Message::ExportPollData),
+        ]
+        .spacing(8)
+        .align_items(Alignment::Center);
+
+        let content = column![
+            text("Poll export")
+                .size(16)
+                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+            column![
+                text("File path")
                     .size(12)
-                    .style(theme::Text::Color(Color::from_rgb8(0x3b, 0x82, 0xf6))),
-            );
-        }
-        content = content.push(body);
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                path_controls,
+            ]
+            .spacing(4),
+            text(format!("Status: {status}"))
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+        ]
+        .spacing(6);
 
         container(content)
             .padding(8)
@@ -1762,6 +1828,81 @@ impl PrintCountApp {
             },
             move |result| Message::SnmpPolled { printer_id, result },
         )
+    }
+
+    fn export_poll_data(&mut self) {
+        let path = self.poll_export_path.trim().to_string();
+        if path.is_empty() {
+            self.poll_export_status = Some("Export failed: path is empty.".to_string());
+            return;
+        }
+
+        let Some(printer_id) = self.selected_printer.clone() else {
+            self.poll_export_status = Some("Export failed: select a printer first.".to_string());
+            return;
+        };
+
+        let Some(state) = self.poll_states.get(&printer_id) else {
+            self.poll_export_status = Some("Export failed: no poll data yet.".to_string());
+            return;
+        };
+
+        let SnmpPollStatus::Ok {
+            received_at,
+            varbinds,
+        } = state
+        else {
+            self.poll_export_status = Some("Export failed: no poll data yet.".to_string());
+            return;
+        };
+
+        let (name, address) = match self
+            .printers
+            .iter()
+            .find(|record| record.id == printer_id)
+        {
+            Some(record) => {
+                let name = record.model.as_deref().unwrap_or("Unknown name").to_string();
+                let address = record
+                    .snmp_address
+                    .as_ref()
+                    .map(|addr| addr.to_string())
+                    .or_else(|| record.ip_or_hostname.clone())
+                    .unwrap_or_else(|| "Not set".to_string());
+                (name, address)
+            }
+            None => ("Unknown name".to_string(), "Not set".to_string()),
+        };
+
+        let mut contents = String::new();
+        let mut push_line = |line: &str| {
+            contents.push_str(line);
+            contents.push('\n');
+        };
+
+        push_line("PrintCountPay poll export");
+        push_line(&format!("printer_id={printer_id}"));
+        push_line(&format!("name={name}"));
+        push_line(&format!("address={address}"));
+        push_line(&format!("received_at={received_at}"));
+        push_line("");
+
+        if varbinds.is_empty() {
+            push_line("No varbinds returned.");
+        } else {
+            for varbind in varbinds {
+                push_line(&format!("{} = {}", varbind.oid, varbind.value));
+            }
+        }
+
+        match fs::write(&path, contents) {
+            Ok(()) => {
+                self.poll_export_status = Some(format!("Exported poll data to {path}."));
+            }
+            Err(error) => {
+                self.poll_export_status = Some(format!("Export failed: {error}"));
+            }
+        }
     }
 
     fn sync_oid_inputs(&mut self) {
