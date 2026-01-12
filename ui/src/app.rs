@@ -14,14 +14,16 @@ use ron::ser::{to_string_pretty, PrettyConfig};
 use printcountpay_core::{
     default_discovery_cidr, probe_printer, resolve_counters, targets, CidrRange, CounterOidSet, Oid,
     PrinterId, PrinterRecord, PrinterStatus, SnmpAddress, SnmpConfig, SnmpRequest, SnmpResponse,
-    SnmpV2cClient, SnmpVarBind, SnmpWalkRequest,
+    SnmpV2cClient, SnmpVarBind, SnmpWalkRequest, DEFAULT_SNMP_PORT,
 };
 
 use crate::logging::{apply_log_level, LogEntry, LogLevel, LogStore, ReloadHandle};
 
 const SYS_DESCR_OID: [u32; 9] = [1, 3, 6, 1, 2, 1, 1, 1, 0];
 const SYS_OBJECT_ID_OID: [u32; 9] = [1, 3, 6, 1, 2, 1, 1, 2, 0];
+const SYS_NAME_OID: [u32; 9] = [1, 3, 6, 1, 2, 1, 1, 5, 0];
 const SYS_UPTIME_OID: [u32; 9] = [1, 3, 6, 1, 2, 1, 1, 3, 0];
+const PRT_GENERAL_PRINTER_NAME_OID: [u32; 12] = [1, 3, 6, 1, 2, 1, 43, 5, 1, 1, 16, 1];
 const PRT_MARKER_LIFECOUNT_ROOT: [u32; 11] = [1, 3, 6, 1, 2, 1, 43, 10, 2, 1, 4];
 const PRT_MARKER_LIFECOUNT_1: [u32; 13] = [1, 3, 6, 1, 2, 1, 43, 10, 2, 1, 4, 1, 1];
 const PRT_MARKER_LIFECOUNT_2: [u32; 13] = [1, 3, 6, 1, 2, 1, 43, 10, 2, 1, 4, 1, 2];
@@ -47,6 +49,14 @@ pub enum Message {
     ToggleTarget(String, bool),
     CopyDiagnostics,
     AddMockSnmp,
+    ManualNameChanged(String),
+    ManualHostChanged(String),
+    ManualPortChanged(String),
+    ManualCommunityChanged(String),
+    AddManualPrinter,
+    PrintersPathChanged(String),
+    LoadPrinters,
+    SavePrinters,
     DiscoveryCidrChanged(String),
     DiscoveryCommunityChanged(String),
     StartDiscovery,
@@ -132,6 +142,13 @@ pub struct PrintCountApp {
     discovery_found: usize,
     discovery_errors: usize,
     discovery_run_id: u64,
+    manual_name: String,
+    manual_host: String,
+    manual_port: String,
+    manual_community: String,
+    manual_status: Option<String>,
+    printers_path: String,
+    printers_status: Option<String>,
     printers: Vec<PrinterRecord>,
     selected_printer: Option<PrinterId>,
     poll_states: HashMap<PrinterId, SnmpPollStatus>,
@@ -201,6 +218,13 @@ impl Application for PrintCountApp {
                 discovery_found: 0,
                 discovery_errors: 0,
                 discovery_run_id: 0,
+                manual_name: String::new(),
+                manual_host: String::new(),
+                manual_port: DEFAULT_SNMP_PORT.to_string(),
+                manual_community: "public".to_string(),
+                manual_status: None,
+                printers_path: "printers.ron".to_string(),
+                printers_status: None,
                 printers,
                 selected_printer: None,
                 poll_states,
@@ -255,6 +279,38 @@ impl Application for PrintCountApp {
                 );
                 Command::none()
             }
+            Message::ManualNameChanged(value) => {
+                self.manual_name = value;
+                Command::none()
+            }
+            Message::ManualHostChanged(value) => {
+                self.manual_host = value;
+                Command::none()
+            }
+            Message::ManualPortChanged(value) => {
+                self.manual_port = value;
+                Command::none()
+            }
+            Message::ManualCommunityChanged(value) => {
+                self.manual_community = value;
+                Command::none()
+            }
+            Message::AddManualPrinter => {
+                self.add_manual_printer();
+                Command::none()
+            }
+            Message::PrintersPathChanged(value) => {
+                self.printers_path = value;
+                Command::none()
+            }
+            Message::LoadPrinters => {
+                self.load_printers_from_path();
+                Command::none()
+            }
+            Message::SavePrinters => {
+                self.save_printers_to_path();
+                Command::none()
+            }
             Message::DiscoveryCidrChanged(value) => {
                 self.discovery_cidr = value;
                 Command::none()
@@ -285,17 +341,43 @@ impl Application for PrintCountApp {
             Message::SnmpPolled { printer_id, result } => {
                 self.poll_in_flight.remove(&printer_id);
                 let received_at = now_epoch_seconds();
+                let mut poll_name = None;
+                let mut allow_override = false;
+                let mut sys_descr = None;
                 let state = match result {
-                    Ok(response) => SnmpPollStatus::Ok {
-                        received_at,
-                        varbinds: response.varbinds,
-                    },
+                    Ok(response) => {
+                        let printer_name = extract_text(
+                            &response.varbinds,
+                            &Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID),
+                        );
+                        let sys_name =
+                            extract_text(&response.varbinds, &Oid::from_slice(&SYS_NAME_OID));
+                        sys_descr =
+                            extract_text(&response.varbinds, &Oid::from_slice(&SYS_DESCR_OID));
+                        allow_override =
+                            printer_name.is_some() || sys_name.is_some() || sys_descr.is_some();
+                        poll_name = printer_name
+                            .or(sys_name)
+                            .or_else(|| sys_descr.clone());
+                        SnmpPollStatus::Ok {
+                            received_at,
+                            varbinds: response.varbinds,
+                        }
+                    }
                     Err(error) => SnmpPollStatus::Error {
                         received_at,
                         summary: error.summary,
                         detail: error.detail,
                     },
                 };
+                if let Some(name) = poll_name {
+                    self.apply_printer_name_fallback(
+                        &printer_id,
+                        name,
+                        allow_override,
+                        sys_descr.as_deref(),
+                    );
+                }
                 self.poll_states.insert(printer_id, state);
                 Command::none()
             }
@@ -512,6 +594,116 @@ impl PrintCountApp {
             .into()
     }
 
+    fn manual_printer_controls_view(&self) -> Element<'_, Message> {
+        let name_input = text_input("Front Office", &self.manual_name)
+            .on_input(Message::ManualNameChanged)
+            .padding(6)
+            .size(12)
+            .width(Length::Fill);
+        let host_input = text_input("192.168.1.50", &self.manual_host)
+            .on_input(Message::ManualHostChanged)
+            .padding(6)
+            .size(12)
+            .width(Length::Fill);
+        let port_input = text_input("161", &self.manual_port)
+            .on_input(Message::ManualPortChanged)
+            .padding(6)
+            .size(12)
+            .width(Length::Fill);
+        let community_input = text_input("public", &self.manual_community)
+            .on_input(Message::ManualCommunityChanged)
+            .padding(6)
+            .size(12)
+            .width(Length::Fill);
+
+        let status = self.manual_status.as_deref().unwrap_or("Ready.");
+
+        let content = column![
+            text("Manual add")
+                .size(16)
+                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+            column![
+                text("Name")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                name_input,
+            ]
+            .spacing(4),
+            column![
+                text("Host or IP")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                host_input,
+            ]
+            .spacing(4),
+            column![
+                text("Port")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                port_input,
+            ]
+            .spacing(4),
+            column![
+                text("Community")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                community_input,
+            ]
+            .spacing(4),
+            row![button("Add printer").on_press(Message::AddManualPrinter)]
+                .spacing(8)
+                .align_items(Alignment::Center),
+            text(format!("Status: {status}"))
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+        ]
+        .spacing(6);
+
+        container(content)
+            .padding(8)
+            .style(theme::Container::Box)
+            .into()
+    }
+
+    fn printer_storage_controls_view(&self) -> Element<'_, Message> {
+        let status = self.printers_status.as_deref().unwrap_or("Ready.");
+        let path_input = text_input("printers.ron", &self.printers_path)
+            .on_input(Message::PrintersPathChanged)
+            .padding(6)
+            .size(12)
+            .width(Length::Fill);
+
+        let path_controls = row![
+            path_input,
+            button("Load").on_press(Message::LoadPrinters),
+            button("Export").on_press(Message::SavePrinters),
+        ]
+        .spacing(8)
+        .align_items(Alignment::Center);
+
+        let content = column![
+            text("Printer list storage")
+                .size(16)
+                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+            column![
+                text("RON path")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                path_controls,
+            ]
+            .spacing(4),
+            text(format!("Status: {status}"))
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+        ]
+        .spacing(6);
+
+        container(content)
+            .padding(8)
+            .style(theme::Container::Box)
+            .into()
+    }
+
     fn printers_tab_view(&self) -> Element<'_, Message> {
         let list = self.printer_list_view();
         let details = self.printer_details_view();
@@ -527,7 +719,7 @@ impl PrintCountApp {
 
         if self.printers.is_empty() {
             list_items = list_items.push(
-                text("No printers discovered yet.")
+                text("No printers discovered or added yet.")
                     .size(14)
                     .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a))),
             );
@@ -537,23 +729,25 @@ impl PrintCountApp {
             }
         }
 
-        let scroll = scrollable(list_items)
-            .height(Length::Fill)
-            .width(Length::Fill);
-
         let content = column![
             self.discovery_controls_view(),
-            text("Found printers")
+            self.manual_printer_controls_view(),
+            self.printer_storage_controls_view(),
+            text("Printers")
                 .size(20)
                 .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-            text("Discovery results appear here.")
+            text("Discovery and manual entries appear here.")
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-            scroll
+            list_items,
         ]
         .spacing(12);
 
-        container(content)
+        let scroll = scrollable(content)
+            .height(Length::Fill)
+            .width(Length::Fill);
+
+        container(scroll)
             .padding(12)
             .width(Length::FillPortion(1))
             .height(Length::Fill)
@@ -566,15 +760,16 @@ impl PrintCountApp {
         let address = record
             .ip_or_hostname
             .as_deref()
+            .or_else(|| record.snmp_address.as_ref().map(|addr| addr.host.as_str()))
             .unwrap_or("unknown host");
-        let model = record.model.as_deref().unwrap_or("Unknown model");
+        let name = record.model.as_deref().unwrap_or("Unknown name");
         let status = status_label(record.status);
 
         let content = column![
-            text(address)
+            text(name)
                 .size(14)
                 .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37))),
-            text(model)
+            text(address)
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a))),
             text(status)
@@ -640,7 +835,7 @@ impl PrintCountApp {
             .as_ref()
             .map(|addr| addr.to_string())
             .unwrap_or_else(|| "Not set".to_string());
-        let model = record.model.as_deref().unwrap_or("Unknown model");
+        let name = record.model.as_deref().unwrap_or("Unknown name");
         let state = self
             .poll_states
             .get(&record.id)
@@ -654,10 +849,10 @@ impl PrintCountApp {
             text(format!("ID: {}", record.id))
                 .size(13)
                 .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-            text(format!("Address: {}", address))
+            text(format!("Name: {}", name))
                 .size(13)
                 .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-            text(format!("Model: {}", model))
+            text(format!("Address: {}", address))
                 .size(13)
                 .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
         ]
@@ -1261,6 +1456,197 @@ impl PrintCountApp {
         }
     }
 
+    fn find_printer_by_host_mut(&mut self, host: &str) -> Option<&mut PrinterRecord> {
+        self.printers.iter_mut().find(|printer| {
+            printer
+                .snmp_address
+                .as_ref()
+                .map(|addr| addr.host.as_str())
+                == Some(host)
+                || printer.ip_or_hostname.as_deref() == Some(host)
+        })
+    }
+
+    fn add_manual_printer(&mut self) {
+        let name = self.manual_name.trim().to_string();
+        let host = self.manual_host.trim().to_string();
+        let port_text = self.manual_port.trim().to_string();
+        let community = self.manual_community.trim().to_string();
+
+        if host.is_empty() {
+            self.manual_status = Some("Add failed: host is empty.".to_string());
+            return;
+        }
+
+        let port = if port_text.is_empty() {
+            DEFAULT_SNMP_PORT
+        } else {
+            match port_text.parse::<u16>() {
+                Ok(port) => port,
+                Err(_) => {
+                    self.manual_status = Some("Add failed: invalid port.".to_string());
+                    return;
+                }
+            }
+        };
+
+        let now = now_epoch_seconds();
+        if let Some(existing) = self.find_printer_by_host_mut(&host) {
+            if !name.is_empty() {
+                existing.model = Some(name);
+            }
+            existing.ip_or_hostname = Some(host.clone());
+            existing.snmp_address = Some(SnmpAddress::new(host.clone(), port));
+            if !community.is_empty() {
+                existing.community = Some(community);
+            }
+            existing.last_seen = Some(now);
+            self.manual_status = Some(format!("Updated printer {host}."));
+            return;
+        }
+
+        let mut record = PrinterRecord::new(PrinterId::new(format!("manual-{host}")));
+        record.ip_or_hostname = Some(host.clone());
+        record.model = (!name.is_empty()).then_some(name);
+        record.snmp_address = Some(SnmpAddress::new(host.clone(), port));
+        record.community = (!community.is_empty()).then_some(community);
+        record.last_seen = Some(now);
+
+        self.poll_states
+            .insert(record.id.clone(), SnmpPollStatus::Idle);
+        self.printers.push(record);
+        self.manual_name.clear();
+        self.manual_host.clear();
+        self.manual_status = Some(format!("Added printer {host}."));
+    }
+
+    fn apply_printer_name_fallback(
+        &mut self,
+        printer_id: &PrinterId,
+        name: String,
+        allow_override: bool,
+        sys_descr: Option<&str>,
+    ) {
+        let name = name.trim();
+        if name.is_empty() {
+            return;
+        }
+
+        let Some(record) = self
+            .printers
+            .iter_mut()
+            .find(|record| &record.id == printer_id)
+        else {
+            return;
+        };
+
+        let existing = record
+            .model
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("");
+        let is_manual = record.id.0.starts_with("manual-");
+
+        if existing.is_empty() {
+            record.model = Some(name.to_string());
+            return;
+        }
+
+        if is_manual {
+            return;
+        }
+
+        if !allow_override {
+            return;
+        }
+
+        let mut should_replace = false;
+        if let Some(sys_descr) = sys_descr.map(str::trim) {
+            if !sys_descr.is_empty() && existing == sys_descr {
+                should_replace = true;
+            }
+        }
+        if let Some(host) = record.ip_or_hostname.as_deref().map(str::trim) {
+            if !host.is_empty() && existing == host {
+                should_replace = true;
+            }
+        }
+
+        if should_replace && existing != name {
+            record.model = Some(name.to_string());
+        }
+    }
+
+    fn load_printers_from_path(&mut self) {
+        let path = self.printers_path.trim().to_string();
+        if path.is_empty() {
+            self.printers_status = Some("Load failed: path is empty.".to_string());
+            return;
+        }
+
+        match fs::read_to_string(&path) {
+            Ok(contents) => match from_str::<Vec<PrinterRecord>>(&contents) {
+                Ok(printers) => {
+                    let count = printers.len();
+                    self.replace_printers(printers);
+                    self.printers_status = Some(format!("Loaded {count} printers from {path}."));
+                }
+                Err(error) => {
+                    self.printers_status = Some(format!("Load failed: {error}"));
+                }
+            },
+            Err(error) => {
+                self.printers_status = Some(format!("Load failed: {error}"));
+            }
+        }
+    }
+
+    fn save_printers_to_path(&mut self) {
+        let path = self.printers_path.trim().to_string();
+        if path.is_empty() {
+            self.printers_status = Some("Save failed: path is empty.".to_string());
+            return;
+        }
+
+        let config = PrettyConfig::new();
+        match to_string_pretty(&self.printers, config) {
+            Ok(contents) => match fs::write(&path, contents) {
+                Ok(()) => {
+                    self.printers_status = Some(format!(
+                        "Saved {} printers to {path}.",
+                        self.printers.len()
+                    ));
+                }
+                Err(error) => {
+                    self.printers_status = Some(format!("Save failed: {error}"));
+                }
+            },
+            Err(error) => {
+                self.printers_status = Some(format!("Save failed: {error}"));
+            }
+        }
+    }
+
+    fn replace_printers(&mut self, printers: Vec<PrinterRecord>) {
+        let selected = self.selected_printer.clone();
+        self.printers = printers;
+        self.poll_states.clear();
+        self.poll_in_flight.clear();
+
+        for record in &self.printers {
+            self.poll_states
+                .insert(record.id.clone(), SnmpPollStatus::Idle);
+        }
+
+        if let Some(selected) = selected {
+            if self.printers.iter().any(|record| record.id == selected) {
+                self.selected_printer = Some(selected);
+            } else {
+                self.selected_printer = None;
+            }
+        }
+    }
+
     fn poll_selected_printer(&mut self) -> Command<Message> {
         let Some(printer_id) = self.selected_printer.clone() else {
             return Command::none();
@@ -1507,6 +1893,20 @@ fn parse_oid_list(value: &str) -> Result<Vec<Oid>, String> {
     Ok(oids)
 }
 
+fn extract_text(varbinds: &[SnmpVarBind], oid: &Oid) -> Option<String> {
+    let varbind = varbinds.iter().find(|varbind| varbind.oid == *oid)?;
+    let value = varbind
+        .value
+        .as_text_lossy()
+        .unwrap_or_else(|| varbind.value.to_string());
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 fn oid_is_descendant(root: &[u32], candidate: &Oid) -> bool {
     let candidate = candidate.as_slice();
     candidate.len() >= root.len() && candidate[..root.len()] == root[..]
@@ -1569,7 +1969,9 @@ fn snmp_oids(counter_oids: &CounterOidSet) -> Vec<Oid> {
     let mut oids = vec![
         Oid::from_slice(&SYS_DESCR_OID),
         Oid::from_slice(&SYS_OBJECT_ID_OID),
+        Oid::from_slice(&SYS_NAME_OID),
         Oid::from_slice(&SYS_UPTIME_OID),
+        Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID),
     ];
 
     oids.extend(counter_oids.bw.iter().cloned());
