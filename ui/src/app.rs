@@ -29,6 +29,7 @@ const PRT_MARKER_LIFECOUNT_1: [u32; 13] = [1, 3, 6, 1, 2, 1, 43, 10, 2, 1, 4, 1,
 const PRT_MARKER_LIFECOUNT_2: [u32; 13] = [1, 3, 6, 1, 2, 1, 43, 10, 2, 1, 4, 1, 2];
 const PRT_MARKER_LIFECOUNT_3: [u32; 13] = [1, 3, 6, 1, 2, 1, 43, 10, 2, 1, 4, 1, 3];
 const DISCOVERY_CONCURRENCY: usize = 24;
+const FALLBACK_DISCOVERY_CIDR: &str = "192.168.129.1/24";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -186,8 +187,8 @@ impl Application for PrintCountApp {
         let (discovery_cidr, discovery_status) = match default_discovery_cidr() {
             Some(cidr) => (cidr, None),
             None => (
-                "".to_string(),
-                Some("Local subnet not detected. Enter a CIDR to scan.".to_string()),
+                FALLBACK_DISCOVERY_CIDR.to_string(),
+                Some("Local subnet not detected. Using default CIDR.".to_string()),
             ),
         };
         let mut poll_states = HashMap::new();
@@ -525,7 +526,7 @@ impl PrintCountApp {
     }
 
     fn discovery_controls_view(&self) -> Element<'_, Message> {
-        let cidr_input = text_input("192.168.1.0/24", &self.discovery_cidr)
+        let cidr_input = text_input("192.168.129.1/24", &self.discovery_cidr)
             .on_input(Message::DiscoveryCidrChanged)
             .padding(6)
             .size(12)

@@ -149,6 +149,9 @@ pub fn default_discovery_cidr() -> Option<String> {
         let Some(prefix) = netmask_to_prefix(addr.netmask) else {
             continue;
         };
+        if prefix == 32 {
+            continue;
+        }
         let mask = prefix_to_mask(prefix);
         let network = ipv4_to_u32(addr.ip) & mask;
         return Some(format!("{}/{}", u32_to_ipv4(network), prefix));
