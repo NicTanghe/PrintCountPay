@@ -8,12 +8,15 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use snmp2::{AsyncSession, Error as Snmp2Error, Oid as Snmp2Oid, Value as Snmp2Value};
 
-use tokio::task;
+use tokio::time::timeout;
 use tracing::{debug, trace, warn};
 
 use crate::targets;
 use crate::{Error, SnmpAddress};
+
+const MAX_OIDS_PER_GET: usize = 24;
 
 #[derive(Debug, Clone)]
 pub struct SnmpConfig {
@@ -275,13 +278,8 @@ impl SnmpV2cClient {
             trace!(target: targets::SNMP, address = %address_label, oid = %oid, "SNMP OID");
         }
 
-        let response = task::spawn_blocking(move || {
-            blocking_get(address, community, oids, config)
-        })
-        .await;
-
-        match response {
-            Ok(Ok(response)) => {
+        match async_get(address, community, oids, config).await {
+            Ok(response) => {
                 debug!(
                     target: targets::SNMP,
                     address = %address_label,
@@ -299,7 +297,7 @@ impl SnmpV2cClient {
                 }
                 Ok(response)
             }
-            Ok(Err(error)) => {
+            Err(error) => {
                 warn!(
                     target: targets::SNMP,
                     address = %address_label,
@@ -307,18 +305,6 @@ impl SnmpV2cClient {
                     "SNMP GET failed"
                 );
                 Err(error)
-            }
-            Err(error) => {
-                let details = format!("SNMP task join error: {error}");
-                warn!(
-                    target: targets::SNMP,
-                    address = %address_label,
-                    "{details}"
-                );
-                Err(Error::SnmpFailure {
-                    address: address_label,
-                    details,
-                })
             }
         }
     }
@@ -345,13 +331,8 @@ impl SnmpV2cClient {
             "SNMP WALK"
         );
 
-        let response = task::spawn_blocking(move || {
-            blocking_walk(address, community, root_oid, max_results, config)
-        })
-        .await;
-
-        match response {
-            Ok(Ok(response)) => {
+        match async_walk(address, community, root_oid, max_results, config).await {
+            Ok(response) => {
                 debug!(
                     target: targets::SNMP,
                     address = %address_label,
@@ -369,7 +350,7 @@ impl SnmpV2cClient {
                 }
                 Ok(response)
             }
-            Ok(Err(error)) => {
+            Err(error) => {
                 warn!(
                     target: targets::SNMP,
                     address = %address_label,
@@ -377,18 +358,6 @@ impl SnmpV2cClient {
                     "SNMP WALK failed"
                 );
                 Err(error)
-            }
-            Err(error) => {
-                let details = format!("SNMP walk task join error: {error}");
-                warn!(
-                    target: targets::SNMP,
-                    address = %address_label,
-                    "{details}"
-                );
-                Err(Error::SnmpFailure {
-                    address: address_label,
-                    details,
-                })
             }
         }
     }
@@ -460,77 +429,46 @@ impl SnmpClient for MockSnmpClient {
     }
 }
 
-fn blocking_get(
+async fn async_get(
     address: SnmpAddress,
     community: String,
     oids: Vec<Oid>,
     config: SnmpConfig,
 ) -> Result<SnmpResponse, Error> {
-    let timeout_ms = duration_ms(config.timeout);
-    let mut session = snmp::SyncSession::new(
-        (address.host.as_str(), address.port),
-        community.as_bytes(),
-        Some(config.timeout),
-        0,
-    )
-    .map_err(|error| map_snmp_io_error(&address, timeout_ms, error))?;
-
     let address_label = address.to_string();
+    let mut session = open_session(&address, &community, &config).await?;
+    let snmp_oids = to_snmp2_oids(&address, &oids)?;
     let mut varbinds = Vec::new();
-    for oid in oids {
-        let mut attempts = 0;
-        loop {
-            match session.get(oid.as_slice()) {
-                Ok(response) => {
-                    for (varbind_oid, varbind_val) in response.varbinds {
-                        let mapped_oid = map_varbind_oid(&address_label, varbind_oid);
-                        varbinds.push(SnmpVarBind {
-                            oid: mapped_oid,
-                            value: map_snmp_value(&address_label, varbind_val),
-                        });
-                    }
-                    break;
-                }
-                Err(error) => {
-                    if attempts < config.retries {
-                        attempts += 1;
-                        trace!(
-                            target: targets::SNMP,
-                            address = %address_label,
-                            oid = %oid,
-                            attempt = attempts,
-                            "SNMP retry"
-                        );
-                        continue;
-                    }
-                    return Err(map_snmp_protocol_error(&address, timeout_ms, error));
-                }
-            }
-        }
+
+    for chunk in snmp_oids.chunks(MAX_OIDS_PER_GET) {
+        let oid_refs: Vec<&Snmp2Oid> = chunk.iter().collect();
+        varbinds.extend(
+            get_many_with_retries(
+                &mut session,
+                &address,
+                &address_label,
+                &config,
+                oid_refs.as_slice(),
+            )
+            .await?,
+        );
     }
 
     Ok(SnmpResponse { address, varbinds })
 }
 
-fn blocking_walk(
+async fn async_walk(
     address: SnmpAddress,
     community: String,
     root_oid: Oid,
     max_results: usize,
     config: SnmpConfig,
 ) -> Result<SnmpResponse, Error> {
-    let timeout_ms = duration_ms(config.timeout);
-    let mut session = snmp::SyncSession::new(
-        (address.host.as_str(), address.port),
-        community.as_bytes(),
-        Some(config.timeout),
-        0,
-    )
-    .map_err(|error| map_snmp_io_error(&address, timeout_ms, error))?;
-
     let address_label = address.to_string();
+    let mut session = open_session(&address, &community, &config).await?;
+    let root_snmp = to_snmp2_oid(&address, &root_oid)?;
+    let mut current = root_snmp.clone();
     let mut results = Vec::new();
-    let mut current = root_oid.clone();
     let mut remaining = max_results;
 
     loop {
@@ -540,28 +478,48 @@ fn blocking_walk(
             }
             remaining -= 1;
         }
-        let response = session
-            .getnext(current.as_slice())
-            .map_err(|error| map_snmp_protocol_error(&address, timeout_ms, error))?;
+
+        let timeout_ms = duration_ms(config.timeout);
+        let mut attempts = 0;
+        let pdu = loop {
+            match timeout(config.timeout, session.getnext(&current)).await {
+                Ok(Ok(pdu)) => break pdu,
+                Ok(Err(error)) => {
+                    if attempts < config.retries {
+                        attempts += 1;
+                        continue;
+                    }
+                    return Err(map_snmp2_error(&address, error));
+                }
+                Err(_) => {
+                    if attempts < config.retries {
+                        attempts += 1;
+                        continue;
+                    }
+                    return Err(Error::SnmpTimeout {
+                        address: address.to_string(),
+                        timeout_ms,
+                    });
+                }
+            }
+        };
 
         let mut progressed = false;
-        for (varbind_oid, varbind_val) in response.varbinds {
-            let mapped_oid = map_varbind_oid(&address_label, varbind_oid);
+        for (oid, value) in pdu.varbinds {
+            let mapped_oid = map_snmp2_oid(&address_label, &oid);
             if mapped_oid.0.is_empty() {
                 return Ok(SnmpResponse {
                     address,
                     varbinds: results,
                 });
             }
-
             if !oid_is_descendant(&root_oid, &mapped_oid) {
                 return Ok(SnmpResponse {
                     address,
                     varbinds: results,
                 });
             }
-
-            if mapped_oid == current {
+            if oid == current {
                 return Ok(SnmpResponse {
                     address,
                     varbinds: results,
@@ -569,10 +527,10 @@ fn blocking_walk(
             }
 
             results.push(SnmpVarBind {
-                oid: mapped_oid.clone(),
-                value: map_snmp_value(&address_label, varbind_val),
+                oid: mapped_oid,
+                value: map_snmp2_value(&address_label, value),
             });
-            current = mapped_oid;
+            current = oid.to_owned();
             progressed = true;
         }
 
@@ -587,11 +545,83 @@ fn blocking_walk(
     })
 }
 
+async fn open_session(
+    address: &SnmpAddress,
+    community: &str,
+    config: &SnmpConfig,
+) -> Result<AsyncSession, Error> {
+    let timeout_ms = duration_ms(config.timeout);
+    let target = format!("{}:{}", address.host, address.port);
+    match timeout(
+        config.timeout,
+        AsyncSession::new_v2c(target.as_str(), community.as_bytes(), 0),
+    )
+    .await
+    {
+        Ok(Ok(session)) => Ok(session),
+        Ok(Err(error)) => Err(map_snmp2_io_error(address, timeout_ms, error)),
+        Err(_) => Err(Error::SnmpTimeout {
+            address: address.to_string(),
+            timeout_ms,
+        }),
+    }
+}
+
+async fn get_many_with_retries(
+    session: &mut AsyncSession,
+    address: &SnmpAddress,
+    address_label: &str,
+    config: &SnmpConfig,
+    oids: &[&Snmp2Oid<'_>],
+) -> Result<Vec<SnmpVarBind>, Error> {
+    let timeout_ms = duration_ms(config.timeout);
+    let mut attempts = 0;
+    loop {
+        match timeout(config.timeout, session.get_many(oids)).await {
+            Ok(Ok(pdu)) => return Ok(map_snmp2_varbinds(address_label, pdu)),
+            Ok(Err(error)) => {
+                if attempts < config.retries {
+                    attempts += 1;
+                    continue;
+                }
+                return Err(map_snmp2_error(address, error));
+            }
+            Err(_) => {
+                if attempts < config.retries {
+                    attempts += 1;
+                    continue;
+                }
+                return Err(Error::SnmpTimeout {
+                    address: address.to_string(),
+                    timeout_ms,
+                });
+            }
+        }
+    }
+}
+
+
 fn duration_ms(duration: Duration) -> u64 {
     duration.as_millis().min(u128::from(u64::MAX)) as u64
 }
 
-fn map_snmp_io_error(address: &SnmpAddress, timeout_ms: u64, error: io::Error) -> Error {
+fn to_snmp2_oids(address: &SnmpAddress, oids: &[Oid]) -> Result<Vec<Snmp2Oid<'static>>, Error> {
+    let mut snmp_oids = Vec::new();
+    for oid in oids {
+        snmp_oids.push(to_snmp2_oid(address, oid)?);
+    }
+    Ok(snmp_oids)
+}
+
+fn to_snmp2_oid(address: &SnmpAddress, oid: &Oid) -> Result<Snmp2Oid<'static>, Error> {
+    let arcs: Vec<u64> = oid.as_slice().iter().map(|value| u64::from(*value)).collect();
+    Snmp2Oid::from(arcs.as_slice()).map_err(|error| Error::SnmpFailure {
+        address: address.to_string(),
+        details: format!("Invalid OID {oid}: {error:?}"),
+    })
+}
+
+fn map_snmp2_io_error(address: &SnmpAddress, timeout_ms: u64, error: io::Error) -> Error {
     if error.kind() == io::ErrorKind::TimedOut {
         Error::SnmpTimeout {
             address: address.to_string(),
@@ -605,43 +635,79 @@ fn map_snmp_io_error(address: &SnmpAddress, timeout_ms: u64, error: io::Error) -
     }
 }
 
-fn map_snmp_protocol_error(
-    address: &SnmpAddress,
-    timeout_ms: u64,
-    error: snmp::SnmpError,
-) -> Error {
+fn map_snmp2_error(address: &SnmpAddress, error: Snmp2Error) -> Error {
     match error {
-        snmp::SnmpError::CommunityMismatch => Error::SnmpAuth {
+        Snmp2Error::CommunityMismatch => Error::SnmpAuth {
             address: address.to_string(),
-            details: Some(format!("{error:?}")),
-        },
-        snmp::SnmpError::ReceiveError => Error::SnmpTimeout {
-            address: address.to_string(),
-            timeout_ms,
+            details: Some(format!("{error}")),
         },
         other => Error::SnmpFailure {
             address: address.to_string(),
-            details: format!("{other:?}"),
+            details: other.to_string(),
         },
     }
 }
 
-fn map_snmp_value(address: &str, value: snmp::Value<'_>) -> SnmpValue {
+fn map_snmp2_oid(address: &str, oid: &Snmp2Oid<'_>) -> Oid {
+    let Some(iter) = oid.iter() else {
+        warn!(
+            target: targets::SNMP,
+            address = %address,
+            "Failed to parse SNMP OID"
+        );
+        return Oid(Vec::new());
+    };
+
+    let mut arcs = Vec::new();
+    for arc in iter {
+        match u32::try_from(arc) {
+            Ok(value) => arcs.push(value),
+            Err(_) => {
+                warn!(
+                    target: targets::SNMP,
+                    address = %address,
+                    arc = arc,
+                    "SNMP OID component out of range"
+                );
+                return Oid(Vec::new());
+            }
+        }
+    }
+
+    Oid(arcs)
+}
+
+fn map_snmp2_value(address: &str, value: Snmp2Value<'_>) -> SnmpValue {
     match value {
-        snmp::Value::Null => SnmpValue::Null,
-        snmp::Value::Integer(value) => SnmpValue::Integer(value),
-        snmp::Value::OctetString(value) => SnmpValue::OctetString(value.to_vec()),
-        snmp::Value::ObjectIdentifier(value) => match map_object_identifier(address, value) {
-            Some(oid) => SnmpValue::ObjectIdentifier(oid),
-            None => SnmpValue::Other("ObjectIdentifier(<unparseable>)".to_string()),
-        },
-        snmp::Value::IpAddress(value) => SnmpValue::IpAddress(value),
-        snmp::Value::Counter32(value) => SnmpValue::Counter32(value),
-        snmp::Value::Unsigned32(value) => SnmpValue::Unsigned32(value),
-        snmp::Value::Timeticks(value) => SnmpValue::Timeticks(value),
-        snmp::Value::Counter64(value) => SnmpValue::Counter64(value),
-        snmp::Value::Opaque(value) => SnmpValue::Opaque(value.to_vec()),
-        other => SnmpValue::Other(format!("{other:?}")),
+        Snmp2Value::Null => SnmpValue::Null,
+        Snmp2Value::Integer(value) => SnmpValue::Integer(value),
+        Snmp2Value::OctetString(value) => SnmpValue::OctetString(value.to_vec()),
+        Snmp2Value::ObjectIdentifier(value) => {
+            SnmpValue::ObjectIdentifier(map_snmp2_oid(address, &value))
+        }
+        Snmp2Value::IpAddress(value) => SnmpValue::IpAddress(value),
+        Snmp2Value::Counter32(value) => SnmpValue::Counter32(value),
+        Snmp2Value::Unsigned32(value) => SnmpValue::Unsigned32(value),
+        Snmp2Value::Timeticks(value) => SnmpValue::Timeticks(value),
+        Snmp2Value::Counter64(value) => SnmpValue::Counter64(value),
+        Snmp2Value::Opaque(value) => SnmpValue::Opaque(value.to_vec()),
+        Snmp2Value::EndOfMibView => SnmpValue::Other("EndOfMibView".to_string()),
+        Snmp2Value::NoSuchObject => SnmpValue::Other("NoSuchObject".to_string()),
+        Snmp2Value::NoSuchInstance => SnmpValue::Other("NoSuchInstance".to_string()),
+        Snmp2Value::Sequence(_) => SnmpValue::Other("Sequence".to_string()),
+        Snmp2Value::Set(_) => SnmpValue::Other("Set".to_string()),
+        Snmp2Value::Constructed(tag, _) => {
+            SnmpValue::Other(format!("Constructed({tag})"))
+        }
+        Snmp2Value::GetRequest(_) => SnmpValue::Other("GetRequest".to_string()),
+        Snmp2Value::GetNextRequest(_) => SnmpValue::Other("GetNextRequest".to_string()),
+        Snmp2Value::GetBulkRequest(_) => SnmpValue::Other("GetBulkRequest".to_string()),
+        Snmp2Value::Response(_) => SnmpValue::Other("Response".to_string()),
+        Snmp2Value::SetRequest(_) => SnmpValue::Other("SetRequest".to_string()),
+        Snmp2Value::InformRequest(_) => SnmpValue::Other("InformRequest".to_string()),
+        Snmp2Value::Trap(_) => SnmpValue::Other("Trap".to_string()),
+        Snmp2Value::Report(_) => SnmpValue::Other("Report".to_string()),
+        Snmp2Value::Boolean(value) => SnmpValue::Other(format!("Boolean({value})")),
     }
 }
 
@@ -651,24 +717,13 @@ fn oid_is_descendant(root: &Oid, candidate: &Oid) -> bool {
     candidate.len() >= root.len() && candidate[..root.len()] == root[..]
 }
 
-fn map_varbind_oid(address: &str, oid: snmp::ObjectIdentifier<'_>) -> Oid {
-    map_object_identifier(address, oid).unwrap_or_else(|| Oid(Vec::new()))
-}
-
-fn map_object_identifier(address: &str, oid: snmp::ObjectIdentifier<'_>) -> Option<Oid> {
-    let mut buf: snmp::ObjIdBuf = [0u32; 128];
-    match oid.read_name(&mut buf) {
-        Ok(name) => Some(Oid(name.to_vec())),
-        Err(error) => {
-            warn!(
-                target: targets::SNMP,
-                address = %address,
-                error = ?error,
-                "Failed to parse SNMP OID"
-            );
-            None
-        }
-    }
+fn map_snmp2_varbinds(address: &str, pdu: snmp2::Pdu<'_>) -> Vec<SnmpVarBind> {
+    pdu.varbinds
+        .map(|(oid, value)| SnmpVarBind {
+            oid: map_snmp2_oid(address, &oid),
+            value: map_snmp2_value(address, value),
+        })
+        .collect()
 }
 
 #[cfg(test)]

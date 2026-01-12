@@ -31,6 +31,7 @@ const PRINTER_MIB_ROOT: [u32; 7] = [1, 3, 6, 1, 2, 1, 43];
 const RICOH_MIB_ROOT: [u32; 7] = [1, 3, 6, 1, 4, 1, 367];
 const CRAWL_ROOTS: [&[u32]; 2] = [&PRINTER_MIB_ROOT, &RICOH_MIB_ROOT];
 const DISCOVERY_CONCURRENCY: usize = 24;
+const MAX_VARBINDS_SHOWN: usize = 200;
 const FALLBACK_DISCOVERY_CIDR: &str = "192.168.129.1/24";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,7 +95,6 @@ pub struct SnmpErrorInfo {
 #[derive(Debug, Clone)]
 enum SnmpPollStatus {
     Idle,
-    Polling,
     Ok {
         received_at: u64,
         varbinds: Vec<SnmpVarBind>,
@@ -858,12 +858,13 @@ impl PrintCountApp {
         let body = match self.printer_tab {
             PrinterTab::Polling => {
                 if let Some(record) = record {
+                    let in_flight = self.poll_in_flight.contains(&record.id);
                     let state = self
                         .poll_states
                         .get(&record.id)
                         .cloned()
                         .unwrap_or(SnmpPollStatus::Idle);
-                    self.printer_poll_view(&state)
+                    self.printer_poll_view(&state, in_flight)
                 } else if selection_missing {
                     self.empty_printer_tab_view("Selected printer not found.")
                 } else {
@@ -908,13 +909,13 @@ impl PrintCountApp {
             .into()
     }
 
-    fn printer_poll_view(&self, state: &SnmpPollStatus) -> Element<'_, Message> {
+    fn printer_poll_view(&self, state: &SnmpPollStatus, in_flight: bool) -> Element<'_, Message> {
         let content = column![
             text("Polling every 5 seconds")
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-            self.poll_state_view(state),
-            self.counters_view(state),
+            self.poll_state_view(state, in_flight),
+            self.counters_view(state, in_flight),
         ]
         .spacing(8);
 
@@ -1035,20 +1036,27 @@ impl PrintCountApp {
         .into()
     }
 
-    fn poll_state_view(&self, state: &SnmpPollStatus) -> Element<'_, Message> {
-        match state {
+    fn poll_state_view(&self, state: &SnmpPollStatus, in_flight: bool) -> Element<'_, Message> {
+        let mut content = column![].spacing(6);
+        if in_flight {
+            content = content.push(
+                text("Polling SNMP...")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3b, 0x82, 0xf6))),
+            );
+        }
+
+        let body: Element<'_, Message> = match state {
             SnmpPollStatus::Idle => text("Waiting for next poll.")
                 .size(14)
                 .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a)))
-                .into(),
-            SnmpPollStatus::Polling => text("Polling SNMP...")
-                .size(14)
-                .style(theme::Text::Color(Color::from_rgb8(0x3b, 0x82, 0xf6)))
                 .into(),
             SnmpPollStatus::Ok {
                 received_at,
                 varbinds,
             } => {
+                let total_varbinds = varbinds.len();
+                let shown_varbinds = total_varbinds.min(MAX_VARBINDS_SHOWN);
                 let mut rows = column![].spacing(4);
                 if varbinds.is_empty() {
                     rows = rows.push(
@@ -1057,11 +1065,20 @@ impl PrintCountApp {
                             .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a))),
                     );
                 } else {
-                    for varbind in varbinds {
+                    for varbind in varbinds.iter().take(MAX_VARBINDS_SHOWN) {
                         rows = rows.push(
                             text(format!("{} = {}", varbind.oid, varbind.value))
                                 .size(13)
                                 .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37))),
+                        );
+                    }
+                    if total_varbinds > shown_varbinds {
+                        rows = rows.push(
+                            text(format!(
+                                "Showing {shown_varbinds} of {total_varbinds} varbinds."
+                            ))
+                            .size(12)
+                            .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
                         );
                     }
                 }
@@ -1074,6 +1091,11 @@ impl PrintCountApp {
                     text(format!("Last poll: {}", received_at))
                         .size(12)
                         .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                    text(format!(
+                        "Varbinds: {shown_varbinds}/{total_varbinds}"
+                    ))
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
                     list
                 ]
                 .spacing(6)
@@ -1096,10 +1118,12 @@ impl PrintCountApp {
             ]
             .spacing(4)
             .into(),
-        }
+        };
+
+        content.push(body).into()
     }
 
-    fn counters_view(&self, state: &SnmpPollStatus) -> Element<'_, Message> {
+    fn counters_view(&self, state: &SnmpPollStatus, in_flight: bool) -> Element<'_, Message> {
         let header = text("Counters")
             .size(18)
             .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12)));
@@ -1141,10 +1165,6 @@ impl PrintCountApp {
 
                 lines.into()
             }
-            SnmpPollStatus::Polling => text("Polling counters...")
-                .size(13)
-                .style(theme::Text::Color(Color::from_rgb8(0x3b, 0x82, 0xf6)))
-                .into(),
             SnmpPollStatus::Idle => text("No counter data yet.")
                 .size(13)
                 .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a)))
@@ -1155,7 +1175,15 @@ impl PrintCountApp {
                 .into(),
         };
 
-        let content = column![header, body].spacing(6);
+        let mut content = column![header].spacing(6);
+        if in_flight {
+            content = content.push(
+                text("Polling counters...")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3b, 0x82, 0xf6))),
+            );
+        }
+        content = content.push(body);
 
         container(content)
             .padding(8)
@@ -1718,7 +1746,8 @@ impl PrintCountApp {
 
         self.poll_in_flight.insert(printer_id.clone());
         self.poll_states
-            .insert(printer_id.clone(), SnmpPollStatus::Polling);
+            .entry(printer_id.clone())
+            .or_insert(SnmpPollStatus::Idle);
 
         Command::perform(
             async move {
