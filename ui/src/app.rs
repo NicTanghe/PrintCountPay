@@ -24,10 +24,12 @@ const SYS_OBJECT_ID_OID: [u32; 9] = [1, 3, 6, 1, 2, 1, 1, 2, 0];
 const SYS_NAME_OID: [u32; 9] = [1, 3, 6, 1, 2, 1, 1, 5, 0];
 const SYS_UPTIME_OID: [u32; 9] = [1, 3, 6, 1, 2, 1, 1, 3, 0];
 const PRT_GENERAL_PRINTER_NAME_OID: [u32; 12] = [1, 3, 6, 1, 2, 1, 43, 5, 1, 1, 16, 1];
-const PRT_MARKER_LIFECOUNT_ROOT: [u32; 11] = [1, 3, 6, 1, 2, 1, 43, 10, 2, 1, 4];
 const PRT_MARKER_LIFECOUNT_1: [u32; 13] = [1, 3, 6, 1, 2, 1, 43, 10, 2, 1, 4, 1, 1];
 const PRT_MARKER_LIFECOUNT_2: [u32; 13] = [1, 3, 6, 1, 2, 1, 43, 10, 2, 1, 4, 1, 2];
 const PRT_MARKER_LIFECOUNT_3: [u32; 13] = [1, 3, 6, 1, 2, 1, 43, 10, 2, 1, 4, 1, 3];
+const PRINTER_MIB_ROOT: [u32; 7] = [1, 3, 6, 1, 2, 1, 43];
+const RICOH_MIB_ROOT: [u32; 7] = [1, 3, 6, 1, 4, 1, 367];
+const CRAWL_ROOTS: [&[u32]; 2] = [&PRINTER_MIB_ROOT, &RICOH_MIB_ROOT];
 const DISCOVERY_CONCURRENCY: usize = 24;
 const FALLBACK_DISCOVERY_CIDR: &str = "192.168.129.1/24";
 
@@ -41,6 +43,7 @@ pub enum Tab {
 pub enum PrinterTab {
     Polling,
     Oids,
+    AddPrinters,
 }
 
 #[derive(Debug, Clone)]
@@ -415,11 +418,15 @@ impl Application for PrintCountApp {
                 self.oids_crawl_in_flight = false;
                 match result {
                     Ok(set) => {
-                        let count = set.bw.len() + set.color.len() + set.total.len();
+                        let mut unique = HashSet::new();
+                        unique.extend(set.bw.iter().cloned());
+                        unique.extend(set.color.iter().cloned());
+                        unique.extend(set.total.iter().cloned());
+                        let count = unique.len();
                         self.counter_oids = set;
                         self.sync_oid_inputs();
                         self.oids_status = Some(format!(
-                            "Crawl mapped {count} OIDs (index order)."
+                            "Crawl captured {count} numeric OIDs. Trim lists for faster polling."
                         ));
                     }
                     Err(error) => {
@@ -505,7 +512,8 @@ impl PrintCountApp {
     fn printer_tab_bar(&self) -> Element<'_, Message> {
         row![
             self.printer_tab_button(PrinterTab::Polling, "Polling"),
-            self.printer_tab_button(PrinterTab::Oids, "SNMP OIDs")
+            self.printer_tab_button(PrinterTab::Oids, "SNMP OIDs"),
+            self.printer_tab_button(PrinterTab::AddPrinters, "Discovery + Manual")
         ]
         .spacing(8)
         .align_items(Alignment::Center)
@@ -731,8 +739,6 @@ impl PrintCountApp {
         }
 
         let content = column![
-            self.discovery_controls_view(),
-            self.manual_printer_controls_view(),
             self.printer_storage_controls_view(),
             text("Printers")
                 .size(20)
@@ -793,75 +799,87 @@ impl PrintCountApp {
     }
 
     fn printer_details_view(&self) -> Element<'_, Message> {
-        let Some(selected) = &self.selected_printer else {
-            let content = column![
-                text("SNMP polling")
+        let selected_id = self.selected_printer.as_ref();
+        let record = selected_id.and_then(|selected| {
+            self.printers.iter().find(|record| &record.id == selected)
+        });
+        let selection_missing = selected_id.is_some() && record.is_none();
+
+        let header = match self.printer_tab {
+            PrinterTab::AddPrinters => column![
+                text("Add printers")
                     .size(20)
                     .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-                text("Select a printer to start polling.")
-                    .size(14)
-                    .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a))),
+                text("Run discovery or add a printer manually.")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
             ]
-            .spacing(8);
-
-            return container(content)
-                .padding(12)
-                .width(Length::FillPortion(2))
-                .height(Length::Fill)
-                .style(theme::Container::Box)
-                .into();
-        };
-
-        let Some(record) = self.printers.iter().find(|record| &record.id == selected) else {
-            let content = column![
-                text("SNMP polling")
+            .spacing(4),
+            _ => {
+                let mut content = column![text("Printer details")
                     .size(20)
-                    .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-                text("Selected printer not found.")
-                    .size(14)
-                    .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a))),
-            ]
-            .spacing(8);
+                    .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12)))]
+                .spacing(4);
 
-            return container(content)
-                .padding(12)
-                .width(Length::FillPortion(2))
-                .height(Length::Fill)
-                .style(theme::Container::Box)
-                .into();
+                if let Some(record) = record {
+                    let address = record
+                        .snmp_address
+                        .as_ref()
+                        .map(|addr| addr.to_string())
+                        .unwrap_or_else(|| "Not set".to_string());
+                    let name = record.model.as_deref().unwrap_or("Unknown name");
+                    content = content.push(
+                        text(format!("ID: {}", record.id))
+                            .size(13)
+                            .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                    );
+                    content = content.push(
+                        text(format!("Name: {}", name))
+                            .size(13)
+                            .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                    );
+                    content = content.push(
+                        text(format!("Address: {}", address))
+                            .size(13)
+                            .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                    );
+                } else if selection_missing {
+                    content = content.push(
+                        text("Selected printer not found.")
+                            .size(13)
+                            .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a))),
+                    );
+                }
+
+                content
+            }
         };
-
-        let address = record
-            .snmp_address
-            .as_ref()
-            .map(|addr| addr.to_string())
-            .unwrap_or_else(|| "Not set".to_string());
-        let name = record.model.as_deref().unwrap_or("Unknown name");
-        let state = self
-            .poll_states
-            .get(&record.id)
-            .cloned()
-            .unwrap_or(SnmpPollStatus::Idle);
-
-        let header = column![
-            text("Printer details")
-                .size(20)
-                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-            text(format!("ID: {}", record.id))
-                .size(13)
-                .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-            text(format!("Name: {}", name))
-                .size(13)
-                .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-            text(format!("Address: {}", address))
-                .size(13)
-                .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-        ]
-        .spacing(4);
 
         let body = match self.printer_tab {
-            PrinterTab::Polling => self.printer_poll_view(&state),
-            PrinterTab::Oids => self.printer_oids_view(record),
+            PrinterTab::Polling => {
+                if let Some(record) = record {
+                    let state = self
+                        .poll_states
+                        .get(&record.id)
+                        .cloned()
+                        .unwrap_or(SnmpPollStatus::Idle);
+                    self.printer_poll_view(&state)
+                } else if selection_missing {
+                    self.empty_printer_tab_view("Selected printer not found.")
+                } else {
+                    self.empty_printer_tab_view("Select a printer to start polling.")
+                }
+            }
+            PrinterTab::Oids => {
+                if let Some(record) = record {
+                    self.printer_oids_view(record)
+                } else if selection_missing {
+                    self.empty_printer_tab_view("Selected printer not found.")
+                } else {
+                    self.empty_printer_tab_view("Select a printer to edit OIDs.")
+                }
+            }
+            PrinterTab::AddPrinters => self.printer_add_printers_view(),
         };
 
         let content = column![header, self.printer_tab_bar(), body].spacing(12);
@@ -871,6 +889,22 @@ impl PrintCountApp {
             .width(Length::FillPortion(2))
             .height(Length::Fill)
             .style(theme::Container::Box)
+            .into()
+    }
+
+    fn printer_add_printers_view(&self) -> Element<'_, Message> {
+        column![
+            self.discovery_controls_view(),
+            self.manual_printer_controls_view(),
+        ]
+        .spacing(12)
+        .into()
+    }
+
+    fn empty_printer_tab_view(&self, message: &str) -> Element<'_, Message> {
+        text(message)
+            .size(14)
+            .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a)))
             .into()
     }
 
@@ -969,7 +1003,7 @@ impl PrintCountApp {
             text(format!("Crawl target: {address}"))
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-            text("Crawl root: 1.3.6.1.2.1.43.10.2.1.4")
+            text("Crawl roots: 1.3.6.1.2.1.43, 1.3.6.1.4.1.367")
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
         ]
@@ -1798,25 +1832,43 @@ impl PrintCountApp {
             return Command::none();
         };
 
-        let mut request =
-            SnmpWalkRequest::new(address, Oid::from_slice(&PRT_MARKER_LIFECOUNT_ROOT));
-        if let Some(community) = record.community.clone() {
-            request = request.with_community(community);
-        }
-
+        let community = record.community.clone();
         let config = self.snmp_config.clone();
         self.oids_crawl_in_flight = true;
-        self.oids_status = Some("Crawling prtMarkerLifeCount...".to_string());
+        self.oids_status = Some("Crawling printer/vendor MIBs...".to_string());
 
         Command::perform(
             async move {
                 let client = SnmpV2cClient::new(config);
-                match client.walk(request).await {
-                    Ok(response) => Ok(counter_oids_from_walk(&response.varbinds)),
-                    Err(error) => Err(SnmpErrorInfo {
-                        summary: error.user_summary(),
-                        detail: error.technical_detail(),
-                    }),
+                let mut varbinds = Vec::new();
+                let mut last_error = None;
+
+                for root in CRAWL_ROOTS {
+                    let mut request =
+                        SnmpWalkRequest::new(address.clone(), Oid::from_slice(root))
+                            .with_max_results(0);
+                    if let Some(ref community) = community {
+                        request = request.with_community(community.clone());
+                    }
+
+                    match client.walk(request).await {
+                        Ok(response) => varbinds.extend(response.varbinds),
+                        Err(error) => {
+                            last_error = Some(SnmpErrorInfo {
+                                summary: error.user_summary(),
+                                detail: error.technical_detail(),
+                            });
+                        }
+                    }
+                }
+
+                if varbinds.is_empty() {
+                    Err(last_error.unwrap_or(SnmpErrorInfo {
+                        summary: "Crawl failed.".to_string(),
+                        detail: "No OIDs returned from crawl.".to_string(),
+                    }))
+                } else {
+                    Ok(counter_oids_from_walk(&varbinds))
                 }
             },
             Message::OidsCrawled,
@@ -1908,76 +1960,74 @@ fn extract_text(varbinds: &[SnmpVarBind], oid: &Oid) -> Option<String> {
     }
 }
 
-fn oid_is_descendant(root: &[u32], candidate: &Oid) -> bool {
-    let candidate = candidate.as_slice();
-    candidate.len() >= root.len() && candidate[..root.len()] == root[..]
-}
-
 fn counter_oids_from_walk(varbinds: &[SnmpVarBind]) -> CounterOidSet {
+    let mut seen = HashSet::new();
     let mut candidates: Vec<Oid> = varbinds
         .iter()
-        .map(|varbind| varbind.oid.clone())
-        .filter(|oid| oid_is_descendant(&PRT_MARKER_LIFECOUNT_ROOT, oid))
+        .filter(|varbind| varbind.value.as_u64().is_some())
+        .filter_map(|varbind| {
+            if seen.insert(varbind.oid.clone()) {
+                Some(varbind.oid.clone())
+            } else {
+                None
+            }
+        })
         .collect();
     candidates.sort_by(|left, right| left.as_slice().cmp(right.as_slice()));
 
     let mut mapping = CounterOidSet::default();
-    let mut used = HashSet::new();
+    let mut total = Vec::new();
+    let mut total_seen = HashSet::new();
 
-    if let Some(oid) = candidates
-        .iter()
-        .find(|oid| oid.as_slice() == PRT_MARKER_LIFECOUNT_1.as_slice())
-    {
-        mapping.bw.push(oid.clone());
-        used.insert(oid.clone());
-    }
-    if let Some(oid) = candidates
-        .iter()
-        .find(|oid| oid.as_slice() == PRT_MARKER_LIFECOUNT_2.as_slice())
-    {
-        mapping.color.push(oid.clone());
-        used.insert(oid.clone());
-    }
-    if let Some(oid) = candidates
-        .iter()
-        .find(|oid| oid.as_slice() == PRT_MARKER_LIFECOUNT_3.as_slice())
-    {
-        mapping.total.push(oid.clone());
-        used.insert(oid.clone());
-    }
-
-    let mut fallback = candidates.into_iter().filter(|oid| !used.contains(oid));
-    if mapping.bw.is_empty() {
-        if let Some(oid) = fallback.next() {
-            mapping.bw.push(oid);
+    for oid in &candidates {
+        if oid.as_slice() == PRT_MARKER_LIFECOUNT_1.as_slice() {
+            mapping.bw.push(oid.clone());
         }
-    }
-    if mapping.color.is_empty() {
-        if let Some(oid) = fallback.next() {
-            mapping.color.push(oid);
+        if oid.as_slice() == PRT_MARKER_LIFECOUNT_2.as_slice() {
+            mapping.color.push(oid.clone());
         }
-    }
-    if mapping.total.is_empty() {
-        if let Some(oid) = fallback.next() {
-            mapping.total.push(oid);
+        if oid.as_slice() == PRT_MARKER_LIFECOUNT_3.as_slice() {
+            if total_seen.insert(oid.clone()) {
+                total.push(oid.clone());
+            }
         }
     }
 
+    for oid in candidates {
+        if total_seen.insert(oid.clone()) {
+            total.push(oid);
+        }
+    }
+
+    mapping.total = total;
     mapping
 }
 
 fn snmp_oids(counter_oids: &CounterOidSet) -> Vec<Oid> {
-    let mut oids = vec![
-        Oid::from_slice(&SYS_DESCR_OID),
-        Oid::from_slice(&SYS_OBJECT_ID_OID),
-        Oid::from_slice(&SYS_NAME_OID),
-        Oid::from_slice(&SYS_UPTIME_OID),
-        Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID),
-    ];
+    let mut oids = Vec::new();
+    let mut seen = HashSet::new();
 
-    oids.extend(counter_oids.bw.iter().cloned());
-    oids.extend(counter_oids.color.iter().cloned());
-    oids.extend(counter_oids.total.iter().cloned());
+    let mut push = |oid: Oid| {
+        if seen.insert(oid.clone()) {
+            oids.push(oid);
+        }
+    };
+
+    push(Oid::from_slice(&SYS_DESCR_OID));
+    push(Oid::from_slice(&SYS_OBJECT_ID_OID));
+    push(Oid::from_slice(&SYS_NAME_OID));
+    push(Oid::from_slice(&SYS_UPTIME_OID));
+    push(Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID));
+
+    for oid in &counter_oids.bw {
+        push(oid.clone());
+    }
+    for oid in &counter_oids.color {
+        push(oid.clone());
+    }
+    for oid in &counter_oids.total {
+        push(oid.clone());
+    }
 
     oids
 }

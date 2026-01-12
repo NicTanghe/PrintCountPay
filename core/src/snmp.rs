@@ -531,8 +531,15 @@ fn blocking_walk(
     let address_label = address.to_string();
     let mut results = Vec::new();
     let mut current = root_oid.clone();
+    let mut remaining = max_results;
 
-    for _ in 0..max_results {
+    loop {
+        if max_results > 0 {
+            if remaining == 0 {
+                break;
+            }
+            remaining -= 1;
+        }
         let response = session
             .getnext(current.as_slice())
             .map_err(|error| map_snmp_protocol_error(&address, timeout_ms, error))?;
