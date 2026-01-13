@@ -172,7 +172,7 @@ pub struct PrintCountApp {
 }
 
 impl Application for PrintCountApp {
-    type Executor = iced::executor::Default;
+    type Executor = crate::executor::StackSizedTokioExecutor;
     type Message = Message;
     type Theme = Theme;
     type Flags = Flags;

@@ -2221,6 +2221,7 @@ dependencies = [
  "iced",
  "printcountpay-core",
  "ron",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]

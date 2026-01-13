@@ -8,5 +8,6 @@ arboard.workspace = true
 iced.workspace = true
 printcountpay-core = { path = "../core" }
 ron.workspace = true
+tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

@@ -1,4 +1,5 @@
 pub mod app;
+mod executor;
 pub mod logging;
 
 use iced::Application;
