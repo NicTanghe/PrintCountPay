@@ -1198,9 +1198,77 @@ impl PrintCountApp {
             } => {
                 let resolution = resolve_counters(*received_at, &self.counter_oids, varbinds);
                 let mut lines = column![
+                    text("Printer counts")
+                        .size(13)
+                        .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                    self.value_line(
+                        "B/W printer",
+                        extract_value_string(
+                            varbinds,
+                            &Oid::from_slice(&RICOH_BW_PRINTER_COUNT_OID),
+                        ),
+                    ),
+                    self.value_line(
+                        "Color printer",
+                        extract_value_string(
+                            varbinds,
+                            &Oid::from_slice(&RICOH_COLOR_PRINTER_COUNT_OID),
+                        ),
+                    ),
+                    text("Copier counts")
+                        .size(13)
+                        .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                    self.value_line(
+                        "B/W copier",
+                        extract_value_string(
+                            varbinds,
+                            &Oid::from_slice(&RICOH_BW_COPIER_COUNT_OID),
+                        ),
+                    ),
+                    self.value_line(
+                        "Color copier",
+                        extract_value_string(
+                            varbinds,
+                            &Oid::from_slice(&RICOH_COLOR_COPIER_COUNT_OID),
+                        ),
+                    ),
+                    text("Click totals")
+                        .size(13)
+                        .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                     self.counter_line("B/W clicks", resolution.snapshot.bw),
                     self.counter_line("Color clicks", resolution.snapshot.color),
                     self.counter_line("Total clicks", resolution.snapshot.total),
+                    text("Toner levels")
+                        .size(13)
+                        .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                    self.value_line(
+                        "Black",
+                        extract_value_string(
+                            varbinds,
+                            &Oid::from_slice(&RICOH_TONER_BLACK_OID),
+                        ),
+                    ),
+                    self.value_line(
+                        "Cyan",
+                        extract_value_string(
+                            varbinds,
+                            &Oid::from_slice(&RICOH_TONER_CYAN_OID),
+                        ),
+                    ),
+                    self.value_line(
+                        "Magenta",
+                        extract_value_string(
+                            varbinds,
+                            &Oid::from_slice(&RICOH_TONER_MAGENTA_OID),
+                        ),
+                    ),
+                    self.value_line(
+                        "Yellow",
+                        extract_value_string(
+                            varbinds,
+                            &Oid::from_slice(&RICOH_TONER_YELLOW_OID),
+                        ),
+                    ),
                 ]
                 .spacing(4);
 
@@ -1299,6 +1367,23 @@ impl PrintCountApp {
 
     fn counter_line(&self, label: &str, value: Option<u64>) -> Element<'_, Message> {
         let value_text = value.map(|value| value.to_string()).unwrap_or_else(|| "N/A".to_string());
+
+        let label = text(label)
+            .size(13)
+            .width(Length::Fill)
+            .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a)));
+        let value = text(value_text)
+            .size(13)
+            .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37)));
+
+        row![label, value]
+            .spacing(12)
+            .align_items(Alignment::Center)
+            .into()
+    }
+
+    fn value_line(&self, label: &str, value: Option<String>) -> Element<'_, Message> {
+        let value_text = value.unwrap_or_else(|| "N/A".to_string());
 
         let label = text(label)
             .size(13)
@@ -2220,6 +2305,17 @@ fn extract_text(varbinds: &[SnmpVarBind], oid: &Oid) -> Option<String> {
     }
 }
 
+fn extract_value_string(varbinds: &[SnmpVarBind], oid: &Oid) -> Option<String> {
+    let varbind = varbinds.iter().find(|varbind| varbind.oid == *oid)?;
+    if varbind.value.is_missing() {
+        return None;
+    }
+    if let Some(value) = varbind.value.as_u64() {
+        return Some(value.to_string());
+    }
+    Some(varbind.value.to_string())
+}
+
 fn counter_oids_from_walk(varbinds: &[SnmpVarBind]) -> CounterOidSet {
     let mut seen = HashSet::new();
     let mut candidates: Vec<Oid> = varbinds
@@ -2278,6 +2374,10 @@ fn snmp_oids(counter_oids: &CounterOidSet) -> Vec<Oid> {
     push(Oid::from_slice(&SYS_NAME_OID));
     push(Oid::from_slice(&SYS_UPTIME_OID));
     push(Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID));
+    push(Oid::from_slice(&RICOH_BW_COPIER_COUNT_OID));
+    push(Oid::from_slice(&RICOH_BW_PRINTER_COUNT_OID));
+    push(Oid::from_slice(&RICOH_COLOR_COPIER_COUNT_OID));
+    push(Oid::from_slice(&RICOH_COLOR_PRINTER_COUNT_OID));
 
     for oid in &counter_oids.bw {
         push(oid.clone());
