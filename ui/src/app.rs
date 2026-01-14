@@ -69,6 +69,7 @@ const FALLBACK_DISCOVERY_CIDR: &str = "192.168.129.1/24";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Printers,
+    Recording,
     Debug,
 }
 
@@ -119,6 +120,8 @@ pub enum Message {
     SaveOids,
     CrawlOids,
     OidsCrawled(Result<CounterOidSet, SnmpErrorInfo>),
+    StartRecording,
+    StopRecording,
 }
 
 #[derive(Debug, Clone)]
@@ -139,6 +142,18 @@ enum SnmpPollStatus {
         summary: String,
         detail: String,
     },
+}
+
+#[derive(Debug, Clone)]
+struct RecordingSnapshot {
+    received_at: u64,
+    bw_printer: Option<u64>,
+    bw_copier: Option<u64>,
+    color_printer: Option<u64>,
+    color_copier: Option<u64>,
+    clicks_bw: Option<u64>,
+    clicks_color: Option<u64>,
+    clicks_total: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -202,6 +217,11 @@ pub struct PrintCountApp {
     oids_total_text: String,
     oids_status: Option<String>,
     oids_crawl_in_flight: bool,
+    recording_active: bool,
+    recording_printer: Option<PrinterId>,
+    recording_start: Option<RecordingSnapshot>,
+    recording_end: Option<RecordingSnapshot>,
+    recording_status: Option<String>,
 }
 
 impl Application for PrintCountApp {
@@ -280,6 +300,11 @@ impl Application for PrintCountApp {
                 oids_total_text,
                 oids_status: None,
                 oids_crawl_in_flight: false,
+                recording_active: false,
+                recording_printer: None,
+                recording_start: None,
+                recording_end: None,
+                recording_status: None,
             },
             Command::none(),
         )
@@ -489,6 +514,14 @@ impl Application for PrintCountApp {
                 }
                 Command::none()
             }
+            Message::StartRecording => {
+                self.start_recording();
+                Command::none()
+            }
+            Message::StopRecording => {
+                self.stop_recording();
+                Command::none()
+            }
         }
     }
 
@@ -515,6 +548,7 @@ impl Application for PrintCountApp {
 
         let body = match self.active_tab {
             Tab::Printers => self.printers_tab_view(),
+            Tab::Recording => self.recording_tab_view(),
             Tab::Debug => self.debug_tab_view(),
         };
 
@@ -541,6 +575,7 @@ impl PrintCountApp {
     fn tab_bar(&self) -> Element<'_, Message> {
         row![
             self.tab_button(Tab::Printers, "Printers"),
+            self.tab_button(Tab::Recording, "Recording"),
             self.tab_button(Tab::Debug, "Debug")
         ]
         .spacing(8)
@@ -772,6 +807,156 @@ impl PrintCountApp {
         row![list, details]
             .spacing(16)
             .align_items(Alignment::Start)
+            .into()
+    }
+
+    fn recording_tab_view(&self) -> Element<'_, Message> {
+        let selected_label = self
+            .selected_printer
+            .as_ref()
+            .and_then(|selected| {
+                self.printers
+                    .iter()
+                    .find(|record| &record.id == selected)
+                    .map(|record| {
+                        record
+                            .model
+                            .as_deref()
+                            .unwrap_or("Unknown name")
+                            .to_string()
+                    })
+            })
+            .unwrap_or_else(|| "No printer selected".to_string());
+
+        let recording_label = self
+            .recording_printer
+            .as_ref()
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "None".to_string());
+
+        let status = self.recording_status.as_deref().unwrap_or("Ready.");
+        let state_label = if self.recording_active {
+            "Recording active"
+        } else {
+            "Recording idle"
+        };
+
+        let start_button = if self.recording_active {
+            button("Start recording").style(theme::Button::Secondary)
+        } else {
+            button("Start recording").on_press(Message::StartRecording)
+        };
+        let stop_button = if self.recording_active {
+            button("Stop recording").on_press(Message::StopRecording)
+        } else {
+            button("Stop recording").style(theme::Button::Secondary)
+        };
+
+        let start_time = self
+            .recording_start
+            .as_ref()
+            .map(|snapshot| snapshot.received_at.to_string())
+            .unwrap_or_else(|| "n/a".to_string());
+        let end_time = self
+            .recording_end
+            .as_ref()
+            .map(|snapshot| snapshot.received_at.to_string())
+            .unwrap_or_else(|| "n/a".to_string());
+
+        let delta_section: Element<'_, Message> =
+            if let (Some(start), Some(end)) = (&self.recording_start, &self.recording_end) {
+                let bw_printer_delta = delta_value(start.bw_printer, end.bw_printer);
+                let color_printer_delta = delta_value(start.color_printer, end.color_printer);
+                let bw_copier_delta = delta_value(start.bw_copier, end.bw_copier);
+                let color_copier_delta = delta_value(start.color_copier, end.color_copier);
+                let clicks_bw_delta = delta_value(start.clicks_bw, end.clicks_bw);
+                let clicks_color_delta = delta_value(start.clicks_color, end.clicks_color);
+                let clicks_total_delta = delta_value(start.clicks_total, end.clicks_total);
+
+                let bw_total_delta = sum_two(bw_printer_delta, bw_copier_delta);
+                let color_total_delta = sum_two(color_printer_delta, color_copier_delta);
+
+                let bw_cost_value = bw_total_delta.map(bw_cost_cents);
+                let color_cost_value = color_total_delta.map(color_cost_cents);
+                let subtotal_cents = match (bw_cost_value, color_cost_value) {
+                    (Some(bw), Some(color)) => Some(bw + color),
+                    _ => None,
+                };
+                let rounded_cents = subtotal_cents.map(round_up_50_cents);
+
+                column![
+                    text("Printer counts")
+                        .size(13)
+                        .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                    self.value_line("B/W printer", bw_printer_delta.map(|v| v.to_string())),
+                    self.value_line(
+                        "Color printer",
+                        color_printer_delta.map(|v| v.to_string())
+                    ),
+                    text("Copier counts")
+                        .size(13)
+                        .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                    self.value_line("B/W copier", bw_copier_delta.map(|v| v.to_string())),
+                    self.value_line("Color copier", color_copier_delta.map(|v| v.to_string())),
+                    text("Click totals")
+                        .size(13)
+                        .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                    self.value_line("B/W clicks", clicks_bw_delta.map(|v| v.to_string())),
+                    self.value_line("Color clicks", clicks_color_delta.map(|v| v.to_string())),
+                    self.value_line("Total clicks", clicks_total_delta.map(|v| v.to_string())),
+                    text("Totals + pricing")
+                        .size(13)
+                        .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                    self.value_line("B/W prints", bw_total_delta.map(|v| v.to_string())),
+                    self.value_line("Color prints", color_total_delta.map(|v| v.to_string())),
+                    self.value_line("B/W cost", bw_cost_value.map(format_cents)),
+                    self.value_line("Color cost", color_cost_value.map(format_cents)),
+                    self.value_line("Subtotal", subtotal_cents.map(format_cents)),
+                    self.value_line("Rounded total", rounded_cents.map(format_cents)),
+                ]
+                .spacing(4)
+                .into()
+            } else {
+                text("No completed recording yet.")
+                    .size(13)
+                    .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a)))
+                    .into()
+            };
+
+        let content = column![
+            text("Recording")
+                .size(20)
+                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+            text(format!("Selected printer: {selected_label}"))
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            text(format!("Recording printer ID: {recording_label}"))
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            text(state_label)
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            row![start_button, stop_button]
+                .spacing(8)
+                .align_items(Alignment::Center),
+            text(format!("Start snapshot: {start_time}"))
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            text(format!("End snapshot: {end_time}"))
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            text(format!("Status: {status}"))
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            delta_section
+        ]
+        .spacing(12);
+
+        container(content)
+            .padding(12)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(theme::Container::Box)
             .into()
     }
 
@@ -1982,6 +2167,51 @@ impl PrintCountApp {
         )
     }
 
+    fn start_recording(&mut self) {
+        let Some(printer_id) = self.selected_printer.clone() else {
+            self.recording_status = Some("Start failed: select a printer first.".to_string());
+            return;
+        };
+
+        match self.snapshot_for_printer(&printer_id) {
+            Ok(snapshot) => {
+                self.recording_active = true;
+                self.recording_printer = Some(printer_id);
+                self.recording_start = Some(snapshot.clone());
+                self.recording_end = None;
+                self.recording_status =
+                    Some(format!("Recording started at {}.", snapshot.received_at));
+            }
+            Err(error) => {
+                self.recording_status = Some(format!("Start failed: {error}"));
+            }
+        }
+    }
+
+    fn stop_recording(&mut self) {
+        if !self.recording_active {
+            self.recording_status = Some("Stop failed: no active recording.".to_string());
+            return;
+        }
+
+        let Some(printer_id) = self.recording_printer.clone() else {
+            self.recording_status = Some("Stop failed: no recording printer.".to_string());
+            return;
+        };
+
+        match self.snapshot_for_printer(&printer_id) {
+            Ok(snapshot) => {
+                self.recording_active = false;
+                self.recording_end = Some(snapshot.clone());
+                self.recording_status =
+                    Some(format!("Recording stopped at {}.", snapshot.received_at));
+            }
+            Err(error) => {
+                self.recording_status = Some(format!("Stop failed: {error}"));
+            }
+        }
+    }
+
     fn export_poll_data(&mut self) {
         let path = self.poll_export_path.trim().to_string();
         if path.is_empty() {
@@ -2054,6 +2284,50 @@ impl PrintCountApp {
             Err(error) => {
                 self.poll_export_status = Some(format!("Export failed: {error}"));
             }
+        }
+    }
+
+    fn snapshot_for_printer(
+        &self,
+        printer_id: &PrinterId,
+    ) -> Result<RecordingSnapshot, String> {
+        let Some(state) = self.poll_states.get(printer_id) else {
+            return Err("No poll data yet.".to_string());
+        };
+
+        match state {
+            SnmpPollStatus::Ok {
+                received_at,
+                varbinds,
+            } => Ok(self.build_recording_snapshot(*received_at, varbinds)),
+            SnmpPollStatus::Error { summary, detail, .. } => {
+                Err(format!("{summary} ({detail})"))
+            }
+            SnmpPollStatus::Idle => Err("No poll data yet.".to_string()),
+        }
+    }
+
+    fn build_recording_snapshot(
+        &self,
+        received_at: u64,
+        varbinds: &[SnmpVarBind],
+    ) -> RecordingSnapshot {
+        let resolution = resolve_counters(received_at, &self.counter_oids, varbinds);
+        RecordingSnapshot {
+            received_at,
+            bw_printer: extract_counter_u64(varbinds, &Oid::from_slice(&RICOH_BW_PRINTER_COUNT_OID)),
+            bw_copier: extract_counter_u64(varbinds, &Oid::from_slice(&RICOH_BW_COPIER_COUNT_OID)),
+            color_printer: extract_counter_u64(
+                varbinds,
+                &Oid::from_slice(&RICOH_COLOR_PRINTER_COUNT_OID),
+            ),
+            color_copier: extract_counter_u64(
+                varbinds,
+                &Oid::from_slice(&RICOH_COLOR_COPIER_COUNT_OID),
+            ),
+            clicks_bw: resolution.snapshot.bw,
+            clicks_color: resolution.snapshot.color,
+            clicks_total: resolution.snapshot.total,
         }
     }
 
@@ -2314,6 +2588,49 @@ fn extract_value_string(varbinds: &[SnmpVarBind], oid: &Oid) -> Option<String> {
         return Some(value.to_string());
     }
     Some(varbind.value.to_string())
+}
+
+fn extract_counter_u64(varbinds: &[SnmpVarBind], oid: &Oid) -> Option<u64> {
+    let varbind = varbinds.iter().find(|varbind| varbind.oid == *oid)?;
+    if varbind.value.is_missing() {
+        return None;
+    }
+    varbind.value.as_u64()
+}
+
+fn delta_value(start: Option<u64>, end: Option<u64>) -> Option<u64> {
+    let start = start?;
+    let end = end?;
+    end.checked_sub(start)
+}
+
+fn sum_two(left: Option<u64>, right: Option<u64>) -> Option<u64> {
+    Some(left? + right?)
+}
+
+fn bw_cost_cents(count: u64) -> u64 {
+    let first = count.min(5);
+    let second = count.saturating_sub(5).min(5);
+    let rest = count.saturating_sub(10);
+    first * 25 + second * 10 + rest * 6
+}
+
+fn color_cost_cents(count: u64) -> u64 {
+    count * 50
+}
+
+fn round_up_50_cents(total_cents: u64) -> u64 {
+    if total_cents == 0 {
+        0
+    } else {
+        (total_cents + 49) / 50 * 50
+    }
+}
+
+fn format_cents(cents: u64) -> String {
+    let euros = cents / 100;
+    let remainder = cents % 100;
+    format!("{euros}.{remainder:02} EUR")
 }
 
 fn counter_oids_from_walk(varbinds: &[SnmpVarBind]) -> CounterOidSet {
