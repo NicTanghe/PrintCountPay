@@ -1,0 +1,28 @@
+[
+    (
+        id: ("snmp-192.168.129.29"),
+        ip_or_hostname: Some("192.168.129.29"),
+        model: Some("Aficio MP C4502 E-5300"),
+        sys_object_id: Some("1.3.6.1.4.1.367.1.1"),
+        snmp_address: Some((
+            host: "192.168.129.29",
+            port: 161,
+        )),
+        community: Some("public"),
+        status: Online,
+        last_seen: Some(1768389668),
+    ),
+    (
+        id: ("snmp-192.168.129.150"),
+        ip_or_hostname: Some("192.168.129.150"),
+        model: Some("Pro C7200S Light E-35A"),
+        sys_object_id: Some("1.3.6.1.4.1.367.1.1"),
+        snmp_address: Some((
+            host: "192.168.129.150",
+            port: 161,
+        )),
+        community: Some("public"),
+        status: Online,
+        last_seen: Some(1768389688),
+    ),
+]

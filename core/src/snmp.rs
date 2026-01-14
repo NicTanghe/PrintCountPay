@@ -8,7 +8,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use snmp2::{AsyncSession, Error as Snmp2Error, Oid as Snmp2Oid, Value as Snmp2Value};
+use snmp2::{
+    snmp as snmp2_constants, AsyncSession, Error as Snmp2Error, Oid as Snmp2Oid,
+    Value as Snmp2Value,
+};
 
 use tokio::time::timeout;
 use tracing::{debug, trace, warn};
@@ -178,6 +181,9 @@ impl FromStr for Oid {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SnmpValue {
     Null,
+    EndOfMibView,
+    NoSuchObject,
+    NoSuchInstance,
     Integer(i64),
     Unsigned32(u32),
     Counter32(u32),
@@ -197,6 +203,9 @@ impl SnmpValue {
             SnmpValue::Counter32(value) => Some(u64::from(*value)),
             SnmpValue::Counter64(value) => Some(*value),
             SnmpValue::Integer(value) => (*value >= 0).then_some(*value as u64),
+            SnmpValue::OctetString(bytes) | SnmpValue::Opaque(bytes) => {
+                Self::parse_ascii_u64(bytes)
+            }
             _ => None,
         }
     }
@@ -209,12 +218,69 @@ impl SnmpValue {
             _ => None,
         }
     }
+
+    pub fn is_missing(&self) -> bool {
+        match self {
+            SnmpValue::Null
+            | SnmpValue::EndOfMibView
+            | SnmpValue::NoSuchObject
+            | SnmpValue::NoSuchInstance => true,
+            SnmpValue::Other(value) => matches!(
+                value.as_str(),
+                "EndOfMibView" | "NoSuchObject" | "NoSuchInstance"
+            ),
+            _ => false,
+        }
+    }
+
+    fn parse_ascii_u64(bytes: &[u8]) -> Option<u64> {
+        let mut start = 0;
+        let mut end = bytes.len();
+        while start < end {
+            let byte = bytes[start];
+            if byte.is_ascii_whitespace() || byte == 0 {
+                start += 1;
+            } else {
+                break;
+            }
+        }
+        while end > start {
+            let byte = bytes[end - 1];
+            if byte.is_ascii_whitespace() || byte == 0 {
+                end -= 1;
+            } else {
+                break;
+            }
+        }
+        if start >= end {
+            return None;
+        }
+        let mut slice = &bytes[start..end];
+        if slice.first() == Some(&b'+') {
+            slice = &slice[1..];
+            if slice.is_empty() {
+                return None;
+            }
+        }
+        let mut value: u64 = 0;
+        for &byte in slice {
+            if !byte.is_ascii_digit() {
+                return None;
+            }
+            value = value.checked_mul(10)?;
+            value = value.checked_add(u64::from(byte - b'0'))?;
+        }
+        Some(value)
+    }
 }
 
 impl fmt::Display for SnmpValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SnmpValue::Null => f.write_str("null"),
+            SnmpValue::EndOfMibView => f.write_str("EndOfMibView"),
+            SnmpValue::NoSuchObject => f.write_str("NoSuchObject"),
+            SnmpValue::NoSuchInstance => f.write_str("NoSuchInstance"),
             SnmpValue::Integer(value) => write!(f, "{value}"),
             SnmpValue::Unsigned32(value) => write!(f, "{value}"),
             SnmpValue::Counter32(value) => write!(f, "{value}"),
@@ -503,6 +569,31 @@ async fn async_walk(
                 }
             }
         };
+        if pdu.error_status != snmp2_constants::ERRSTATUS_NOERROR {
+            let oid_refs = [&current];
+            let details = snmp2_pdu_error_details(
+                pdu.error_status,
+                pdu.error_index,
+                &oid_refs,
+                &address_label,
+            );
+            if pdu.error_status == snmp2_constants::ERRSTATUS_NOSUCHNAME {
+                warn!(
+                    target: targets::SNMP,
+                    address = %address_label,
+                    details = %details,
+                    "SNMP WALK reached end of MIB"
+                );
+                return Ok(SnmpResponse {
+                    address,
+                    varbinds: results,
+                });
+            }
+            return Err(Error::SnmpFailure {
+                address: address.to_string(),
+                details,
+            });
+        }
 
         let mut progressed = false;
         for (oid, value) in pdu.varbinds {
@@ -567,6 +658,66 @@ async fn open_session(
     }
 }
 
+async fn get_one_with_retries(
+    session: &mut AsyncSession,
+    address: &SnmpAddress,
+    address_label: &str,
+    config: &SnmpConfig,
+    oid: &Snmp2Oid<'_>,
+) -> Result<Vec<SnmpVarBind>, Error> {
+    let timeout_ms = duration_ms(config.timeout);
+    let mut attempts = 0;
+    let oid_refs = [oid];
+
+    loop {
+        match timeout(config.timeout, session.get(oid)).await {
+            Ok(Ok(pdu)) => {
+                if pdu.error_status != snmp2_constants::ERRSTATUS_NOERROR {
+                    let details = snmp2_pdu_error_details(
+                        pdu.error_status,
+                        pdu.error_index,
+                        &oid_refs,
+                        address_label,
+                    );
+                    if is_non_fatal_pdu_error(pdu.error_status) {
+                        warn!(
+                            target: targets::SNMP,
+                            address = %address_label,
+                            status = pdu.error_status,
+                            index = pdu.error_index,
+                            details = %details,
+                            "SNMP GET returned error status for single OID"
+                        );
+                        return Ok(map_snmp2_varbinds(address_label, pdu));
+                    }
+                    return Err(Error::SnmpFailure {
+                        address: address.to_string(),
+                        details,
+                    });
+                }
+                return Ok(map_snmp2_varbinds(address_label, pdu));
+            }
+            Ok(Err(error)) => {
+                if attempts < config.retries {
+                    attempts += 1;
+                    continue;
+                }
+                return Err(map_snmp2_error(address, error));
+            }
+            Err(_) => {
+                if attempts < config.retries {
+                    attempts += 1;
+                    continue;
+                }
+                return Err(Error::SnmpTimeout {
+                    address: address.to_string(),
+                    timeout_ms,
+                });
+            }
+        }
+    }
+}
+
 async fn get_many_with_retries(
     session: &mut AsyncSession,
     address: &SnmpAddress,
@@ -578,7 +729,39 @@ async fn get_many_with_retries(
     let mut attempts = 0;
     loop {
         match timeout(config.timeout, session.get_many(oids)).await {
-            Ok(Ok(pdu)) => return Ok(map_snmp2_varbinds(address_label, pdu)),
+            Ok(Ok(pdu)) => {
+                if pdu.error_status != snmp2_constants::ERRSTATUS_NOERROR {
+                    let details = snmp2_pdu_error_details(
+                        pdu.error_status,
+                        pdu.error_index,
+                        oids,
+                        address_label,
+                    );
+                    warn!(
+                        target: targets::SNMP,
+                        address = %address_label,
+                        status = pdu.error_status,
+                        index = pdu.error_index,
+                        details = %details,
+                        "SNMP GET returned error status; retrying per-OID GETs"
+                    );
+                    let mut varbinds = Vec::new();
+                    for oid in oids {
+                        varbinds.extend(
+                            get_one_with_retries(
+                                session,
+                                address,
+                                address_label,
+                                config,
+                                oid,
+                            )
+                            .await?,
+                        );
+                    }
+                    return Ok(varbinds);
+                }
+                return Ok(map_snmp2_varbinds(address_label, pdu));
+            }
             Ok(Err(error)) => {
                 if attempts < config.retries {
                     attempts += 1;
@@ -648,6 +831,59 @@ fn map_snmp2_error(address: &SnmpAddress, error: Snmp2Error) -> Error {
     }
 }
 
+fn snmp2_pdu_error_details(
+    status: u32,
+    index: u32,
+    oids: &[&Snmp2Oid<'_>],
+    address_label: &str,
+) -> String {
+    let label = snmp2_error_status_label(status);
+    if index == 0 {
+        return format!("SNMP error status {label} ({status})");
+    }
+    let oid_text = oids
+        .get(index.saturating_sub(1) as usize)
+        .map(|oid| map_snmp2_oid(address_label, oid).to_string());
+    match oid_text {
+        Some(oid) => {
+            format!("SNMP error status {label} ({status}) at index {index} ({oid})")
+        }
+        None => format!("SNMP error status {label} ({status}) at index {index}"),
+    }
+}
+
+fn snmp2_error_status_label(status: u32) -> &'static str {
+    match status {
+        snmp2_constants::ERRSTATUS_NOERROR => "NoError",
+        snmp2_constants::ERRSTATUS_TOOBIG => "TooBig",
+        snmp2_constants::ERRSTATUS_NOSUCHNAME => "NoSuchName",
+        snmp2_constants::ERRSTATUS_BADVALUE => "BadValue",
+        snmp2_constants::ERRSTATUS_READONLY => "ReadOnly",
+        snmp2_constants::ERRSTATUS_GENERR => "GenErr",
+        snmp2_constants::ERRSTATUS_NOACCESS => "NoAccess",
+        snmp2_constants::ERRSTATUS_WRONGTYPE => "WrongType",
+        snmp2_constants::ERRSTATUS_WRONGLENGTH => "WrongLength",
+        snmp2_constants::ERRSTATUS_WRONGENCODING => "WrongEncoding",
+        snmp2_constants::ERRSTATUS_WRONGVALUE => "WrongValue",
+        snmp2_constants::ERRSTATUS_NOCREATION => "NoCreation",
+        snmp2_constants::ERRSTATUS_INCONSISTENTVALUE => "InconsistentValue",
+        snmp2_constants::ERRSTATUS_RESOURCEUNAVAILABLE => "ResourceUnavailable",
+        snmp2_constants::ERRSTATUS_COMMITFAILED => "CommitFailed",
+        snmp2_constants::ERRSTATUS_UNDOFAILED => "UndoFailed",
+        snmp2_constants::ERRSTATUS_AUTHORIZATIONERROR => "AuthorizationError",
+        snmp2_constants::ERRSTATUS_NOTWRITABLE => "NotWritable",
+        snmp2_constants::ERRSTATUS_INCONSISTENTNAME => "InconsistentName",
+        _ => "Unknown",
+    }
+}
+
+fn is_non_fatal_pdu_error(status: u32) -> bool {
+    matches!(
+        status,
+        snmp2_constants::ERRSTATUS_NOSUCHNAME | snmp2_constants::ERRSTATUS_NOACCESS
+    )
+}
+
 fn map_snmp2_oid(address: &str, oid: &Snmp2Oid<'_>) -> Oid {
     let Some(iter) = oid.iter() else {
         warn!(
@@ -691,9 +927,9 @@ fn map_snmp2_value(address: &str, value: Snmp2Value<'_>) -> SnmpValue {
         Snmp2Value::Timeticks(value) => SnmpValue::Timeticks(value),
         Snmp2Value::Counter64(value) => SnmpValue::Counter64(value),
         Snmp2Value::Opaque(value) => SnmpValue::Opaque(value.to_vec()),
-        Snmp2Value::EndOfMibView => SnmpValue::Other("EndOfMibView".to_string()),
-        Snmp2Value::NoSuchObject => SnmpValue::Other("NoSuchObject".to_string()),
-        Snmp2Value::NoSuchInstance => SnmpValue::Other("NoSuchInstance".to_string()),
+        Snmp2Value::EndOfMibView => SnmpValue::EndOfMibView,
+        Snmp2Value::NoSuchObject => SnmpValue::NoSuchObject,
+        Snmp2Value::NoSuchInstance => SnmpValue::NoSuchInstance,
         Snmp2Value::Sequence(_) => SnmpValue::Other("Sequence".to_string()),
         Snmp2Value::Set(_) => SnmpValue::Other("Set".to_string()),
         Snmp2Value::Constructed(tag, _) => {

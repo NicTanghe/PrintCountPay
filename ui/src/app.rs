@@ -3,6 +3,7 @@ use std::fs;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use iced::alignment::Horizontal;
+use iced::keyboard;
 use iced::theme;
 use iced::widget::{
     button, checkbox, column, container, pick_list, row, scrollable, text, text_input,
@@ -27,9 +28,40 @@ const PRT_GENERAL_PRINTER_NAME_OID: [u32; 12] = [1, 3, 6, 1, 2, 1, 43, 5, 1, 1, 
 const PRT_MARKER_LIFECOUNT_1: [u32; 13] = [1, 3, 6, 1, 2, 1, 43, 10, 2, 1, 4, 1, 1];
 const PRT_MARKER_LIFECOUNT_2: [u32; 13] = [1, 3, 6, 1, 2, 1, 43, 10, 2, 1, 4, 1, 2];
 const PRT_MARKER_LIFECOUNT_3: [u32; 13] = [1, 3, 6, 1, 2, 1, 43, 10, 2, 1, 4, 1, 3];
+const RICOH_COUNTER_ROOT: [u32; 12] = [1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 19];
+const RICOH_TONER_ROOT: [u32; 12] = [1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 24];
+const RICOH_COLOR_COPIER_COUNT_OID: [u32; 16] = [
+    1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 19, 5, 1, 9, 17,
+];
+const RICOH_COLOR_PRINTER_COUNT_OID: [u32; 16] = [
+    1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 19, 5, 1, 9, 60,
+];
+const RICOH_BW_COPIER_COUNT_OID: [u32; 16] = [
+    1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 19, 5, 1, 9, 18,
+];
+const RICOH_BW_PRINTER_COUNT_OID: [u32; 16] = [
+    1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 19, 5, 1, 9, 61,
+];
+const RICOH_TONER_BLACK_OID: [u32; 16] = [
+    1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 24, 1, 1, 5, 1,
+];
+const RICOH_TONER_CYAN_OID: [u32; 16] = [
+    1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 24, 1, 1, 5, 2,
+];
+const RICOH_TONER_MAGENTA_OID: [u32; 16] = [
+    1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 24, 1, 1, 5, 3,
+];
+const RICOH_TONER_YELLOW_OID: [u32; 16] = [
+    1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 24, 1, 1, 5, 4,
+];
 const PRINTER_MIB_ROOT: [u32; 7] = [1, 3, 6, 1, 2, 1, 43];
 const RICOH_MIB_ROOT: [u32; 7] = [1, 3, 6, 1, 4, 1, 367];
-const CRAWL_ROOTS: [&[u32]; 2] = [&PRINTER_MIB_ROOT, &RICOH_MIB_ROOT];
+const CRAWL_ROOTS: [&[u32]; 4] = [
+    &PRINTER_MIB_ROOT,
+    &RICOH_MIB_ROOT,
+    &RICOH_COUNTER_ROOT,
+    &RICOH_TONER_ROOT,
+];
 const DISCOVERY_CONCURRENCY: usize = 24;
 const MAX_VARBINDS_SHOWN: usize = 200;
 const FALLBACK_DISCOVERY_CIDR: &str = "192.168.129.1/24";
@@ -70,6 +102,7 @@ pub enum Message {
     SelectTab(Tab),
     SelectPrinterTab(PrinterTab),
     SelectPrinter(PrinterId),
+    DeleteSelectedPrinter,
     PollSelectedSnmp,
     PollExportPathChanged(String),
     ExportPollData,
@@ -347,6 +380,10 @@ impl Application for PrintCountApp {
                 self.selected_printer = Some(printer_id);
                 self.poll_selected_printer()
             }
+            Message::DeleteSelectedPrinter => {
+                self.delete_selected_printer();
+                Command::none()
+            }
             Message::PollSelectedSnmp => self.poll_selected_printer(),
             Message::PollExportPathChanged(value) => {
                 self.poll_export_path = value;
@@ -458,7 +495,8 @@ impl Application for PrintCountApp {
     fn subscription(&self) -> Subscription<Message> {
         let log_tick = iced::time::every(Duration::from_millis(250)).map(|_| Message::LogTick);
         let poll_tick = iced::time::every(Duration::from_secs(5)).map(|_| Message::PollSelectedSnmp);
-        Subscription::batch(vec![log_tick, poll_tick])
+        let delete_key = keyboard::on_key_press(delete_key_event);
+        Subscription::batch(vec![log_tick, poll_tick, delete_key])
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -1019,7 +1057,9 @@ impl PrintCountApp {
             text(format!("Crawl target: {address}"))
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-            text("Crawl roots: 1.3.6.1.2.1.43, 1.3.6.1.4.1.367")
+            text(
+                "Crawl roots: 1.3.6.1.2.1.43, 1.3.6.1.4.1.367, 1.3.6.1.4.1.367.3.2.1.2.19, 1.3.6.1.4.1.367.3.2.1.2.24",
+            )
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
         ]
@@ -1585,6 +1625,33 @@ impl PrintCountApp {
         }
     }
 
+    fn delete_selected_printer(&mut self) {
+        if self.active_tab != Tab::Printers {
+            return;
+        }
+
+        let Some(selected) = self.selected_printer.clone() else {
+            return;
+        };
+
+        let Some(index) = self.printers.iter().position(|record| record.id == selected) else {
+            self.selected_printer = None;
+            return;
+        };
+
+        self.printers.remove(index);
+        self.poll_states.remove(&selected);
+        self.poll_in_flight.remove(&selected);
+
+        if self.printers.is_empty() {
+            self.selected_printer = None;
+            return;
+        }
+
+        let new_index = index.min(self.printers.len() - 1);
+        self.selected_printer = Some(self.printers[new_index].id.clone());
+    }
+
     fn find_printer_by_host_mut(&mut self, host: &str) -> Option<&mut PrinterRecord> {
         self.printers.iter_mut().find(|printer| {
             printer
@@ -2062,6 +2129,18 @@ fn level_color(level: tracing::Level) -> Color {
     }
 }
 
+fn delete_key_event(
+    key: keyboard::Key,
+    _modifiers: keyboard::Modifiers,
+) -> Option<Message> {
+    match key {
+        keyboard::Key::Named(keyboard::key::Named::Delete) => {
+            Some(Message::DeleteSelectedPrinter)
+        }
+        _ => None,
+    }
+}
+
 fn status_label(status: PrinterStatus) -> &'static str {
     match status {
         PrinterStatus::Unknown => "Unknown",
@@ -2080,8 +2159,16 @@ fn now_epoch_seconds() -> u64 {
 
 fn default_counter_oids() -> CounterOidSet {
     CounterOidSet {
-        bw: vec![Oid::from_slice(&PRT_MARKER_LIFECOUNT_1)],
-        color: vec![Oid::from_slice(&PRT_MARKER_LIFECOUNT_2)],
+        bw: vec![
+            Oid::from_slice(&RICOH_BW_COPIER_COUNT_OID),
+            Oid::from_slice(&RICOH_BW_PRINTER_COUNT_OID),
+            Oid::from_slice(&PRT_MARKER_LIFECOUNT_1),
+        ],
+        color: vec![
+            Oid::from_slice(&RICOH_COLOR_COPIER_COUNT_OID),
+            Oid::from_slice(&RICOH_COLOR_PRINTER_COUNT_OID),
+            Oid::from_slice(&PRT_MARKER_LIFECOUNT_2),
+        ],
         total: vec![Oid::from_slice(&PRT_MARKER_LIFECOUNT_3)],
     }
 }
@@ -2118,6 +2205,9 @@ fn parse_oid_list(value: &str) -> Result<Vec<Oid>, String> {
 
 fn extract_text(varbinds: &[SnmpVarBind], oid: &Oid) -> Option<String> {
     let varbind = varbinds.iter().find(|varbind| varbind.oid == *oid)?;
+    if varbind.value.is_missing() {
+        return None;
+    }
     let value = varbind
         .value
         .as_text_lossy()
@@ -2198,6 +2288,10 @@ fn snmp_oids(counter_oids: &CounterOidSet) -> Vec<Oid> {
     for oid in &counter_oids.total {
         push(oid.clone());
     }
+    push(Oid::from_slice(&RICOH_TONER_BLACK_OID));
+    push(Oid::from_slice(&RICOH_TONER_CYAN_OID));
+    push(Oid::from_slice(&RICOH_TONER_MAGENTA_OID));
+    push(Oid::from_slice(&RICOH_TONER_YELLOW_OID));
 
     oids
 }

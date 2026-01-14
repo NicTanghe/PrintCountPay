@@ -290,6 +290,9 @@ async fn probe_marker_life_count(
 
 fn extract_text(varbinds: &[SnmpVarBind], oid: &Oid) -> Option<String> {
     let varbind = varbinds.iter().find(|varbind| varbind.oid == *oid)?;
+    if varbind.value.is_missing() {
+        return None;
+    }
     varbind
         .value
         .as_text_lossy()

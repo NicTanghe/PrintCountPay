@@ -159,6 +159,9 @@ fn find_counter_value(
 ) -> CounterValue {
     for candidate in candidates {
         if let Some(varbind) = varbinds.iter().find(|item| item.oid == *candidate) {
+            if varbind.value.is_missing() {
+                continue;
+            }
             if let Some(value) = varbind.value.as_u64() {
                 return CounterValue {
                     value: Some(value),
