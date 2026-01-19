@@ -166,13 +166,10 @@ struct RecordingSnapshot {
     bw_copier: Option<u64>,
     color_printer: Option<u64>,
     color_copier: Option<u64>,
-    clicks_bw: Option<u64>,
-    clicks_color: Option<u64>,
-    clicks_total: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum RecordingCategory {
+pub enum RecordingCategory {
     CopiesBw,
     CopiesColor,
     PrintsBw,
@@ -2796,7 +2793,6 @@ impl PrintCountApp {
         received_at: u64,
         varbinds: &[SnmpVarBind],
     ) -> RecordingSnapshot {
-        let resolution = resolve_counters(received_at, &self.counter_oids, varbinds);
         RecordingSnapshot {
             received_at,
             bw_printer: extract_counter_u64(varbinds, &Oid::from_slice(&RICOH_BW_PRINTER_COUNT_OID)),
@@ -2809,9 +2805,6 @@ impl PrintCountApp {
                 varbinds,
                 &Oid::from_slice(&RICOH_COLOR_COPIER_COUNT_OID),
             ),
-            clicks_bw: resolution.snapshot.bw,
-            clicks_color: resolution.snapshot.color,
-            clicks_total: resolution.snapshot.total,
         }
     }
 
