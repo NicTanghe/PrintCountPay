@@ -6,9 +6,9 @@ use iced::alignment::Horizontal;
 use iced::keyboard;
 use iced::theme;
 use iced::widget::{
-    button, checkbox, column, container, pick_list, row, scrollable, text, text_input,
+    button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Rule,
 };
-use iced::{Alignment, Application, Color, Command, Element, Length, Subscription, Theme};
+use iced::{Alignment, Application, Background, Border, Color, Command, Element, Length, Subscription, Theme, Vector};
 use ron::de::from_str;
 use ron::ser::{to_string_pretty, PrettyConfig};
 
@@ -69,13 +69,13 @@ const FALLBACK_DISCOVERY_CIDR: &str = "192.168.129.1/24";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Printers,
-    Recording,
     Debug,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrinterTab {
     Polling,
+    Recording,
     Oids,
     AddPrinters,
 }
@@ -122,6 +122,15 @@ pub enum Message {
     OidsCrawled(Result<CounterOidSet, SnmpErrorInfo>),
     StartRecording,
     StopRecording,
+    RecordingStartChanged {
+        category: RecordingCategory,
+        value: String,
+    },
+    RecordingEndChanged {
+        category: RecordingCategory,
+        value: String,
+    },
+    RecordingToggleInclude(RecordingCategory),
 }
 
 #[derive(Debug, Clone)]
@@ -154,6 +163,90 @@ struct RecordingSnapshot {
     clicks_bw: Option<u64>,
     clicks_color: Option<u64>,
     clicks_total: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum RecordingCategory {
+    CopiesBw,
+    CopiesColor,
+    PrintsBw,
+    PrintsColor,
+}
+
+#[derive(Debug, Clone)]
+struct RecordingCategoryEdits {
+    include_in_price: bool,
+    start_input: String,
+    end_input: String,
+}
+
+impl Default for RecordingCategoryEdits {
+    fn default() -> Self {
+        Self {
+            include_in_price: true,
+            start_input: String::new(),
+            end_input: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct RecordingEdits {
+    copies_bw: RecordingCategoryEdits,
+    copies_color: RecordingCategoryEdits,
+    prints_bw: RecordingCategoryEdits,
+    prints_color: RecordingCategoryEdits,
+}
+
+impl RecordingEdits {
+    fn category(&self, category: RecordingCategory) -> &RecordingCategoryEdits {
+        match category {
+            RecordingCategory::CopiesBw => &self.copies_bw,
+            RecordingCategory::CopiesColor => &self.copies_color,
+            RecordingCategory::PrintsBw => &self.prints_bw,
+            RecordingCategory::PrintsColor => &self.prints_color,
+        }
+    }
+
+    fn category_mut(&mut self, category: RecordingCategory) -> &mut RecordingCategoryEdits {
+        match category {
+            RecordingCategory::CopiesBw => &mut self.copies_bw,
+            RecordingCategory::CopiesColor => &mut self.copies_color,
+            RecordingCategory::PrintsBw => &mut self.prints_bw,
+            RecordingCategory::PrintsColor => &mut self.prints_color,
+        }
+    }
+
+    fn apply_start_snapshot(&mut self, snapshot: &RecordingSnapshot) {
+        set_input(&mut self.copies_bw.start_input, snapshot.bw_copier);
+        set_input(&mut self.copies_color.start_input, snapshot.color_copier);
+        set_input(&mut self.prints_bw.start_input, snapshot.bw_printer);
+        set_input(&mut self.prints_color.start_input, snapshot.color_printer);
+        self.clear_end_inputs();
+    }
+
+    fn apply_end_snapshot(&mut self, snapshot: &RecordingSnapshot) {
+        set_input(&mut self.copies_bw.end_input, snapshot.bw_copier);
+        set_input(&mut self.copies_color.end_input, snapshot.color_copier);
+        set_input(&mut self.prints_bw.end_input, snapshot.bw_printer);
+        set_input(&mut self.prints_color.end_input, snapshot.color_printer);
+    }
+
+    fn clear_end_inputs(&mut self) {
+        self.copies_bw.end_input.clear();
+        self.copies_color.end_input.clear();
+        self.prints_bw.end_input.clear();
+        self.prints_color.end_input.clear();
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct RecordingSession {
+    active: bool,
+    start: Option<RecordingSnapshot>,
+    end: Option<RecordingSnapshot>,
+    status: Option<String>,
+    edits: RecordingEdits,
 }
 
 #[derive(Debug, Clone)]
@@ -217,11 +310,7 @@ pub struct PrintCountApp {
     oids_total_text: String,
     oids_status: Option<String>,
     oids_crawl_in_flight: bool,
-    recording_active: bool,
-    recording_printer: Option<PrinterId>,
-    recording_start: Option<RecordingSnapshot>,
-    recording_end: Option<RecordingSnapshot>,
-    recording_status: Option<String>,
+    recording_sessions: HashMap<PrinterId, RecordingSession>,
 }
 
 impl Application for PrintCountApp {
@@ -300,11 +389,7 @@ impl Application for PrintCountApp {
                 oids_total_text,
                 oids_status: None,
                 oids_crawl_in_flight: false,
-                recording_active: false,
-                recording_printer: None,
-                recording_start: None,
-                recording_end: None,
-                recording_status: None,
+                recording_sessions: HashMap::new(),
             },
             Command::none(),
         )
@@ -522,6 +607,37 @@ impl Application for PrintCountApp {
                 self.stop_recording();
                 Command::none()
             }
+            Message::RecordingStartChanged { category, value } => {
+                if let Some(printer_id) = self.selected_printer.clone() {
+                    let session = self
+                        .recording_sessions
+                        .entry(printer_id)
+                        .or_default();
+                    session.edits.category_mut(category).start_input = value;
+                }
+                Command::none()
+            }
+            Message::RecordingEndChanged { category, value } => {
+                if let Some(printer_id) = self.selected_printer.clone() {
+                    let session = self
+                        .recording_sessions
+                        .entry(printer_id)
+                        .or_default();
+                    session.edits.category_mut(category).end_input = value;
+                }
+                Command::none()
+            }
+            Message::RecordingToggleInclude(category) => {
+                if let Some(printer_id) = self.selected_printer.clone() {
+                    let session = self
+                        .recording_sessions
+                        .entry(printer_id)
+                        .or_default();
+                    let entry = session.edits.category_mut(category);
+                    entry.include_in_price = !entry.include_in_price;
+                }
+                Command::none()
+            }
         }
     }
 
@@ -548,7 +664,6 @@ impl Application for PrintCountApp {
 
         let body = match self.active_tab {
             Tab::Printers => self.printers_tab_view(),
-            Tab::Recording => self.recording_tab_view(),
             Tab::Debug => self.debug_tab_view(),
         };
 
@@ -575,7 +690,6 @@ impl PrintCountApp {
     fn tab_bar(&self) -> Element<'_, Message> {
         row![
             self.tab_button(Tab::Printers, "Printers"),
-            self.tab_button(Tab::Recording, "Recording"),
             self.tab_button(Tab::Debug, "Debug")
         ]
         .spacing(8)
@@ -599,22 +713,22 @@ impl PrintCountApp {
     fn printer_tab_bar(&self) -> Element<'_, Message> {
         row![
             self.printer_tab_button(PrinterTab::Polling, "Polling"),
+            self.printer_tab_button(PrinterTab::Recording, "Recording"),
             self.printer_tab_button(PrinterTab::Oids, "SNMP OIDs"),
             self.printer_tab_button(PrinterTab::AddPrinters, "Discovery + Manual")
         ]
-        .spacing(8)
+        .spacing(4)
         .align_items(Alignment::Center)
         .into()
     }
 
     fn printer_tab_button(&self, tab: PrinterTab, label: &str) -> Element<'_, Message> {
-        let style = if self.printer_tab == tab {
-            theme::Button::Primary
-        } else {
-            theme::Button::Secondary
-        };
+        let style = theme::Button::custom(FirefoxTabStyle {
+            active: self.printer_tab == tab,
+        });
 
         button(text(label))
+            .padding([6, 12])
             .style(style)
             .on_press(Message::SelectPrinterTab(tab))
             .into()
@@ -811,9 +925,8 @@ impl PrintCountApp {
     }
 
     fn recording_tab_view(&self) -> Element<'_, Message> {
-        let selected_label = self
-            .selected_printer
-            .as_ref()
+        let selected_id = self.selected_printer.as_ref();
+        let selected_label = selected_id
             .and_then(|selected| {
                 self.printers
                     .iter()
@@ -828,109 +941,172 @@ impl PrintCountApp {
             })
             .unwrap_or_else(|| "No printer selected".to_string());
 
-        let recording_label = self
-            .recording_printer
-            .as_ref()
+        let selected_id_label = selected_id
             .map(|id| id.to_string())
             .unwrap_or_else(|| "None".to_string());
 
-        let status = self.recording_status.as_deref().unwrap_or("Ready.");
-        let state_label = if self.recording_active {
+        let session = selected_id
+            .and_then(|id| self.recording_sessions.get(id))
+            .cloned()
+            .unwrap_or_default();
+
+        let status = session.status.as_deref().unwrap_or("Ready.");
+        let state_label = if session.active {
             "Recording active"
         } else {
             "Recording idle"
         };
 
-        let start_button = if self.recording_active {
+        let controls_enabled = selected_id.is_some();
+        let start_button = if !controls_enabled || session.active {
             button("Start recording").style(theme::Button::Secondary)
         } else {
             button("Start recording").on_press(Message::StartRecording)
         };
-        let stop_button = if self.recording_active {
-            button("Stop recording").on_press(Message::StopRecording)
-        } else {
+        let stop_button = if !controls_enabled || !session.active {
             button("Stop recording").style(theme::Button::Secondary)
+        } else {
+            button("Stop recording").on_press(Message::StopRecording)
         };
 
-        let start_time = self
-            .recording_start
+        let start_time = session
+            .start
             .as_ref()
             .map(|snapshot| snapshot.received_at.to_string())
             .unwrap_or_else(|| "n/a".to_string());
-        let end_time = self
-            .recording_end
+        let end_time = session
+            .end
             .as_ref()
             .map(|snapshot| snapshot.received_at.to_string())
             .unwrap_or_else(|| "n/a".to_string());
 
-        let delta_section: Element<'_, Message> =
-            if let (Some(start), Some(end)) = (&self.recording_start, &self.recording_end) {
-                let bw_printer_delta = delta_value(start.bw_printer, end.bw_printer);
-                let color_printer_delta = delta_value(start.color_printer, end.color_printer);
-                let bw_copier_delta = delta_value(start.bw_copier, end.bw_copier);
-                let color_copier_delta = delta_value(start.color_copier, end.color_copier);
-                let clicks_bw_delta = delta_value(start.clicks_bw, end.clicks_bw);
-                let clicks_color_delta = delta_value(start.clicks_color, end.clicks_color);
-                let clicks_total_delta = delta_value(start.clicks_total, end.clicks_total);
+        let delta_section: Element<'_, Message> = if session.start.is_some() && session.end.is_some()
+        {
+            let copies_bw_start = category_start_value(&session, RecordingCategory::CopiesBw);
+            let copies_bw_end = category_end_value(&session, RecordingCategory::CopiesBw);
+            let copies_bw_delta = delta_value(copies_bw_start, copies_bw_end);
 
-                let bw_total_delta = sum_two(bw_printer_delta, bw_copier_delta);
-                let color_total_delta = sum_two(color_printer_delta, color_copier_delta);
+            let copies_color_start = category_start_value(&session, RecordingCategory::CopiesColor);
+            let copies_color_end = category_end_value(&session, RecordingCategory::CopiesColor);
+            let copies_color_delta = delta_value(copies_color_start, copies_color_end);
 
-                let bw_cost_value = bw_total_delta.map(bw_cost_cents);
-                let color_cost_value = color_total_delta.map(color_cost_cents);
-                let subtotal_cents = match (bw_cost_value, color_cost_value) {
-                    (Some(bw), Some(color)) => Some(bw + color),
-                    _ => None,
-                };
-                let rounded_cents = subtotal_cents.map(round_up_50_cents);
+            let prints_bw_start = category_start_value(&session, RecordingCategory::PrintsBw);
+            let prints_bw_end = category_end_value(&session, RecordingCategory::PrintsBw);
+            let prints_bw_delta = delta_value(prints_bw_start, prints_bw_end);
 
-                column![
-                    text("Printer counts")
-                        .size(13)
-                        .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-                    self.value_line("B/W printer", bw_printer_delta.map(|v| v.to_string())),
-                    self.value_line(
-                        "Color printer",
-                        color_printer_delta.map(|v| v.to_string())
-                    ),
-                    text("Copier counts")
-                        .size(13)
-                        .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-                    self.value_line("B/W copier", bw_copier_delta.map(|v| v.to_string())),
-                    self.value_line("Color copier", color_copier_delta.map(|v| v.to_string())),
-                    text("Click totals")
-                        .size(13)
-                        .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-                    self.value_line("B/W clicks", clicks_bw_delta.map(|v| v.to_string())),
-                    self.value_line("Color clicks", clicks_color_delta.map(|v| v.to_string())),
-                    self.value_line("Total clicks", clicks_total_delta.map(|v| v.to_string())),
-                    text("Totals + pricing")
-                        .size(13)
-                        .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-                    self.value_line("B/W prints", bw_total_delta.map(|v| v.to_string())),
-                    self.value_line("Color prints", color_total_delta.map(|v| v.to_string())),
-                    self.value_line("B/W cost", bw_cost_value.map(format_cents)),
-                    self.value_line("Color cost", color_cost_value.map(format_cents)),
-                    self.value_line("Subtotal", subtotal_cents.map(format_cents)),
-                    self.value_line("Rounded total", rounded_cents.map(format_cents)),
-                ]
-                .spacing(4)
-                .into()
-            } else {
-                text("No completed recording yet.")
-                    .size(13)
-                    .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a)))
-                    .into()
+            let prints_color_start = category_start_value(&session, RecordingCategory::PrintsColor);
+            let prints_color_end = category_end_value(&session, RecordingCategory::PrintsColor);
+            let prints_color_delta = delta_value(prints_color_start, prints_color_end);
+
+            let include_copies_bw = session.edits.copies_bw.include_in_price;
+            let include_copies_color = session.edits.copies_color.include_in_price;
+            let include_prints_bw = session.edits.prints_bw.include_in_price;
+            let include_prints_color = session.edits.prints_color.include_in_price;
+
+            let start_bw_total = sum_optional_included([
+                (include_copies_bw, copies_bw_start),
+                (include_prints_bw, prints_bw_start),
+            ]);
+            let end_bw_total = sum_optional_included([
+                (include_copies_bw, copies_bw_end),
+                (include_prints_bw, prints_bw_end),
+            ]);
+            let total_bw_delta = delta_value(start_bw_total, end_bw_total);
+
+            let start_color_total = sum_optional_included([
+                (include_copies_color, copies_color_start),
+                (include_prints_color, prints_color_start),
+            ]);
+            let end_color_total = sum_optional_included([
+                (include_copies_color, copies_color_end),
+                (include_prints_color, prints_color_end),
+            ]);
+            let total_color_delta = delta_value(start_color_total, end_color_total);
+
+            let bw_delta = sum_optional_included([
+                (include_copies_bw, copies_bw_delta),
+                (include_prints_bw, prints_bw_delta),
+            ]);
+            let color_delta = sum_optional_included([
+                (include_copies_color, copies_color_delta),
+                (include_prints_color, prints_color_delta),
+            ]);
+
+            let bw_cost_value = bw_delta.map(bw_cost_cents);
+            let color_cost_value = color_delta.map(color_cost_cents);
+            let subtotal_cents = match (bw_cost_value, color_cost_value) {
+                (Some(bw), Some(color)) => Some(bw + color),
+                _ => None,
             };
+            let rounded_cents = subtotal_cents.map(round_up_50_cents);
+
+            column![
+                self.recording_table_header(),
+                self.recording_table_row_editable(
+                    RecordingCategory::CopiesBw,
+                    "Copies B/W",
+                    &session.edits.copies_bw.start_input,
+                    &session.edits.copies_bw.end_input,
+                    copies_bw_delta,
+                    include_copies_bw,
+                ),
+                self.recording_table_row_editable(
+                    RecordingCategory::CopiesColor,
+                    "Copies color",
+                    &session.edits.copies_color.start_input,
+                    &session.edits.copies_color.end_input,
+                    copies_color_delta,
+                    include_copies_color,
+                ),
+                self.recording_table_row_editable(
+                    RecordingCategory::PrintsBw,
+                    "Prints B/W",
+                    &session.edits.prints_bw.start_input,
+                    &session.edits.prints_bw.end_input,
+                    prints_bw_delta,
+                    include_prints_bw,
+                ),
+                self.recording_table_row_editable(
+                    RecordingCategory::PrintsColor,
+                    "Prints color",
+                    &session.edits.prints_color.start_input,
+                    &session.edits.prints_color.end_input,
+                    prints_color_delta,
+                    include_prints_color,
+                ),
+                Rule::horizontal(1),
+                self.recording_table_row(
+                    "Total B/W",
+                    start_bw_total,
+                    end_bw_total,
+                    total_bw_delta,
+                ),
+                self.recording_table_row(
+                    "Total color",
+                    start_color_total,
+                    end_color_total,
+                    total_color_delta,
+                ),
+                Rule::horizontal(1),
+                self.value_line("Total price", rounded_cents.map(format_cents)),
+                text("Rounded up to the next 0.50 EUR")
+                    .size(11)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            ]
+            .spacing(6)
+            .into()
+        } else {
+            text("No completed recording yet.")
+                .size(13)
+                .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a)))
+                .into()
+        };
 
         let content = column![
-            text("Recording")
-                .size(20)
-                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
             text(format!("Selected printer: {selected_label}"))
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-            text(format!("Recording printer ID: {recording_label}"))
+            text(format!("Recording printer ID: {selected_id_label}"))
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
             text(state_label)
@@ -1053,7 +1229,12 @@ impl PrintCountApp {
             ]
             .spacing(4),
             _ => {
-                let mut content = column![text("Printer details")
+                let title = if self.printer_tab == PrinterTab::Recording {
+                    "Recording"
+                } else {
+                    "Printer details"
+                };
+                let mut content = column![text(title)
                     .size(20)
                     .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12)))]
                 .spacing(4);
@@ -1117,10 +1298,11 @@ impl PrintCountApp {
                     self.empty_printer_tab_view("Select a printer to edit OIDs.")
                 }
             }
+            PrinterTab::Recording => self.recording_tab_view(),
             PrinterTab::AddPrinters => self.printer_add_printers_view(),
         };
 
-        let content = column![header, self.printer_tab_bar(), body].spacing(12);
+        let content = column![self.printer_tab_bar(), header, body].spacing(12);
 
         container(content)
             .padding(12)
@@ -1584,6 +1766,120 @@ impl PrintCountApp {
             .into()
     }
 
+    fn recording_table_header(&self) -> Element<'_, Message> {
+        let label = text("Category")
+            .size(12)
+            .width(Length::FillPortion(2))
+            .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a)));
+        let start = text("Start")
+            .size(12)
+            .width(Length::FillPortion(1))
+            .horizontal_alignment(Horizontal::Right)
+            .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a)));
+        let end = text("End")
+            .size(12)
+            .width(Length::FillPortion(1))
+            .horizontal_alignment(Horizontal::Right)
+            .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a)));
+        let delta = text("Delta")
+            .size(12)
+            .width(Length::FillPortion(1))
+            .horizontal_alignment(Horizontal::Right)
+            .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a)));
+
+        row![label, start, end, delta]
+            .spacing(12)
+            .align_items(Alignment::Center)
+            .into()
+    }
+
+    fn recording_table_row(
+        &self,
+        label: &str,
+        start: Option<u64>,
+        end: Option<u64>,
+        delta: Option<u64>,
+    ) -> Element<'_, Message> {
+        let label = text(label)
+            .size(13)
+            .width(Length::FillPortion(2))
+            .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a)));
+        let start = text(format_count(start))
+            .size(13)
+            .width(Length::FillPortion(1))
+            .horizontal_alignment(Horizontal::Right)
+            .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37)));
+        let end = text(format_count(end))
+            .size(13)
+            .width(Length::FillPortion(1))
+            .horizontal_alignment(Horizontal::Right)
+            .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37)));
+        let delta = text(format_count(delta))
+            .size(13)
+            .width(Length::FillPortion(1))
+            .horizontal_alignment(Horizontal::Right)
+            .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37)));
+
+        row![label, start, end, delta]
+            .spacing(12)
+            .align_items(Alignment::Center)
+            .into()
+    }
+
+    fn recording_table_row_editable(
+        &self,
+        category: RecordingCategory,
+        label: &str,
+        start_value: &str,
+        end_value: &str,
+        delta: Option<u64>,
+        include_in_price: bool,
+    ) -> Element<'_, Message> {
+        let indicator_color = if include_in_price {
+            Color::from_rgb8(0x6a, 0x6a, 0x6a)
+        } else {
+            Color::from_rgb8(0xe0, 0x4f, 0x4f)
+        };
+
+        let indicator = button(text("o").size(12))
+            .on_press(Message::RecordingToggleInclude(category))
+            .padding(2)
+            .style(theme::Button::custom(IndicatorButtonStyle {
+                color: indicator_color,
+            }));
+
+        let label = row![
+            indicator,
+            text(label)
+                .size(13)
+                .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a)))
+        ]
+        .spacing(6)
+        .align_items(Alignment::Center)
+        .width(Length::FillPortion(2));
+
+        let start = text_input("n/a", start_value)
+            .on_input(move |value| Message::RecordingStartChanged { category, value })
+            .padding(4)
+            .size(12)
+            .width(Length::FillPortion(1));
+        let end = text_input("n/a", end_value)
+            .on_input(move |value| Message::RecordingEndChanged { category, value })
+            .padding(4)
+            .size(12)
+            .width(Length::FillPortion(1));
+        let delta = text(format_count(delta))
+            .size(13)
+            .width(Length::FillPortion(1))
+            .horizontal_alignment(Horizontal::Right)
+            .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37)));
+
+        row![label, start, end, delta]
+            .spacing(12)
+            .align_items(Alignment::Center)
+            .into()
+    }
+
     fn debug_tab_view(&self) -> Element<'_, Message> {
         let level_picker = pick_list(
             &LogLevel::ALL[..],
@@ -1912,6 +2208,7 @@ impl PrintCountApp {
         self.printers.remove(index);
         self.poll_states.remove(&selected);
         self.poll_in_flight.remove(&selected);
+        self.recording_sessions.remove(&selected);
 
         if self.printers.is_empty() {
             self.selected_printer = None;
@@ -2098,6 +2395,8 @@ impl PrintCountApp {
         self.printers = printers;
         self.poll_states.clear();
         self.poll_in_flight.clear();
+        self.recording_sessions
+            .retain(|id, _| self.printers.iter().any(|record| &record.id == id));
 
         for record in &self.printers {
             self.poll_states
@@ -2169,45 +2468,83 @@ impl PrintCountApp {
 
     fn start_recording(&mut self) {
         let Some(printer_id) = self.selected_printer.clone() else {
-            self.recording_status = Some("Start failed: select a printer first.".to_string());
             return;
         };
 
-        match self.snapshot_for_printer(&printer_id) {
+        let already_active = self
+            .recording_sessions
+            .get(&printer_id)
+            .map(|session| session.active)
+            .unwrap_or(false);
+        if already_active {
+            let session = self
+                .recording_sessions
+                .entry(printer_id.clone())
+                .or_default();
+            session.status = Some("Start ignored: recording already active.".to_string());
+            return;
+        }
+
+        let snapshot_result = self.snapshot_for_printer(&printer_id);
+        let session = self
+            .recording_sessions
+            .entry(printer_id.clone())
+            .or_default();
+
+        match snapshot_result {
             Ok(snapshot) => {
-                self.recording_active = true;
-                self.recording_printer = Some(printer_id);
-                self.recording_start = Some(snapshot.clone());
-                self.recording_end = None;
-                self.recording_status =
-                    Some(format!("Recording started at {}.", snapshot.received_at));
+                session.active = true;
+                session.start = Some(snapshot.clone());
+                session.end = None;
+                session.edits.apply_start_snapshot(&snapshot);
+                session.status = Some(format!(
+                    "Recording started at {}.",
+                    snapshot.received_at
+                ));
             }
             Err(error) => {
-                self.recording_status = Some(format!("Start failed: {error}"));
+                session.status = Some(format!("Start failed: {error}"));
             }
         }
     }
 
     fn stop_recording(&mut self) {
-        if !self.recording_active {
-            self.recording_status = Some("Stop failed: no active recording.".to_string());
-            return;
-        }
-
-        let Some(printer_id) = self.recording_printer.clone() else {
-            self.recording_status = Some("Stop failed: no recording printer.".to_string());
+        let Some(printer_id) = self.selected_printer.clone() else {
             return;
         };
 
-        match self.snapshot_for_printer(&printer_id) {
+        let is_active = self
+            .recording_sessions
+            .get(&printer_id)
+            .map(|session| session.active)
+            .unwrap_or(false);
+        if !is_active {
+            let session = self
+                .recording_sessions
+                .entry(printer_id.clone())
+                .or_default();
+            session.status = Some("Stop failed: no active recording.".to_string());
+            return;
+        }
+
+        let snapshot_result = self.snapshot_for_printer(&printer_id);
+        let session = self
+            .recording_sessions
+            .entry(printer_id.clone())
+            .or_default();
+
+        match snapshot_result {
             Ok(snapshot) => {
-                self.recording_active = false;
-                self.recording_end = Some(snapshot.clone());
-                self.recording_status =
-                    Some(format!("Recording stopped at {}.", snapshot.received_at));
+                session.active = false;
+                session.end = Some(snapshot.clone());
+                session.edits.apply_end_snapshot(&snapshot);
+                session.status = Some(format!(
+                    "Recording stopped at {}.",
+                    snapshot.received_at
+                ));
             }
             Err(error) => {
-                self.recording_status = Some(format!("Stop failed: {error}"));
+                session.status = Some(format!("Stop failed: {error}"));
             }
         }
     }
@@ -2631,6 +2968,164 @@ fn format_cents(cents: u64) -> String {
     let euros = cents / 100;
     let remainder = cents % 100;
     format!("{euros}.{remainder:02} EUR")
+}
+
+fn format_count(value: Option<u64>) -> String {
+    value.map(|value| value.to_string()).unwrap_or_else(|| "N/A".to_string())
+}
+
+fn set_input(target: &mut String, value: Option<u64>) {
+    target.clear();
+    if let Some(value) = value {
+        target.push_str(&value.to_string());
+    }
+}
+
+fn parse_count_input(value: &str) -> Result<Option<u64>, ()> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    trimmed.parse::<u64>().map(Some).map_err(|_| ())
+}
+
+fn snapshot_category_value(
+    snapshot: &RecordingSnapshot,
+    category: RecordingCategory,
+) -> Option<u64> {
+    match category {
+        RecordingCategory::CopiesBw => snapshot.bw_copier,
+        RecordingCategory::CopiesColor => snapshot.color_copier,
+        RecordingCategory::PrintsBw => snapshot.bw_printer,
+        RecordingCategory::PrintsColor => snapshot.color_printer,
+    }
+}
+
+fn category_start_value(
+    session: &RecordingSession,
+    category: RecordingCategory,
+) -> Option<u64> {
+    let edits = session.edits.category(category);
+    match parse_count_input(&edits.start_input) {
+        Ok(Some(value)) => Some(value),
+        Ok(None) => session
+            .start
+            .as_ref()
+            .and_then(|snapshot| snapshot_category_value(snapshot, category)),
+        Err(()) => None,
+    }
+}
+
+fn category_end_value(
+    session: &RecordingSession,
+    category: RecordingCategory,
+) -> Option<u64> {
+    let edits = session.edits.category(category);
+    match parse_count_input(&edits.end_input) {
+        Ok(Some(value)) => Some(value),
+        Ok(None) => session
+            .end
+            .as_ref()
+            .and_then(|snapshot| snapshot_category_value(snapshot, category)),
+        Err(()) => None,
+    }
+}
+
+fn sum_optional_included(
+    values: impl IntoIterator<Item = (bool, Option<u64>)>,
+) -> Option<u64> {
+    let mut total = 0u64;
+    let mut included_any = false;
+    for (included, value) in values {
+        if !included {
+            continue;
+        }
+        included_any = true;
+        total = total.saturating_add(value?);
+    }
+    if included_any {
+        Some(total)
+    } else {
+        Some(0)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FirefoxTabStyle {
+    active: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct IndicatorButtonStyle {
+    color: Color,
+}
+
+impl iced::widget::button::StyleSheet for IndicatorButtonStyle {
+    type Style = Theme;
+
+    fn active(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
+        iced::widget::button::Appearance {
+            background: None,
+            text_color: self.color,
+            border: Border {
+                color: Color::from_rgb8(0x00, 0x00, 0x00),
+                width: 0.0,
+                radius: 0.0.into(),
+            },
+            shadow_offset: Vector::new(0.0, 0.0),
+            ..iced::widget::button::Appearance::default()
+        }
+    }
+}
+
+impl iced::widget::button::StyleSheet for FirefoxTabStyle {
+    type Style = Theme;
+
+    fn active(&self, style: &Self::Style) -> iced::widget::button::Appearance {
+        let palette = style.extended_palette();
+        let background = if self.active {
+            palette.background.base.color
+        } else {
+            palette.background.weak.color
+        };
+        let text_color = if self.active {
+            palette.background.base.text
+        } else {
+            palette.background.weak.text
+        };
+
+        iced::widget::button::Appearance {
+            background: Some(Background::Color(background)),
+            text_color,
+            border: Border {
+                color: palette.background.strong.color,
+                width: 1.0,
+                radius: [8.0, 8.0, 0.0, 0.0].into(),
+            },
+            shadow_offset: if self.active {
+                Vector::new(0.0, 0.0)
+            } else {
+                Vector::new(0.0, 1.0)
+            },
+            ..iced::widget::button::Appearance::default()
+        }
+    }
+
+    fn hovered(&self, style: &Self::Style) -> iced::widget::button::Appearance {
+        let mut appearance = self.active(style);
+        if !self.active {
+            if let Some(Background::Color(color)) = appearance.background {
+                let lifted = Color {
+                    r: (color.r + 0.05).min(1.0),
+                    g: (color.g + 0.05).min(1.0),
+                    b: (color.b + 0.05).min(1.0),
+                    a: color.a,
+                };
+                appearance.background = Some(Background::Color(lifted));
+            }
+        }
+        appearance
+    }
 }
 
 fn counter_oids_from_walk(varbinds: &[SnmpVarBind]) -> CounterOidSet {
