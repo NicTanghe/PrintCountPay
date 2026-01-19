@@ -76,6 +76,7 @@ pub enum Tab {
 pub enum PrinterTab {
     Polling,
     Recording,
+    Pricing,
     Oids,
     AddPrinters,
 }
@@ -131,6 +132,11 @@ pub enum Message {
         value: String,
     },
     RecordingToggleInclude(RecordingCategory),
+    PricingBwFirstChanged(String),
+    PricingBwNextChanged(String),
+    PricingBwRestChanged(String),
+    PricingColorChanged(String),
+    PricingRoundChanged(bool),
 }
 
 #[derive(Debug, Clone)]
@@ -250,6 +256,33 @@ struct RecordingSession {
 }
 
 #[derive(Debug, Clone)]
+struct PricingSettings {
+    bw_first_input: String,
+    bw_next_input: String,
+    bw_rest_input: String,
+    color_input: String,
+    round_to_half_euro: bool,
+}
+
+impl Default for PricingSettings {
+    fn default() -> Self {
+        Self {
+            bw_first_input: "0.25".to_string(),
+            bw_next_input: "0.10".to_string(),
+            bw_rest_input: "0.06".to_string(),
+            color_input: "0.50".to_string(),
+            round_to_half_euro: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BwPricing {
+    first_cents: u64,
+    next_cents: u64,
+    rest_cents: u64,
+}
+#[derive(Debug, Clone)]
 pub struct DiscoveryProbeResult {
     run_id: u64,
     outcome: DiscoveryOutcome,
@@ -311,6 +344,7 @@ pub struct PrintCountApp {
     oids_status: Option<String>,
     oids_crawl_in_flight: bool,
     recording_sessions: HashMap<PrinterId, RecordingSession>,
+    pricing: PricingSettings,
 }
 
 impl Application for PrintCountApp {
@@ -390,6 +424,7 @@ impl Application for PrintCountApp {
                 oids_status: None,
                 oids_crawl_in_flight: false,
                 recording_sessions: HashMap::new(),
+                pricing: PricingSettings::default(),
             },
             Command::none(),
         )
@@ -638,6 +673,26 @@ impl Application for PrintCountApp {
                 }
                 Command::none()
             }
+            Message::PricingBwFirstChanged(value) => {
+                self.pricing.bw_first_input = value;
+                Command::none()
+            }
+            Message::PricingBwNextChanged(value) => {
+                self.pricing.bw_next_input = value;
+                Command::none()
+            }
+            Message::PricingBwRestChanged(value) => {
+                self.pricing.bw_rest_input = value;
+                Command::none()
+            }
+            Message::PricingColorChanged(value) => {
+                self.pricing.color_input = value;
+                Command::none()
+            }
+            Message::PricingRoundChanged(value) => {
+                self.pricing.round_to_half_euro = value;
+                Command::none()
+            }
         }
     }
 
@@ -714,6 +769,7 @@ impl PrintCountApp {
         row![
             self.printer_tab_button(PrinterTab::Polling, "Polling"),
             self.printer_tab_button(PrinterTab::Recording, "Recording"),
+            self.printer_tab_button(PrinterTab::Pricing, "Pricing"),
             self.printer_tab_button(PrinterTab::Oids, "SNMP OIDs"),
             self.printer_tab_button(PrinterTab::AddPrinters, "Discovery + Manual")
         ]
@@ -1003,24 +1059,12 @@ impl PrintCountApp {
             let include_prints_bw = session.edits.prints_bw.include_in_price;
             let include_prints_color = session.edits.prints_color.include_in_price;
 
-            let start_bw_total = sum_optional_included([
-                (include_copies_bw, copies_bw_start),
-                (include_prints_bw, prints_bw_start),
-            ]);
-            let end_bw_total = sum_optional_included([
-                (include_copies_bw, copies_bw_end),
-                (include_prints_bw, prints_bw_end),
-            ]);
+            let start_bw_total = sum_two(copies_bw_start, prints_bw_start);
+            let end_bw_total = sum_two(copies_bw_end, prints_bw_end);
             let total_bw_delta = delta_value(start_bw_total, end_bw_total);
 
-            let start_color_total = sum_optional_included([
-                (include_copies_color, copies_color_start),
-                (include_prints_color, prints_color_start),
-            ]);
-            let end_color_total = sum_optional_included([
-                (include_copies_color, copies_color_end),
-                (include_prints_color, prints_color_end),
-            ]);
+            let start_color_total = sum_two(copies_color_start, prints_color_start);
+            let end_color_total = sum_two(copies_color_end, prints_color_end);
             let total_color_delta = delta_value(start_color_total, end_color_total);
 
             let bw_delta = sum_optional_included([
@@ -1032,13 +1076,35 @@ impl PrintCountApp {
                 (include_prints_color, prints_color_delta),
             ]);
 
-            let bw_cost_value = bw_delta.map(bw_cost_cents);
-            let color_cost_value = color_delta.map(color_cost_cents);
+            let bw_pricing = bw_pricing_from_settings(&self.pricing);
+            let color_price = color_price_from_settings(&self.pricing);
+            let bw_cost_raw = match bw_delta {
+                Some(0) => Some(0),
+                Some(count) => bw_pricing.map(|pricing| bw_cost_cents(count, pricing)),
+                None => None,
+            };
+            let bw_cost_value = bw_cost_raw.map(|value| {
+                if self.pricing.round_to_half_euro {
+                    round_to_nearest_50_cents(value)
+                } else {
+                    value
+                }
+            });
+            let color_cost_value = match color_delta {
+                Some(0) => Some(0),
+                Some(count) => color_price.map(|price| color_cost_cents(count, price)),
+                None => None,
+            };
             let subtotal_cents = match (bw_cost_value, color_cost_value) {
                 (Some(bw), Some(color)) => Some(bw + color),
                 _ => None,
             };
-            let rounded_cents = subtotal_cents.map(round_up_50_cents);
+            let total_cents = subtotal_cents;
+            let rounding_label = if self.pricing.round_to_half_euro {
+                "B/W rounded to nearest 0.50 EUR"
+            } else {
+                "No rounding applied"
+            };
 
             column![
                 self.recording_table_header(),
@@ -1088,8 +1154,8 @@ impl PrintCountApp {
                     total_color_delta,
                 ),
                 Rule::horizontal(1),
-                self.value_line("Total price", rounded_cents.map(format_cents)),
-                text("Rounded up to the next 0.50 EUR")
+                self.value_line("Total price", total_cents.map(format_cents)),
+                text(rounding_label)
                     .size(11)
                     .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
             ]
@@ -1132,6 +1198,63 @@ impl PrintCountApp {
             .padding(12)
             .width(Length::Fill)
             .height(Length::Fill)
+            .style(theme::Container::Box)
+            .into()
+    }
+
+    fn pricing_tab_view(&self) -> Element<'_, Message> {
+        let bw_section = column![
+            text("Black/white pricing")
+                .size(14)
+                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+            self.pricing_input(
+                "First 5 pages (EUR)",
+                "0.25",
+                &self.pricing.bw_first_input,
+                Message::PricingBwFirstChanged,
+            ),
+            self.pricing_input(
+                "Next 5 pages (EUR)",
+                "0.10",
+                &self.pricing.bw_next_input,
+                Message::PricingBwNextChanged,
+            ),
+            self.pricing_input(
+                "Rest (EUR)",
+                "0.06",
+                &self.pricing.bw_rest_input,
+                Message::PricingBwRestChanged,
+            ),
+        ]
+        .spacing(6);
+
+        let color_section = column![
+            text("Color pricing")
+                .size(14)
+                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+            self.pricing_input(
+                "Per page (EUR)",
+                "0.50",
+                &self.pricing.color_input,
+                Message::PricingColorChanged,
+            ),
+        ]
+        .spacing(6);
+
+        let rounding_toggle =
+            checkbox("Round B/W to nearest 0.50 EUR", self.pricing.round_to_half_euro)
+                .on_toggle(Message::PricingRoundChanged)
+                .size(12);
+
+        let hint = text("Used for recording totals. Decimals accept . or ,")
+            .size(11)
+            .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a)));
+
+        let content = column![bw_section, color_section, rounding_toggle, hint].spacing(12);
+
+        container(content)
+            .padding(12)
+            .width(Length::Fill)
             .style(theme::Container::Box)
             .into()
     }
@@ -1229,10 +1352,10 @@ impl PrintCountApp {
             ]
             .spacing(4),
             _ => {
-                let title = if self.printer_tab == PrinterTab::Recording {
-                    "Recording"
-                } else {
-                    "Printer details"
+                let title = match self.printer_tab {
+                    PrinterTab::Recording => "Recording",
+                    PrinterTab::Pricing => "Pricing",
+                    _ => "Printer details",
                 };
                 let mut content = column![text(title)
                     .size(20)
@@ -1299,6 +1422,7 @@ impl PrintCountApp {
                 }
             }
             PrinterTab::Recording => self.recording_tab_view(),
+            PrinterTab::Pricing => self.pricing_tab_view(),
             PrinterTab::AddPrinters => self.printer_add_printers_view(),
         };
 
@@ -1433,6 +1557,29 @@ impl PrintCountApp {
         .spacing(8);
 
         content.into()
+    }
+
+    fn pricing_input(
+        &self,
+        label: &str,
+        placeholder: &str,
+        value: &str,
+        on_change: fn(String) -> Message,
+    ) -> Element<'_, Message> {
+        let input = text_input(placeholder, value)
+            .on_input(on_change)
+            .padding(6)
+            .size(12)
+            .width(Length::Fill);
+
+        column![
+            text(label)
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+            input
+        ]
+        .spacing(4)
+        .into()
     }
 
     fn oids_input(
@@ -2945,23 +3092,19 @@ fn sum_two(left: Option<u64>, right: Option<u64>) -> Option<u64> {
     Some(left? + right?)
 }
 
-fn bw_cost_cents(count: u64) -> u64 {
+fn bw_cost_cents(count: u64, pricing: BwPricing) -> u64 {
     let first = count.min(5);
     let second = count.saturating_sub(5).min(5);
     let rest = count.saturating_sub(10);
-    first * 25 + second * 10 + rest * 6
+    first * pricing.first_cents + second * pricing.next_cents + rest * pricing.rest_cents
 }
 
-fn color_cost_cents(count: u64) -> u64 {
-    count * 50
+fn color_cost_cents(count: u64, price_cents: u64) -> u64 {
+    count * price_cents
 }
 
-fn round_up_50_cents(total_cents: u64) -> u64 {
-    if total_cents == 0 {
-        0
-    } else {
-        (total_cents + 49) / 50 * 50
-    }
+fn round_to_nearest_50_cents(total_cents: u64) -> u64 {
+    (total_cents + 25) / 50 * 50
 }
 
 fn format_cents(cents: u64) -> String {
@@ -2987,6 +3130,34 @@ fn parse_count_input(value: &str) -> Result<Option<u64>, ()> {
         return Ok(None);
     }
     trimmed.parse::<u64>().map(Some).map_err(|_| ())
+}
+
+fn parse_price_input(value: &str) -> Result<Option<u64>, ()> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let normalized = trimmed.replace(',', ".");
+    let parsed = normalized.parse::<f64>().map_err(|_| ())?;
+    if parsed < 0.0 {
+        return Err(());
+    }
+    Ok(Some((parsed * 100.0).round() as u64))
+}
+
+fn bw_pricing_from_settings(settings: &PricingSettings) -> Option<BwPricing> {
+    let first = parse_price_input(&settings.bw_first_input).ok().flatten()?;
+    let next = parse_price_input(&settings.bw_next_input).ok().flatten()?;
+    let rest = parse_price_input(&settings.bw_rest_input).ok().flatten()?;
+    Some(BwPricing {
+        first_cents: first,
+        next_cents: next,
+        rest_cents: rest,
+    })
+}
+
+fn color_price_from_settings(settings: &PricingSettings) -> Option<u64> {
+    parse_price_input(&settings.color_input).ok().flatten()
 }
 
 fn snapshot_category_value(
