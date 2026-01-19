@@ -239,6 +239,7 @@ pub(crate) fn category_start_value(
 pub(crate) fn category_end_value(
     session: &RecordingSession,
     category: RecordingCategory,
+    fallback: Option<&RecordingSnapshot>,
 ) -> Option<u64> {
     let edits = session.edits.category(category);
     match parse_count_input(&edits.end_input) {
@@ -246,7 +247,8 @@ pub(crate) fn category_end_value(
         Ok(None) => session
             .end
             .as_ref()
-            .and_then(|snapshot| snapshot_category_value(snapshot, category)),
+            .and_then(|snapshot| snapshot_category_value(snapshot, category))
+            .or_else(|| fallback.and_then(|snapshot| snapshot_category_value(snapshot, category))),
         Err(()) => None,
     }
 }

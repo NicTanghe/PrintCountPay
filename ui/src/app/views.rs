@@ -262,6 +262,11 @@ impl PrintCountApp {
             .and_then(|id| self.recording_sessions.get(id))
             .cloned()
             .unwrap_or_default();
+        let live_snapshot = if session.active {
+            selected_id.and_then(|id| self.snapshot_for_printer(id).ok())
+        } else {
+            None
+        };
 
         let status = session.status.as_deref().unwrap_or("Ready.");
         let state_label = if session.active {
@@ -291,30 +296,58 @@ impl PrintCountApp {
             .end
             .as_ref()
             .map(|snapshot| snapshot.received_at.to_string())
+            .or_else(|| {
+                live_snapshot
+                    .as_ref()
+                    .map(|snapshot| format!("live {}", snapshot.received_at))
+            })
             .unwrap_or_else(|| "n/a".to_string());
 
-        let delta_section: Element<'_, Message> = if session.start.is_some() && session.end.is_some()
-        {
+        let delta_section: Element<'_, Message> = if session.start.is_some() {
+            let live_snapshot_ref = live_snapshot.as_ref();
+            let end_display = |input: &str, category| {
+                if !input.trim().is_empty() {
+                    return input.to_string();
+                }
+                live_snapshot_ref
+                    .and_then(|snapshot| snapshot_category_value(snapshot, category))
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| input.to_string())
+            };
+
             let copies_bw_start = category_start_value(&session, RecordingCategory::CopiesBw);
-            let copies_bw_end = category_end_value(&session, RecordingCategory::CopiesBw);
+            let copies_bw_end =
+                category_end_value(&session, RecordingCategory::CopiesBw, live_snapshot_ref);
             let copies_bw_delta = delta_value(copies_bw_start, copies_bw_end);
 
             let copies_color_start = category_start_value(&session, RecordingCategory::CopiesColor);
-            let copies_color_end = category_end_value(&session, RecordingCategory::CopiesColor);
+            let copies_color_end =
+                category_end_value(&session, RecordingCategory::CopiesColor, live_snapshot_ref);
             let copies_color_delta = delta_value(copies_color_start, copies_color_end);
 
             let prints_bw_start = category_start_value(&session, RecordingCategory::PrintsBw);
-            let prints_bw_end = category_end_value(&session, RecordingCategory::PrintsBw);
+            let prints_bw_end =
+                category_end_value(&session, RecordingCategory::PrintsBw, live_snapshot_ref);
             let prints_bw_delta = delta_value(prints_bw_start, prints_bw_end);
 
             let prints_color_start = category_start_value(&session, RecordingCategory::PrintsColor);
-            let prints_color_end = category_end_value(&session, RecordingCategory::PrintsColor);
+            let prints_color_end =
+                category_end_value(&session, RecordingCategory::PrintsColor, live_snapshot_ref);
             let prints_color_delta = delta_value(prints_color_start, prints_color_end);
 
             let include_copies_bw = session.edits.copies_bw.include_in_price;
             let include_copies_color = session.edits.copies_color.include_in_price;
             let include_prints_bw = session.edits.prints_bw.include_in_price;
             let include_prints_color = session.edits.prints_color.include_in_price;
+
+            let copies_bw_end_input =
+                end_display(&session.edits.copies_bw.end_input, RecordingCategory::CopiesBw);
+            let copies_color_end_input =
+                end_display(&session.edits.copies_color.end_input, RecordingCategory::CopiesColor);
+            let prints_bw_end_input =
+                end_display(&session.edits.prints_bw.end_input, RecordingCategory::PrintsBw);
+            let prints_color_end_input =
+                end_display(&session.edits.prints_color.end_input, RecordingCategory::PrintsColor);
 
             let start_bw_total = sum_two(copies_bw_start, prints_bw_start);
             let end_bw_total = sum_two(copies_bw_end, prints_bw_end);
@@ -369,7 +402,7 @@ impl PrintCountApp {
                     RecordingCategory::CopiesBw,
                     "Copies B/W",
                     &session.edits.copies_bw.start_input,
-                    &session.edits.copies_bw.end_input,
+                    &copies_bw_end_input,
                     copies_bw_delta,
                     include_copies_bw,
                 ),
@@ -377,7 +410,7 @@ impl PrintCountApp {
                     RecordingCategory::CopiesColor,
                     "Copies color",
                     &session.edits.copies_color.start_input,
-                    &session.edits.copies_color.end_input,
+                    &copies_color_end_input,
                     copies_color_delta,
                     include_copies_color,
                 ),
@@ -385,7 +418,7 @@ impl PrintCountApp {
                     RecordingCategory::PrintsBw,
                     "Prints B/W",
                     &session.edits.prints_bw.start_input,
-                    &session.edits.prints_bw.end_input,
+                    &prints_bw_end_input,
                     prints_bw_delta,
                     include_prints_bw,
                 ),
@@ -393,7 +426,7 @@ impl PrintCountApp {
                     RecordingCategory::PrintsColor,
                     "Prints color",
                     &session.edits.prints_color.start_input,
-                    &session.edits.prints_color.end_input,
+                    &prints_color_end_input,
                     prints_color_delta,
                     include_prints_color,
                 ),
@@ -419,7 +452,7 @@ impl PrintCountApp {
             .spacing(6)
             .into()
         } else {
-            text("No completed recording yet.")
+            text("No recording started yet.")
                 .size(13)
                 .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a)))
                 .into()
@@ -557,6 +590,11 @@ impl PrintCountApp {
 
     fn printer_row(&self, record: &PrinterRecord) -> Element<'_, Message> {
         let is_selected = self.selected_printer.as_ref() == Some(&record.id);
+        let is_recording = self
+            .recording_sessions
+            .get(&record.id)
+            .map(|session| session.active)
+            .unwrap_or(false);
         let address = record
             .ip_or_hostname
             .as_deref()
@@ -564,7 +602,6 @@ impl PrintCountApp {
             .unwrap_or("unknown host");
         let name = record.model.as_deref().unwrap_or("Unknown name");
         let status = status_label(record.status);
-
         let content = column![
             text(name)
                 .size(14)
@@ -584,10 +621,13 @@ impl PrintCountApp {
             theme::Button::Secondary
         };
 
-        button(content)
+        let base = button(content)
             .style(style)
             .width(Length::Fill)
-            .on_press(Message::SelectPrinter(record.id.clone()))
+            .on_press(Message::SelectPrinter(record.id.clone()));
+
+        BadgeOverlay::new(base, self.recording_badge(is_recording), is_recording)
+            .margin(6.0)
             .into()
     }
 
@@ -1095,6 +1135,18 @@ impl PrintCountApp {
         text(label)
             .size(12)
             .style(theme::Text::Color(color))
+            .into()
+    }
+
+    fn recording_badge(&self, active: bool) -> Element<'_, Message> {
+        container(text("REC").size(9))
+            .width(Length::Fixed(24.0))
+            .height(Length::Fixed(24.0))
+            .center_x()
+            .center_y()
+            .style(theme::Container::Custom(Box::new(RecBadgeStyle {
+                active,
+            })))
             .into()
     }
 

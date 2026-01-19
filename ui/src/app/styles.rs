@@ -77,3 +77,36 @@ impl iced::widget::button::StyleSheet for IndicatorButtonStyle {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RecBadgeStyle {
+    pub(crate) active: bool,
+}
+
+impl iced::widget::container::StyleSheet for RecBadgeStyle {
+    type Style = Theme;
+
+    fn appearance(&self, _style: &Self::Style) -> iced::widget::container::Appearance {
+        let background = if self.active {
+            Some(Background::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f)))
+        } else {
+            None
+        };
+        let text_color = if self.active {
+            Some(Color::from_rgb8(0xff, 0xff, 0xff))
+        } else {
+            Some(Color::TRANSPARENT)
+        };
+
+        iced::widget::container::Appearance {
+            text_color,
+            background,
+            border: Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: 999.0.into(),
+            },
+            ..iced::widget::container::Appearance::default()
+        }
+    }
+}

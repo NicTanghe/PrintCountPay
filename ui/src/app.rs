@@ -21,6 +21,7 @@ use printcountpay_core::{
 use crate::logging::{apply_log_level, LogEntry, LogLevel, LogStore, ReloadHandle};
 
 mod constants;
+mod badge_overlay;
 mod helpers;
 mod styles;
 mod types;
@@ -28,6 +29,7 @@ mod types;
 pub use types::{Flags, Message, Tab, PrinterTab, RecordingCategory, SnmpErrorInfo, DiscoveryProbeResult, DiscoveryOutcome};
 
 use constants::*;
+use badge_overlay::BadgeOverlay;
 use helpers::*;
 use styles::*;
 use types::*;

@@ -4,7 +4,7 @@ use iced::executor::Executor;
 use iced::futures;
 use tokio::runtime::{Builder, Runtime};
 
-const TOKIO_WORKER_STACK_SIZE_BYTES: usize = 4_200_000;
+const TOKIO_WORKER_STACK_SIZE_BYTES: usize = 4_194_304;
 
 #[derive(Debug)]
 pub struct StackSizedTokioExecutor {

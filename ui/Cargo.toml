@@ -5,7 +5,7 @@ edition.workspace = true
 
 [dependencies]
 arboard.workspace = true
-iced.workspace = true
+iced = { workspace = true, features = ["advanced"] }
 printcountpay-core = { path = "../core" }
 ron.workspace = true
 tokio.workspace = true
