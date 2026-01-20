@@ -20,6 +20,10 @@ pub enum PrinterTab {
 #[derive(Debug, Clone)]
 pub enum Message {
     LogTick,
+    ToggleAdvancedMode,
+    DragWindow,
+    MinimizeWindow,
+    CloseWindow,
     LogLevelChanged(LogLevel),
     ToggleTarget(String, bool),
     CopyDiagnostics,
@@ -49,14 +53,16 @@ pub enum Message {
         result: Result<SnmpResponse, SnmpErrorInfo>,
     },
     OidsPathChanged(String),
-    OidsBwChanged(String),
-    OidsColorChanged(String),
     OidsTotalChanged(String),
     ApplyOids,
     LoadOids,
     SaveOids,
     CrawlOids,
     OidsCrawled(Result<CounterOidSet, SnmpErrorInfo>),
+    RecordingOidCopiesBwChanged(String),
+    RecordingOidCopiesColorChanged(String),
+    RecordingOidPrintsBwChanged(String),
+    RecordingOidPrintsColorChanged(String),
     StartRecording,
     StopRecording,
     RecordingStartChanged {
@@ -196,6 +202,14 @@ pub(crate) struct RecordingSession {
     pub(crate) end: Option<RecordingSnapshot>,
     pub(crate) status: Option<String>,
     pub(crate) edits: RecordingEdits,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RecordingOidSettings {
+    pub(crate) copies_bw_input: String,
+    pub(crate) copies_color_input: String,
+    pub(crate) prints_bw_input: String,
+    pub(crate) prints_color_input: String,
 }
 
 #[derive(Debug, Clone)]

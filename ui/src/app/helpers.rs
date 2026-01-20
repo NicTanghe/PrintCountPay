@@ -15,7 +15,8 @@ use crate::app::constants::{
     SYS_NAME_OID, SYS_OBJECT_ID_OID, SYS_UPTIME_OID,
 };
 use crate::app::types::{
-    BwPricing, Message, PricingSettings, RecordingCategory, RecordingSession, RecordingSnapshot,
+    BwPricing, Message, PricingSettings, RecordingCategory, RecordingOidSettings, RecordingSession,
+    RecordingSnapshot,
 };
 
 pub(crate) fn level_color(level: tracing::Level) -> Color {
@@ -72,6 +73,51 @@ pub(crate) fn default_counter_oids() -> CounterOidSet {
     }
 }
 
+pub(crate) fn default_recording_oid_inputs() -> RecordingOidSettings {
+    RecordingOidSettings {
+        copies_bw_input: Oid::from_slice(&RICOH_BW_COPIER_COUNT_OID).to_string(),
+        copies_color_input: Oid::from_slice(&RICOH_COLOR_COPIER_COUNT_OID).to_string(),
+        prints_bw_input: Oid::from_slice(&RICOH_BW_PRINTER_COUNT_OID).to_string(),
+        prints_color_input: Oid::from_slice(&RICOH_COLOR_PRINTER_COUNT_OID).to_string(),
+    }
+}
+
+pub(crate) fn recording_oids_from_counter_set(
+    set: &CounterOidSet,
+) -> RecordingOidSettings {
+    let mut copies_bw = Vec::new();
+    let mut prints_bw = Vec::new();
+    let mut copies_color = Vec::new();
+    let mut prints_color = Vec::new();
+
+    for oid in &set.bw {
+        if oid.as_slice() == RICOH_BW_COPIER_COUNT_OID.as_slice() {
+            copies_bw.push(oid.clone());
+        } else if oid.as_slice() == RICOH_BW_PRINTER_COUNT_OID.as_slice() {
+            prints_bw.push(oid.clone());
+        } else {
+            copies_bw.push(oid.clone());
+        }
+    }
+
+    for oid in &set.color {
+        if oid.as_slice() == RICOH_COLOR_COPIER_COUNT_OID.as_slice() {
+            copies_color.push(oid.clone());
+        } else if oid.as_slice() == RICOH_COLOR_PRINTER_COUNT_OID.as_slice() {
+            prints_color.push(oid.clone());
+        } else {
+            copies_color.push(oid.clone());
+        }
+    }
+
+    RecordingOidSettings {
+        copies_bw_input: format_oid_list(&copies_bw),
+        copies_color_input: format_oid_list(&copies_color),
+        prints_bw_input: format_oid_list(&prints_bw),
+        prints_color_input: format_oid_list(&prints_color),
+    }
+}
+
 pub(crate) fn format_oid_list(oids: &[Oid]) -> String {
     oids.iter()
         .map(|oid| oid.to_string())
@@ -79,13 +125,6 @@ pub(crate) fn format_oid_list(oids: &[Oid]) -> String {
         .join(", ")
 }
 
-pub(crate) fn format_counter_oids(oids: &CounterOidSet) -> (String, String, String) {
-    (
-        format_oid_list(&oids.bw),
-        format_oid_list(&oids.color),
-        format_oid_list(&oids.total),
-    )
-}
 
 pub(crate) fn parse_oid_list(value: &str) -> Result<Vec<Oid>, String> {
     let mut oids = Vec::new();
@@ -101,6 +140,7 @@ pub(crate) fn parse_oid_list(value: &str) -> Result<Vec<Oid>, String> {
     }
     Ok(oids)
 }
+
 
 pub(crate) fn extract_text(varbinds: &[SnmpVarBind], oid: &Oid) -> Option<String> {
     let varbind = varbinds.iter().find(|varbind| varbind.oid == *oid)?;
@@ -315,7 +355,10 @@ pub(crate) fn counter_oids_from_walk(varbinds: &[SnmpVarBind]) -> CounterOidSet 
     mapping
 }
 
-pub(crate) fn snmp_oids(counter_oids: &CounterOidSet) -> Vec<Oid> {
+pub(crate) fn snmp_oids(
+    counter_oids: &CounterOidSet,
+    recording_oids: &RecordingOidSettings,
+) -> Vec<Oid> {
     let mut oids = Vec::new();
     let mut seen = HashSet::new();
 
@@ -330,10 +373,27 @@ pub(crate) fn snmp_oids(counter_oids: &CounterOidSet) -> Vec<Oid> {
     push(Oid::from_slice(&SYS_NAME_OID));
     push(Oid::from_slice(&SYS_UPTIME_OID));
     push(Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID));
-    push(Oid::from_slice(&RICOH_BW_COPIER_COUNT_OID));
-    push(Oid::from_slice(&RICOH_BW_PRINTER_COUNT_OID));
-    push(Oid::from_slice(&RICOH_COLOR_COPIER_COUNT_OID));
-    push(Oid::from_slice(&RICOH_COLOR_PRINTER_COUNT_OID));
+
+    if let Ok(oids) = parse_oid_list(&recording_oids.copies_bw_input) {
+        for oid in oids {
+            push(oid);
+        }
+    }
+    if let Ok(oids) = parse_oid_list(&recording_oids.prints_bw_input) {
+        for oid in oids {
+            push(oid);
+        }
+    }
+    if let Ok(oids) = parse_oid_list(&recording_oids.copies_color_input) {
+        for oid in oids {
+            push(oid);
+        }
+    }
+    if let Ok(oids) = parse_oid_list(&recording_oids.prints_color_input) {
+        for oid in oids {
+            push(oid);
+        }
+    }
 
     for oid in &counter_oids.bw {
         push(oid.clone());

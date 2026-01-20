@@ -12,5 +12,7 @@ pub use logging::{
 pub type UiResult = iced::Result;
 
 pub fn run(flags: Flags) -> UiResult {
-    PrintCountApp::run(iced::Settings::with_flags(flags))
+    let mut settings = iced::Settings::with_flags(flags);
+    settings.window.decorations = false;
+    PrintCountApp::run(settings)
 }

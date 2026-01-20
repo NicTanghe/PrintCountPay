@@ -462,7 +462,10 @@ impl PrintCountApp {
             return Command::none();
         };
 
-        let mut request = SnmpRequest::new(address, snmp_oids(&self.counter_oids));
+        let mut request = SnmpRequest::new(
+            address,
+            snmp_oids(&self.counter_oids, &self.recording_oids),
+        );
         if let Some(community) = record.community.clone() {
             request = request.with_community(community);
         }
@@ -673,26 +676,40 @@ impl PrintCountApp {
         received_at: u64,
         varbinds: &[SnmpVarBind],
     ) -> RecordingSnapshot {
+        let copies_bw_oids =
+            parse_oid_list(&self.recording_oids.copies_bw_input).unwrap_or_default();
+        let copies_color_oids =
+            parse_oid_list(&self.recording_oids.copies_color_input).unwrap_or_default();
+        let prints_bw_oids =
+            parse_oid_list(&self.recording_oids.prints_bw_input).unwrap_or_default();
+        let prints_color_oids =
+            parse_oid_list(&self.recording_oids.prints_color_input).unwrap_or_default();
+
+        let copies_bw_value = copies_bw_oids
+            .iter()
+            .find_map(|oid| extract_counter_u64(varbinds, oid));
+        let copies_color_value = copies_color_oids
+            .iter()
+            .find_map(|oid| extract_counter_u64(varbinds, oid));
+        let prints_bw_value = prints_bw_oids
+            .iter()
+            .find_map(|oid| extract_counter_u64(varbinds, oid));
+        let prints_color_value = prints_color_oids
+            .iter()
+            .find_map(|oid| extract_counter_u64(varbinds, oid));
+
         RecordingSnapshot {
             received_at,
-            bw_printer: extract_counter_u64(varbinds, &Oid::from_slice(&RICOH_BW_PRINTER_COUNT_OID)),
-            bw_copier: extract_counter_u64(varbinds, &Oid::from_slice(&RICOH_BW_COPIER_COUNT_OID)),
-            color_printer: extract_counter_u64(
-                varbinds,
-                &Oid::from_slice(&RICOH_COLOR_PRINTER_COUNT_OID),
-            ),
-            color_copier: extract_counter_u64(
-                varbinds,
-                &Oid::from_slice(&RICOH_COLOR_COPIER_COUNT_OID),
-            ),
+            bw_printer: prints_bw_value,
+            bw_copier: copies_bw_value,
+            color_printer: prints_color_value,
+            color_copier: copies_color_value,
         }
     }
 
     fn sync_oid_inputs(&mut self) {
-        let (bw, color, total) = format_counter_oids(&self.counter_oids);
-        self.oids_bw_text = bw;
-        self.oids_color_text = color;
-        self.oids_total_text = total;
+        self.recording_oids = recording_oids_from_counter_set(&self.counter_oids);
+        self.oids_total_text = format_oid_list(&self.counter_oids.total);
     }
 
     fn apply_oid_inputs(&mut self) {
@@ -708,12 +725,21 @@ impl PrintCountApp {
     }
 
     fn parse_oid_inputs(&self) -> Result<CounterOidSet, String> {
-        let bw = parse_oid_list(&self.oids_bw_text)
-            .map_err(|error| format!("B/W OIDs: {error}"))?;
-        let color = parse_oid_list(&self.oids_color_text)
-            .map_err(|error| format!("Color OIDs: {error}"))?;
+        let copies_bw = parse_oid_list(&self.recording_oids.copies_bw_input)
+            .map_err(|error| format!("Copies B/W OIDs: {error}"))?;
+        let prints_bw = parse_oid_list(&self.recording_oids.prints_bw_input)
+            .map_err(|error| format!("Prints B/W OIDs: {error}"))?;
+        let copies_color = parse_oid_list(&self.recording_oids.copies_color_input)
+            .map_err(|error| format!("Copies color OIDs: {error}"))?;
+        let prints_color = parse_oid_list(&self.recording_oids.prints_color_input)
+            .map_err(|error| format!("Prints color OIDs: {error}"))?;
         let total = parse_oid_list(&self.oids_total_text)
             .map_err(|error| format!("Total OIDs: {error}"))?;
+
+        let mut bw = copies_bw;
+        bw.extend(prints_bw);
+        let mut color = copies_color;
+        color.extend(prints_color);
 
         Ok(CounterOidSet { bw, color, total })
     }

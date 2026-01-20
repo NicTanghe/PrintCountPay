@@ -6,9 +6,10 @@ use iced::alignment::Horizontal;
 use iced::keyboard;
 use iced::theme;
 use iced::widget::{
-    button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Rule,
+    button, checkbox, column, container, horizontal_space, mouse_area, pick_list, row, scrollable,
+    text, text_input, Rule,
 };
-use iced::{Alignment, Application, Color, Command, Element, Length, Subscription, Theme};
+use iced::{window, Alignment, Application, Color, Command, Element, Length, Subscription, Theme};
 use ron::de::from_str;
 use ron::ser::{to_string_pretty, PrettyConfig};
 
@@ -43,6 +44,7 @@ pub struct PrintCountApp {
     enabled_targets: HashSet<String>,
     copy_status: Option<String>,
     mock_snmp_count: u32,
+    advanced_mode: bool,
     active_tab: Tab,
     printer_tab: PrinterTab,
     discovery_cidr: String,
@@ -72,11 +74,10 @@ pub struct PrintCountApp {
     snmp_config: SnmpConfig,
     counter_oids: CounterOidSet,
     oids_path: String,
-    oids_bw_text: String,
-    oids_color_text: String,
     oids_total_text: String,
     oids_status: Option<String>,
     oids_crawl_in_flight: bool,
+    recording_oids: RecordingOidSettings,
     recording_sessions: HashMap<PrinterId, RecordingSession>,
     pricing: PricingSettings,
 }
@@ -100,7 +101,8 @@ impl Application for PrintCountApp {
         let enabled_targets = known_targets.clone();
         let printers = seed_printers();
         let counter_oids = default_counter_oids();
-        let (oids_bw_text, oids_color_text, oids_total_text) = format_counter_oids(&counter_oids);
+        let oids_total_text = format_oid_list(&counter_oids.total);
+        let recording_oids = default_recording_oid_inputs();
         let (discovery_cidr, discovery_status) = match default_discovery_cidr() {
             Some(cidr) => (cidr, None),
             None => (
@@ -113,8 +115,7 @@ impl Application for PrintCountApp {
             poll_states.insert(record.id.clone(), SnmpPollStatus::Idle);
         }
 
-        (
-            Self {
+        let mut app = Self {
                 log_store: flags.log_store,
                 reload_handle: flags.reload_handle,
                 log_entries: Vec::new(),
@@ -123,8 +124,9 @@ impl Application for PrintCountApp {
                 enabled_targets,
                 copy_status: None,
                 mock_snmp_count: 0,
+                advanced_mode: false,
                 active_tab: Tab::Printers,
-                printer_tab: PrinterTab::Polling,
+                printer_tab: PrinterTab::Recording,
                 discovery_cidr,
                 discovery_community: "public".to_string(),
                 discovery_status,
@@ -152,16 +154,19 @@ impl Application for PrintCountApp {
                 snmp_config: SnmpConfig::default(),
                 counter_oids,
                 oids_path: "counter_oids.ron".to_string(),
-                oids_bw_text,
-                oids_color_text,
                 oids_total_text,
                 oids_status: None,
                 oids_crawl_in_flight: false,
+                recording_oids,
                 recording_sessions: HashMap::new(),
                 pricing: PricingSettings::default(),
-            },
-            Command::none(),
-        )
+            };
+        if !app.advanced_mode {
+            app.printers_path = "printers.ron".to_string();
+            app.load_printers_from_path();
+        }
+
+        (app, Command::none())
     }
 
     fn title(&self) -> String {
@@ -174,6 +179,21 @@ impl Application for PrintCountApp {
                 self.refresh_logs();
                 Command::none()
             }
+            Message::ToggleAdvancedMode => {
+                self.advanced_mode = !self.advanced_mode;
+                if !self.advanced_mode {
+                    self.active_tab = Tab::Printers;
+                    if !matches!(self.printer_tab, PrinterTab::Recording | PrinterTab::Pricing) {
+                        self.printer_tab = PrinterTab::Recording;
+                    }
+                    self.printers_path = "printers.ron".to_string();
+                    self.load_printers_from_path();
+                }
+                Command::none()
+            }
+            Message::DragWindow => window::drag(window::Id::MAIN),
+            Message::MinimizeWindow => window::minimize(window::Id::MAIN, true),
+            Message::CloseWindow => window::close(window::Id::MAIN),
             Message::LogLevelChanged(level) => {
                 self.log_level = level;
                 apply_log_level(&self.reload_handle, level);
@@ -248,11 +268,17 @@ impl Application for PrintCountApp {
             }
             Message::DiscoveryProbeFinished(result) => self.handle_discovery_result(result),
             Message::SelectTab(tab) => {
-                self.active_tab = tab;
+                if self.advanced_mode || tab == Tab::Printers {
+                    self.active_tab = tab;
+                }
                 Command::none()
             }
             Message::SelectPrinterTab(tab) => {
-                self.printer_tab = tab;
+                if self.advanced_mode
+                    || matches!(tab, PrinterTab::Recording | PrinterTab::Pricing)
+                {
+                    self.printer_tab = tab;
+                }
                 Command::none()
             }
             Message::SelectPrinter(printer_id) => {
@@ -319,14 +345,6 @@ impl Application for PrintCountApp {
                 self.oids_path = value;
                 Command::none()
             }
-            Message::OidsBwChanged(value) => {
-                self.oids_bw_text = value;
-                Command::none()
-            }
-            Message::OidsColorChanged(value) => {
-                self.oids_color_text = value;
-                Command::none()
-            }
             Message::OidsTotalChanged(value) => {
                 self.oids_total_text = value;
                 Command::none()
@@ -366,6 +384,22 @@ impl Application for PrintCountApp {
                         ));
                     }
                 }
+                Command::none()
+            }
+            Message::RecordingOidCopiesBwChanged(value) => {
+                self.recording_oids.copies_bw_input = value;
+                Command::none()
+            }
+            Message::RecordingOidCopiesColorChanged(value) => {
+                self.recording_oids.copies_color_input = value;
+                Command::none()
+            }
+            Message::RecordingOidPrintsBwChanged(value) => {
+                self.recording_oids.prints_bw_input = value;
+                Command::none()
+            }
+            Message::RecordingOidPrintsColorChanged(value) => {
+                self.recording_oids.prints_color_input = value;
                 Command::none()
             }
             Message::StartRecording => {
@@ -438,25 +472,25 @@ impl Application for PrintCountApp {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let header = row![
-            text("Ricoh PrintCount")
-                .size(28)
-                .style(theme::Text::Color(Color::from_rgb8(0x10, 0x1a, 0x24))),
-            text("debug-first")
-                .size(16)
-                .style(theme::Text::Color(Color::from_rgb8(0x5f, 0x6b, 0x7a))),
-        ]
-        .spacing(12)
-        .align_items(Alignment::Center);
+        let header = row![]
+            .spacing(12)
+            .align_items(Alignment::Center);
 
         let tabs = self.tab_bar();
 
-        let body = match self.active_tab {
-            Tab::Printers => self.printers_tab_view(),
-            Tab::Debug => self.debug_tab_view(),
+        let body = if self.advanced_mode {
+            match self.active_tab {
+                Tab::Printers => self.printers_tab_view(),
+                Tab::Debug => self.debug_tab_view(),
+            }
+        } else {
+            self.printers_tab_view()
         };
 
-        let content = column![header, tabs, body].spacing(20).padding(16);
+        let top_area = mouse_area(column![header, tabs].spacing(12))
+            .on_press(Message::DragWindow);
+
+        let content = column![top_area, body].spacing(20).padding(16);
 
         container(content)
             .width(Length::Fill)

@@ -1,12 +1,25 @@
 impl PrintCountApp {
     fn tab_bar(&self) -> Element<'_, Message> {
-        row![
-            self.tab_button(Tab::Printers, "Printers"),
-            self.tab_button(Tab::Debug, "Debug")
+        let mut left_tabs = row![self.tab_button(Tab::Printers, "Printers")]
+            .spacing(8)
+            .align_items(Alignment::Center);
+
+        if self.advanced_mode {
+            left_tabs = left_tabs.push(self.tab_button(Tab::Debug, "Debug"));
+        }
+
+        let right_controls = row![
+            self.advanced_toggle_button(),
+            self.window_button("-", Message::MinimizeWindow),
+            self.window_button("x", Message::CloseWindow),
         ]
-        .spacing(8)
-        .align_items(Alignment::Center)
-        .into()
+        .spacing(6)
+        .align_items(Alignment::Center);
+
+        row![left_tabs, horizontal_space(), right_controls]
+            .spacing(8)
+            .align_items(Alignment::Center)
+            .into()
     }
 
     fn tab_button(&self, tab: Tab, label: &str) -> Element<'_, Message> {
@@ -16,23 +29,67 @@ impl PrintCountApp {
             theme::Button::Secondary
         };
 
-        button(text(label))
+        self.top_bar_button(label, style, Message::SelectTab(tab))
+    }
+
+    fn advanced_toggle_button(&self) -> Element<'_, Message> {
+        let label = if self.advanced_mode {
+            "Advanced: On"
+        } else {
+            "Advanced: Off"
+        };
+        let style = if self.advanced_mode {
+            theme::Button::Primary
+        } else {
+            theme::Button::Secondary
+        };
+
+        self.top_bar_button(label, style, Message::ToggleAdvancedMode)
+    }
+
+    fn window_button(&self, label: &str, message: Message) -> Element<'_, Message> {
+        self.top_bar_button(label, theme::Button::Secondary, message)
+    }
+
+    fn top_bar_button(
+        &self,
+        label: &str,
+        style: theme::Button,
+        message: Message,
+    ) -> Element<'_, Message> {
+        let label = container(text(label).size(12))
+            .height(Length::Fixed(16.0))
+            .center_x()
+            .center_y();
+
+        button(label)
             .style(style)
-            .on_press(Message::SelectTab(tab))
+            .padding([4, 8])
+            .on_press(message)
             .into()
     }
 
     fn printer_tab_bar(&self) -> Element<'_, Message> {
-        row![
-            self.printer_tab_button(PrinterTab::Polling, "Polling"),
+        let mut tabs = row![
             self.printer_tab_button(PrinterTab::Recording, "Recording"),
-            self.printer_tab_button(PrinterTab::Pricing, "Pricing"),
-            self.printer_tab_button(PrinterTab::Oids, "SNMP OIDs"),
-            self.printer_tab_button(PrinterTab::AddPrinters, "Discovery + Manual")
+            self.printer_tab_button(PrinterTab::Pricing, "Pricing")
         ]
         .spacing(4)
-        .align_items(Alignment::Center)
-        .into()
+        .align_items(Alignment::Center);
+
+        if self.advanced_mode {
+            tabs = row![
+                self.printer_tab_button(PrinterTab::Polling, "Polling"),
+                self.printer_tab_button(PrinterTab::Recording, "Recording"),
+                self.printer_tab_button(PrinterTab::Pricing, "Pricing"),
+                self.printer_tab_button(PrinterTab::Oids, "SNMP OIDs"),
+                self.printer_tab_button(PrinterTab::AddPrinters, "Discovery + Manual")
+            ]
+            .spacing(4)
+            .align_items(Alignment::Center);
+        }
+
+        tabs.into()
     }
 
     fn printer_tab_button(&self, tab: PrinterTab, label: &str) -> Element<'_, Message> {
@@ -458,31 +515,45 @@ impl PrintCountApp {
                 .into()
         };
 
-        let content = column![
-            text(format!("Selected printer: {selected_label}"))
-                .size(12)
-                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-            text(format!("Recording printer ID: {selected_id_label}"))
-                .size(12)
-                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-            text(state_label)
-                .size(12)
-                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+        let mut content = column![].spacing(12);
+        if self.advanced_mode {
+            content = content.push(
+                text(format!("Selected printer: {selected_label}"))
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            );
+            content = content.push(
+                text(format!("Recording printer ID: {selected_id_label}"))
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            );
+            content = content.push(
+                text(state_label)
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            );
+        }
+        content = content.push(
             row![start_button, stop_button]
                 .spacing(8)
                 .align_items(Alignment::Center),
+        );
+        content = content.push(
             text(format!("Start snapshot: {start_time}"))
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+        );
+        content = content.push(
             text(format!("End snapshot: {end_time}"))
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+        );
+        content = content.push(
             text(format!("Status: {status}"))
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-            delta_section
-        ]
-        .spacing(12);
+        );
+        content = content.push(delta_section);
 
         container(content)
             .padding(12)
@@ -564,17 +635,27 @@ impl PrintCountApp {
             }
         }
 
-        let content = column![
-            self.printer_storage_controls_view(),
-            text("Printers")
-                .size(20)
-                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-            text("Discovery and manual entries appear here.")
-                .size(12)
-                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-            list_items,
-        ]
-        .spacing(12);
+        let content = if self.advanced_mode {
+            column![
+                self.printer_storage_controls_view(),
+                text("Printers")
+                    .size(20)
+                    .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+                text("Discovery and manual entries appear here.")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                list_items,
+            ]
+            .spacing(12)
+        } else {
+            column![
+                text("Printers")
+                    .size(20)
+                    .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+                list_items,
+            ]
+            .spacing(12)
+        };
 
         let scroll = scrollable(content)
             .height(Length::Fill)
@@ -660,27 +741,29 @@ impl PrintCountApp {
                 .spacing(4);
 
                 if let Some(record) = record {
-                    let address = record
-                        .snmp_address
-                        .as_ref()
-                        .map(|addr| addr.to_string())
-                        .unwrap_or_else(|| "Not set".to_string());
-                    let name = record.model.as_deref().unwrap_or("Unknown name");
-                    content = content.push(
-                        text(format!("ID: {}", record.id))
-                            .size(13)
-                            .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-                    );
-                    content = content.push(
-                        text(format!("Name: {}", name))
-                            .size(13)
-                            .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-                    );
-                    content = content.push(
-                        text(format!("Address: {}", address))
-                            .size(13)
-                            .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-                    );
+                    if self.advanced_mode {
+                        let address = record
+                            .snmp_address
+                            .as_ref()
+                            .map(|addr| addr.to_string())
+                            .unwrap_or_else(|| "Not set".to_string());
+                        let name = record.model.as_deref().unwrap_or("Unknown name");
+                        content = content.push(
+                            text(format!("ID: {}", record.id))
+                                .size(13)
+                                .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                        );
+                        content = content.push(
+                            text(format!("Name: {}", name))
+                                .size(13)
+                                .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                        );
+                        content = content.push(
+                            text(format!("Address: {}", address))
+                                .size(13)
+                                .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                        );
+                    }
                 } else if selection_missing {
                     content = content.push(
                         text("Selected printer not found.")
@@ -785,21 +868,33 @@ impl PrintCountApp {
         .spacing(8)
         .align_items(Alignment::Center);
 
-        let manual_inputs = column![
+        let counter_inputs = column![
             self.oids_input(
-                "B/W OIDs",
-                "1.3.6.1.2.1.43.10.2.1.4.1.1",
-                &self.oids_bw_text,
-                Message::OidsBwChanged,
+                "Copies B/W OIDs",
+                "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.18",
+                &self.recording_oids.copies_bw_input,
+                Message::RecordingOidCopiesBwChanged,
             ),
             self.oids_input(
-                "Color OIDs",
-                "1.3.6.1.2.1.43.10.2.1.4.1.2",
-                &self.oids_color_text,
-                Message::OidsColorChanged,
+                "Copies color OIDs",
+                "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.17",
+                &self.recording_oids.copies_color_input,
+                Message::RecordingOidCopiesColorChanged,
             ),
             self.oids_input(
-                "Total OIDs",
+                "Prints B/W OIDs",
+                "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.61",
+                &self.recording_oids.prints_bw_input,
+                Message::RecordingOidPrintsBwChanged,
+            ),
+            self.oids_input(
+                "Prints color OIDs",
+                "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.60",
+                &self.recording_oids.prints_color_input,
+                Message::RecordingOidPrintsColorChanged,
+            ),
+            self.oids_input(
+                "Total clicks OIDs",
                 "1.3.6.1.2.1.43.10.2.1.4.1.3",
                 &self.oids_total_text,
                 Message::OidsTotalChanged,
@@ -837,7 +932,7 @@ impl PrintCountApp {
                 path_controls,
             ]
             .spacing(4),
-            manual_inputs,
+            counter_inputs,
             actions,
             text(format!("Status: {status}"))
                 .size(12)
