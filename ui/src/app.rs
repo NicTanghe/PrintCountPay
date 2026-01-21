@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
+use std::path::Path;
 use std::time::Duration;
 
 use iced::alignment::Horizontal;
@@ -24,14 +25,19 @@ use crate::logging::{apply_log_level, LogEntry, LogLevel, LogStore, ReloadHandle
 mod constants;
 mod badge_overlay;
 mod helpers;
+mod profiles;
 mod styles;
 mod types;
 
-pub use types::{Flags, Message, Tab, PrinterTab, RecordingCategory, SnmpErrorInfo, DiscoveryProbeResult, DiscoveryOutcome};
+pub use types::{
+    DiscoveryOutcome, DiscoveryProbeResult, Flags, Message, PrinterTab, ProfileChoice,
+    RecordingCategory, SnmpErrorInfo, Tab,
+};
 
 use constants::*;
 use badge_overlay::BadgeOverlay;
 use helpers::*;
+use profiles::*;
 use styles::*;
 use types::*;
 
@@ -73,6 +79,10 @@ pub struct PrintCountApp {
     poll_export_status: Option<String>,
     snmp_config: SnmpConfig,
     counter_oids: CounterOidSet,
+    profiles_root: String,
+    profile_index: ProfileIndex,
+    profile_status: Option<String>,
+    active_profile: Option<ManufacturerProfile>,
     oids_path: String,
     oids_total_text: String,
     oids_status: Option<String>,
@@ -100,6 +110,9 @@ impl Application for PrintCountApp {
             default_targets.iter().map(|value| value.to_string()).collect();
         let enabled_targets = known_targets.clone();
         let printers = seed_printers();
+        let profiles_root = "profiles".to_string();
+        let (profile_index, profile_status) =
+            load_profile_index(Path::new(&profiles_root));
         let counter_oids = default_counter_oids();
         let oids_total_text = format_oid_list(&counter_oids.total);
         let recording_oids = default_recording_oid_inputs();
@@ -153,6 +166,10 @@ impl Application for PrintCountApp {
                 poll_export_status: None,
                 snmp_config: SnmpConfig::default(),
                 counter_oids,
+                profiles_root,
+                profile_index,
+                profile_status,
+                active_profile: None,
                 oids_path: "counter_oids.ron".to_string(),
                 oids_total_text,
                 oids_status: None,
@@ -282,8 +299,25 @@ impl Application for PrintCountApp {
                 Command::none()
             }
             Message::SelectPrinter(printer_id) => {
-                self.selected_printer = Some(printer_id);
+                self.selected_printer = Some(printer_id.clone());
+                self.apply_profile_for_printer(&printer_id, None);
                 self.poll_selected_printer()
+            }
+            Message::ProfileChoiceChanged(choice) => {
+                if let Some(printer_id) = self.selected_printer.clone() {
+                    if let Some(record) = self
+                        .printers
+                        .iter_mut()
+                        .find(|record| record.id == printer_id)
+                    {
+                        record.profile_id = match choice {
+                            ProfileChoice::Auto => None,
+                            ProfileChoice::Profile(id) => Some(id),
+                        };
+                    }
+                    self.apply_profile_for_printer(&printer_id, None);
+                }
+                Command::none()
             }
             Message::DeleteSelectedPrinter => {
                 self.delete_selected_printer();
@@ -304,6 +338,7 @@ impl Application for PrintCountApp {
                 let mut poll_name = None;
                 let mut allow_override = false;
                 let mut sys_descr = None;
+                let mut sys_object_id = None;
                 let state = match result {
                     Ok(response) => {
                         let printer_name = extract_text(
@@ -314,6 +349,10 @@ impl Application for PrintCountApp {
                             extract_text(&response.varbinds, &Oid::from_slice(&SYS_NAME_OID));
                         sys_descr =
                             extract_text(&response.varbinds, &Oid::from_slice(&SYS_DESCR_OID));
+                        sys_object_id = extract_text(
+                            &response.varbinds,
+                            &Oid::from_slice(&SYS_OBJECT_ID_OID),
+                        );
                         allow_override =
                             printer_name.is_some() || sys_name.is_some() || sys_descr.is_some();
                         poll_name = printer_name
@@ -338,7 +377,27 @@ impl Application for PrintCountApp {
                         sys_descr.as_deref(),
                     );
                 }
+                if let Some(record) = self
+                    .printers
+                    .iter_mut()
+                    .find(|record| record.id == printer_id)
+                {
+                    record.sys_object_id = sys_object_id;
+                    record.sys_descr = sys_descr.clone();
+                }
+                let printer_id_clone = printer_id.clone();
                 self.poll_states.insert(printer_id, state);
+                if self.selected_printer.as_ref() == Some(&printer_id_clone) {
+                    let needs_profile = self
+                        .printers
+                        .iter()
+                        .find(|record| record.id == printer_id_clone)
+                        .and_then(|record| record.profile_id.as_ref())
+                        .is_none();
+                    if needs_profile {
+                        self.apply_profile_for_printer(&printer_id_clone, sys_descr.as_deref());
+                    }
+                }
                 Command::none()
             }
             Message::OidsPathChanged(value) => {

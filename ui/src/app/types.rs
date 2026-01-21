@@ -44,6 +44,7 @@ pub enum Message {
     SelectTab(Tab),
     SelectPrinterTab(PrinterTab),
     SelectPrinter(PrinterId),
+    ProfileChoiceChanged(ProfileChoice),
     DeleteSelectedPrinter,
     PollSelectedSnmp,
     PollExportPathChanged(String),
@@ -256,4 +257,19 @@ pub enum DiscoveryOutcome {
 pub struct Flags {
     pub log_store: LogStore,
     pub reload_handle: ReloadHandle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProfileChoice {
+    Auto,
+    Profile(String),
+}
+
+impl std::fmt::Display for ProfileChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProfileChoice::Auto => write!(f, "Auto match"),
+            ProfileChoice::Profile(id) => write!(f, "{id}"),
+        }
+    }
 }

@@ -221,11 +221,13 @@ pub async fn probe_printer(
         id: PrinterId::new(format!("snmp-{}", address.host)),
         ip_or_hostname: Some(address.host.clone()),
         model,
+        sys_descr,
         sys_object_id: sys_object_id_text,
         snmp_address: Some(address),
         community,
         status: PrinterStatus::Online,
         last_seen,
+        profile_id: None,
     }))
 }
 

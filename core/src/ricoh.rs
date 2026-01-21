@@ -121,7 +121,7 @@ impl RicohProfile {
 
     pub fn from_printer(record: &PrinterRecord) -> Self {
         let sys_object_id = record.sys_object_id.as_deref();
-        let sys_descr = record.model.as_deref();
+        let sys_descr = record.sys_descr.as_deref().or(record.model.as_deref());
         Self::identify(sys_object_id, sys_descr)
     }
 }

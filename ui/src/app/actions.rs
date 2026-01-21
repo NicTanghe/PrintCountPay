@@ -434,6 +434,10 @@ impl PrintCountApp {
                 self.selected_printer = None;
             }
         }
+
+        if let Some(selected) = self.selected_printer.clone() {
+            self.apply_profile_for_printer(&selected, None);
+        }
     }
 
     fn poll_selected_printer(&mut self) -> Command<Message> {
@@ -462,9 +466,26 @@ impl PrintCountApp {
             return Command::none();
         };
 
+        let default_toner = default_toner_oids();
+        let extra_poll_oids = self
+            .active_profile
+            .as_ref()
+            .map(|profile| profile.extra_poll_oids.as_slice())
+            .unwrap_or(&[]);
+        let toner_oids = self
+            .active_profile
+            .as_ref()
+            .map(|profile| &profile.toner)
+            .unwrap_or(&default_toner);
+
         let mut request = SnmpRequest::new(
             address,
-            snmp_oids(&self.counter_oids, &self.recording_oids),
+            snmp_oids(
+                &self.counter_oids,
+                &self.recording_oids,
+                extra_poll_oids,
+                toner_oids,
+            ),
         );
         if let Some(community) = record.community.clone() {
             request = request.with_community(community);
@@ -707,6 +728,109 @@ impl PrintCountApp {
         }
     }
 
+    fn apply_profile_for_printer(
+        &mut self,
+        printer_id: &PrinterId,
+        sys_descr_override: Option<&str>,
+    ) {
+        let record_snapshot = self.printers.iter().find(|record| &record.id == printer_id);
+        let Some(record_snapshot) = record_snapshot else {
+            return;
+        };
+
+        let sys_object_id = record_snapshot.sys_object_id.clone();
+        let sys_descr = record_snapshot
+            .sys_descr
+            .as_deref()
+            .or(sys_descr_override);
+        let model = record_snapshot.model.clone();
+        let mut profile_id = record_snapshot.profile_id.clone();
+
+        if profile_id.is_none() {
+            profile_id = self.profile_index.match_profile_id(
+                sys_object_id.as_deref(),
+                sys_descr,
+                model.as_deref(),
+            );
+            if let Some(ref id) = profile_id {
+                if let Some(record) = self
+                    .printers
+                    .iter_mut()
+                    .find(|record| &record.id == printer_id)
+                {
+                    record.profile_id = Some(id.clone());
+                }
+            }
+        }
+
+        let Some(profile_id) = profile_id else {
+            if self.selected_printer.as_ref() == Some(printer_id) {
+                self.clear_active_profile();
+            }
+            return;
+        };
+
+        if self
+            .active_profile
+            .as_ref()
+            .map(|profile| profile.id())
+            == Some(profile_id.clone())
+        {
+            return;
+        }
+
+        let Some(profile) = self.profile_index.profile(&profile_id).cloned() else {
+            if self.selected_printer.as_ref() == Some(printer_id) {
+                self.clear_active_profile();
+                self.oids_status = Some(format!("Profile {profile_id} not found."));
+            }
+            return;
+        };
+
+        if self.selected_printer.as_ref() == Some(printer_id) {
+            self.apply_active_profile(profile);
+        }
+    }
+
+    fn apply_active_profile(&mut self, profile: ManufacturerProfile) {
+        self.recording_oids = recording_settings_from_profile(&profile.recording);
+        self.counter_oids = profile.counters.clone();
+        self.oids_total_text = format_oid_list(&self.counter_oids.total);
+        self.oids_path = profile_path(
+            Path::new(&self.profiles_root),
+            &profile.manufacturer,
+            &profile.firmware,
+        )
+        .to_string_lossy()
+        .to_string();
+        self.active_profile = Some(profile);
+    }
+
+    fn clear_active_profile(&mut self) {
+        self.active_profile = None;
+        self.counter_oids = default_counter_oids();
+        self.recording_oids = default_recording_oid_inputs();
+        self.oids_total_text = format_oid_list(&self.counter_oids.total);
+        self.oids_path = "counter_oids.ron".to_string();
+    }
+
+    fn sync_active_profile_from_inputs(&mut self) -> Result<(), String> {
+        let updated = {
+            let Some(profile) = self.active_profile.as_mut() else {
+                return Err("No active profile selected.".to_string());
+            };
+
+            let recording = recording_profile_from_settings(&self.recording_oids)?;
+            profile.recording = recording;
+            profile.counters = self.counter_oids.clone();
+            profile.clone()
+        };
+        self.profile_index
+            .profiles
+            .insert(updated.id(), updated);
+        Ok(())
+    }
+
     fn sync_oid_inputs(&mut self) {
         self.recording_oids = recording_oids_from_counter_set(&self.counter_oids);
         self.oids_total_text = format_oid_list(&self.counter_oids.total);
@@ -716,7 +840,11 @@ impl PrintCountApp {
         match self.parse_oid_inputs() {
             Ok(set) => {
                 self.counter_oids = set;
-                self.oids_status = Some("Applied OID mapping.".to_string());
+                if let Err(error) = self.sync_active_profile_from_inputs() {
+                    self.oids_status = Some(format!("Applied mapping (profile not synced: {error})"));
+                } else {
+                    self.oids_status = Some("Applied OID mapping.".to_string());
+                }
             }
             Err(error) => {
                 self.oids_status = Some(format!("Apply failed: {error}"));
@@ -752,16 +880,25 @@ impl PrintCountApp {
         }
 
         match fs::read_to_string(&path) {
-            Ok(contents) => match from_str::<CounterOidSet>(&contents) {
-                Ok(set) => {
-                    self.counter_oids = set;
-                    self.sync_oid_inputs();
-                    self.oids_status = Some(format!("Loaded OIDs from {path}."));
+            Ok(contents) => {
+                if let Ok(profile) = from_str::<ManufacturerProfile>(&contents) {
+                    let id = profile.id();
+                    self.profile_index.profiles.insert(id.clone(), profile.clone());
+                    self.apply_active_profile(profile);
+                    self.oids_status = Some(format!("Loaded profile {id} from {path}."));
+                    return;
                 }
-                Err(error) => {
-                    self.oids_status = Some(format!("Load failed: {error}"));
+                match from_str::<CounterOidSet>(&contents) {
+                    Ok(set) => {
+                        self.counter_oids = set;
+                        self.sync_oid_inputs();
+                        self.oids_status = Some(format!("Loaded OIDs from {path}."));
+                    }
+                    Err(error) => {
+                        self.oids_status = Some(format!("Load failed: {error}"));
+                    }
                 }
-            },
+            }
             Err(error) => {
                 self.oids_status = Some(format!("Load failed: {error}"));
             }
@@ -776,18 +913,27 @@ impl PrintCountApp {
         }
 
         let config = PrettyConfig::new();
-        match to_string_pretty(&self.counter_oids, config) {
-            Ok(contents) => match fs::write(&path, contents) {
-                Ok(()) => {
-                    self.oids_status = Some(format!("Saved OIDs to {path}."));
-                }
+        if let Err(error) = self.sync_active_profile_from_inputs() {
+            self.oids_status = Some(format!("Save failed: {error}"));
+            return;
+        }
+
+        if let Some(profile) = self.active_profile.clone() {
+            match to_string_pretty(&profile, config) {
+                Ok(contents) => match fs::write(&path, contents) {
+                    Ok(()) => {
+                        self.oids_status = Some(format!("Saved profile to {path}."));
+                    }
+                    Err(error) => {
+                        self.oids_status = Some(format!("Save failed: {error}"));
+                    }
+                },
                 Err(error) => {
                     self.oids_status = Some(format!("Save failed: {error}"));
                 }
-            },
-            Err(error) => {
-                self.oids_status = Some(format!("Save failed: {error}"));
             }
+        } else {
+            self.oids_status = Some("Save failed: no active profile.".to_string());
         }
     }
 

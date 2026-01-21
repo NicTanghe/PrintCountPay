@@ -10,10 +10,11 @@ use printcountpay_core::{
 use crate::app::constants::{
     PRT_GENERAL_PRINTER_NAME_OID, PRT_MARKER_LIFECOUNT_1, PRT_MARKER_LIFECOUNT_2,
     PRT_MARKER_LIFECOUNT_3, RICOH_BW_COPIER_COUNT_OID, RICOH_BW_PRINTER_COUNT_OID,
-    RICOH_COLOR_COPIER_COUNT_OID, RICOH_COLOR_PRINTER_COUNT_OID, RICOH_TONER_BLACK_OID,
-    RICOH_TONER_CYAN_OID, RICOH_TONER_MAGENTA_OID, RICOH_TONER_YELLOW_OID, SYS_DESCR_OID,
-    SYS_NAME_OID, SYS_OBJECT_ID_OID, SYS_UPTIME_OID,
+    RICOH_COLOR_COPIER_COUNT_OID, RICOH_COLOR_PRINTER_COUNT_OID, RICOH_COUNTER_VALUE_ROOT,
+    RICOH_TONER_BLACK_OID, RICOH_TONER_CYAN_OID, RICOH_TONER_MAGENTA_OID, RICOH_TONER_YELLOW_OID,
+    SYS_DESCR_OID, SYS_NAME_OID, SYS_OBJECT_ID_OID, SYS_UPTIME_OID,
 };
+use crate::app::profiles::{RecordingOidProfile, TonerOidProfile};
 use crate::app::types::{
     BwPricing, Message, PricingSettings, RecordingCategory, RecordingOidSettings, RecordingSession,
     RecordingSnapshot,
@@ -74,11 +75,28 @@ pub(crate) fn default_counter_oids() -> CounterOidSet {
 }
 
 pub(crate) fn default_recording_oid_inputs() -> RecordingOidSettings {
+    let copies_color_alt = ricoh_counter_oid(202);
+    let prints_color_alt = ricoh_counter_oid(402);
     RecordingOidSettings {
-        copies_bw_input: Oid::from_slice(&RICOH_BW_COPIER_COUNT_OID).to_string(),
-        copies_color_input: Oid::from_slice(&RICOH_COLOR_COPIER_COUNT_OID).to_string(),
-        prints_bw_input: Oid::from_slice(&RICOH_BW_PRINTER_COUNT_OID).to_string(),
-        prints_color_input: Oid::from_slice(&RICOH_COLOR_PRINTER_COUNT_OID).to_string(),
+        copies_bw_input: format_oid_list(&[Oid::from_slice(&RICOH_BW_COPIER_COUNT_OID)]),
+        copies_color_input: format_oid_list(&[
+            Oid::from_slice(&RICOH_COLOR_COPIER_COUNT_OID),
+            copies_color_alt,
+        ]),
+        prints_bw_input: format_oid_list(&[Oid::from_slice(&RICOH_BW_PRINTER_COUNT_OID)]),
+        prints_color_input: format_oid_list(&[
+            Oid::from_slice(&RICOH_COLOR_PRINTER_COUNT_OID),
+            prints_color_alt,
+        ]),
+    }
+}
+
+pub(crate) fn default_toner_oids() -> TonerOidProfile {
+    TonerOidProfile {
+        black: Some(Oid::from_slice(&RICOH_TONER_BLACK_OID)),
+        cyan: Some(Oid::from_slice(&RICOH_TONER_CYAN_OID)),
+        magenta: Some(Oid::from_slice(&RICOH_TONER_MAGENTA_OID)),
+        yellow: Some(Oid::from_slice(&RICOH_TONER_YELLOW_OID)),
     }
 }
 
@@ -89,6 +107,8 @@ pub(crate) fn recording_oids_from_counter_set(
     let mut prints_bw = Vec::new();
     let mut copies_color = Vec::new();
     let mut prints_color = Vec::new();
+    let copies_color_alt = ricoh_counter_oid(202);
+    let prints_color_alt = ricoh_counter_oid(402);
 
     for oid in &set.bw {
         if oid.as_slice() == RICOH_BW_COPIER_COUNT_OID.as_slice() {
@@ -101,9 +121,13 @@ pub(crate) fn recording_oids_from_counter_set(
     }
 
     for oid in &set.color {
-        if oid.as_slice() == RICOH_COLOR_COPIER_COUNT_OID.as_slice() {
+        if oid.as_slice() == RICOH_COLOR_COPIER_COUNT_OID.as_slice()
+            || oid.as_slice() == copies_color_alt.as_slice()
+        {
             copies_color.push(oid.clone());
-        } else if oid.as_slice() == RICOH_COLOR_PRINTER_COUNT_OID.as_slice() {
+        } else if oid.as_slice() == RICOH_COLOR_PRINTER_COUNT_OID.as_slice()
+            || oid.as_slice() == prints_color_alt.as_slice()
+        {
             prints_color.push(oid.clone());
         } else {
             copies_color.push(oid.clone());
@@ -118,11 +142,44 @@ pub(crate) fn recording_oids_from_counter_set(
     }
 }
 
+pub(crate) fn recording_settings_from_profile(
+    profile: &RecordingOidProfile,
+) -> RecordingOidSettings {
+    RecordingOidSettings {
+        copies_bw_input: format_oid_list(&profile.copies_bw),
+        copies_color_input: format_oid_list(&profile.copies_color),
+        prints_bw_input: format_oid_list(&profile.prints_bw),
+        prints_color_input: format_oid_list(&profile.prints_color),
+    }
+}
+
+pub(crate) fn recording_profile_from_settings(
+    settings: &RecordingOidSettings,
+) -> Result<RecordingOidProfile, String> {
+    Ok(RecordingOidProfile {
+        copies_bw: parse_oid_list(&settings.copies_bw_input)
+            .map_err(|error| format!("Copies B/W OIDs: {error}"))?,
+        copies_color: parse_oid_list(&settings.copies_color_input)
+            .map_err(|error| format!("Copies color OIDs: {error}"))?,
+        prints_bw: parse_oid_list(&settings.prints_bw_input)
+            .map_err(|error| format!("Prints B/W OIDs: {error}"))?,
+        prints_color: parse_oid_list(&settings.prints_color_input)
+            .map_err(|error| format!("Prints color OIDs: {error}"))?,
+    })
+}
+
 pub(crate) fn format_oid_list(oids: &[Oid]) -> String {
     oids.iter()
         .map(|oid| oid.to_string())
         .collect::<Vec<String>>()
         .join(", ")
+}
+
+pub(crate) fn ricoh_counter_oid(type_id: u32) -> Oid {
+    let mut parts = Vec::with_capacity(RICOH_COUNTER_VALUE_ROOT.len() + 1);
+    parts.extend_from_slice(&RICOH_COUNTER_VALUE_ROOT);
+    parts.push(type_id);
+    Oid(parts)
 }
 
 
@@ -358,6 +415,8 @@ pub(crate) fn counter_oids_from_walk(varbinds: &[SnmpVarBind]) -> CounterOidSet 
 pub(crate) fn snmp_oids(
     counter_oids: &CounterOidSet,
     recording_oids: &RecordingOidSettings,
+    extra_poll_oids: &[Oid],
+    toner_oids: &TonerOidProfile,
 ) -> Vec<Oid> {
     let mut oids = Vec::new();
     let mut seen = HashSet::new();
@@ -395,6 +454,10 @@ pub(crate) fn snmp_oids(
         }
     }
 
+    for oid in extra_poll_oids {
+        push(oid.clone());
+    }
+
     for oid in &counter_oids.bw {
         push(oid.clone());
     }
@@ -404,10 +467,19 @@ pub(crate) fn snmp_oids(
     for oid in &counter_oids.total {
         push(oid.clone());
     }
-    push(Oid::from_slice(&RICOH_TONER_BLACK_OID));
-    push(Oid::from_slice(&RICOH_TONER_CYAN_OID));
-    push(Oid::from_slice(&RICOH_TONER_MAGENTA_OID));
-    push(Oid::from_slice(&RICOH_TONER_YELLOW_OID));
+
+    if let Some(oid) = toner_oids.black.clone() {
+        push(oid);
+    }
+    if let Some(oid) = toner_oids.cyan.clone() {
+        push(oid);
+    }
+    if let Some(oid) = toner_oids.magenta.clone() {
+        push(oid);
+    }
+    if let Some(oid) = toner_oids.yellow.clone() {
+        push(oid);
+    }
 
     oids
 }

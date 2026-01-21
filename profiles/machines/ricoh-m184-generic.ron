@@ -1,0 +1,12 @@
+(
+    id: "ricoh-m184-generic",
+    manufacturer: "ricoh",
+    firmware: "m184",
+    matchers: [
+        (
+            sys_object_id_prefix: Some("1.3.6.1.4.1.367"),
+            sys_descr_contains: None,
+            model_contains: None,
+        ),
+    ],
+)

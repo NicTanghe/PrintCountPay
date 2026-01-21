@@ -73,12 +73,16 @@ pub struct PrinterRecord {
     pub id: PrinterId,
     pub ip_or_hostname: Option<String>,
     pub model: Option<String>,
+    #[serde(default)]
+    pub sys_descr: Option<String>,
     pub sys_object_id: Option<String>,
     pub snmp_address: Option<SnmpAddress>,
     pub community: Option<String>,
     #[serde(default)]
     pub status: PrinterStatus,
     pub last_seen: Option<EpochSeconds>,
+    #[serde(default)]
+    pub profile_id: Option<String>,
 }
 
 impl PrinterRecord {
@@ -87,11 +91,13 @@ impl PrinterRecord {
             id,
             ip_or_hostname: None,
             model: None,
+            sys_descr: None,
             sys_object_id: None,
             snmp_address: None,
             community: None,
             status: PrinterStatus::Unknown,
             last_seen: None,
+            profile_id: None,
         }
     }
 }
@@ -135,11 +141,13 @@ mod tests {
             id: PrinterId::new("printer-001"),
             ip_or_hostname: Some("192.168.1.5".to_string()),
             model: Some("Ricoh IM C3000".to_string()),
+            sys_descr: Some("Ricoh IM C3000".to_string()),
             sys_object_id: Some("1.3.6.1.4.1.367.3.2".to_string()),
             snmp_address: Some(SnmpAddress::with_default_port("192.168.1.5")),
             community: Some("public".to_string()),
             status: PrinterStatus::Online,
             last_seen: Some(1_725_000_000),
+            profile_id: Some("ricoh/m184".to_string()),
         };
 
         let snapshot = CounterSnapshot {

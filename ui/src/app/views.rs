@@ -748,6 +748,14 @@ impl PrintCountApp {
                             .map(|addr| addr.to_string())
                             .unwrap_or_else(|| "Not set".to_string());
                         let name = record.model.as_deref().unwrap_or("Unknown name");
+                        let profile_choices = self.profile_choices();
+                        let selected_profile = self.profile_choice_for_record(record);
+                        let profile_picker = pick_list(
+                            profile_choices,
+                            Some(selected_profile),
+                            Message::ProfileChoiceChanged,
+                        )
+                        .placeholder("Auto match");
                         content = content.push(
                             text(format!("ID: {}", record.id))
                                 .size(13)
@@ -763,6 +771,23 @@ impl PrintCountApp {
                                 .size(13)
                                 .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                         );
+                        content = content.push(
+                            row![
+                                text("Profile")
+                                    .size(12)
+                                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                                profile_picker
+                            ]
+                            .spacing(8)
+                            .align_items(Alignment::Center),
+                        );
+                        if let Some(status) = self.profile_status.as_deref() {
+                            content = content.push(
+                                text(format!("Profile status: {status}"))
+                                    .size(12)
+                                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                            );
+                        }
                     }
                 } else if selection_missing {
                     content = content.push(
@@ -871,25 +896,25 @@ impl PrintCountApp {
         let counter_inputs = column![
             self.oids_input(
                 "Copies B/W OIDs",
-                "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.18",
+                "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.201",
                 &self.recording_oids.copies_bw_input,
                 Message::RecordingOidCopiesBwChanged,
             ),
             self.oids_input(
                 "Copies color OIDs",
-                "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.17",
+                "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.203",
                 &self.recording_oids.copies_color_input,
                 Message::RecordingOidCopiesColorChanged,
             ),
             self.oids_input(
                 "Prints B/W OIDs",
-                "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.61",
+                "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.401",
                 &self.recording_oids.prints_bw_input,
                 Message::RecordingOidPrintsBwChanged,
             ),
             self.oids_input(
                 "Prints color OIDs",
-                "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.60",
+                "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.403",
                 &self.recording_oids.prints_color_input,
                 Message::RecordingOidPrintsColorChanged,
             ),
@@ -919,14 +944,14 @@ impl PrintCountApp {
             .align_items(Alignment::Center);
 
         let content = column![
-            text("Counter OID mapping")
+            text("Profile OID mapping")
                 .size(18)
                 .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
             text("Enter dotted OIDs separated by commas or spaces.")
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
             column![
-                text("RON path")
+                text("Profile file path")
                     .size(12)
                     .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                 path_controls,
@@ -1103,22 +1128,31 @@ impl PrintCountApp {
                 varbinds,
             } => {
                 let resolution = resolve_counters(*received_at, &self.counter_oids, varbinds);
+                let default_toner = default_toner_oids();
+                let toner = self
+                    .active_profile
+                    .as_ref()
+                    .map(|profile| &profile.toner)
+                    .unwrap_or(&default_toner);
+                let show_ricoh_table = self
+                    .active_profile
+                    .as_ref()
+                    .and_then(|profile| profile.counter_table.as_deref())
+                    .map(|table| table == "ricoh-m184")
+                    .unwrap_or(false);
                 let mut lines = column![
                     text("Printer counts")
                         .size(13)
                         .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                     self.value_line(
                         "B/W printer",
-                        extract_value_string(
-                            varbinds,
-                            &Oid::from_slice(&RICOH_BW_PRINTER_COUNT_OID),
-                        ),
+                        self.value_from_oid_input(varbinds, &self.recording_oids.prints_bw_input),
                     ),
                     self.value_line(
                         "Color printer",
-                        extract_value_string(
+                        self.value_from_oid_input(
                             varbinds,
-                            &Oid::from_slice(&RICOH_COLOR_PRINTER_COUNT_OID),
+                            &self.recording_oids.prints_color_input,
                         ),
                     ),
                     text("Copier counts")
@@ -1126,16 +1160,13 @@ impl PrintCountApp {
                         .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                     self.value_line(
                         "B/W copier",
-                        extract_value_string(
-                            varbinds,
-                            &Oid::from_slice(&RICOH_BW_COPIER_COUNT_OID),
-                        ),
+                        self.value_from_oid_input(varbinds, &self.recording_oids.copies_bw_input),
                     ),
                     self.value_line(
                         "Color copier",
-                        extract_value_string(
+                        self.value_from_oid_input(
                             varbinds,
-                            &Oid::from_slice(&RICOH_COLOR_COPIER_COUNT_OID),
+                            &self.recording_oids.copies_color_input,
                         ),
                     ),
                     text("Click totals")
@@ -1149,34 +1180,44 @@ impl PrintCountApp {
                         .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                     self.value_line(
                         "Black",
-                        extract_value_string(
-                            varbinds,
-                            &Oid::from_slice(&RICOH_TONER_BLACK_OID),
-                        ),
+                        self.toner_value(varbinds, toner.black.as_ref()),
                     ),
                     self.value_line(
                         "Cyan",
-                        extract_value_string(
-                            varbinds,
-                            &Oid::from_slice(&RICOH_TONER_CYAN_OID),
-                        ),
+                        self.toner_value(varbinds, toner.cyan.as_ref()),
                     ),
                     self.value_line(
                         "Magenta",
-                        extract_value_string(
-                            varbinds,
-                            &Oid::from_slice(&RICOH_TONER_MAGENTA_OID),
-                        ),
+                        self.toner_value(varbinds, toner.magenta.as_ref()),
                     ),
                     self.value_line(
                         "Yellow",
-                        extract_value_string(
-                            varbinds,
-                            &Oid::from_slice(&RICOH_TONER_YELLOW_OID),
-                        ),
+                        self.toner_value(varbinds, toner.yellow.as_ref()),
                     ),
                 ]
                 .spacing(4);
+
+                if show_ricoh_table {
+                    lines = lines.push(
+                        text("Ricoh counter table (M184)")
+                            .size(13)
+                            .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                    );
+
+                    let mut table_rows = column![].spacing(4);
+                    for entry in &RICOH_COUNTER_TABLE {
+                        let label = format!(
+                            "{} (type {}, {})",
+                            entry.label, entry.type_id, entry.unit
+                        );
+                        table_rows = table_rows.push(self.value_line_owned(
+                            label,
+                            extract_value_string(varbinds, &ricoh_counter_oid(entry.type_id)),
+                        ));
+                    }
+                    let table = scrollable(table_rows).height(Length::Fixed(240.0));
+                    lines = lines.push(table);
+                }
 
                 if self.counter_oids_empty() {
                     lines = lines.push(
@@ -1315,6 +1356,59 @@ impl PrintCountApp {
             .spacing(12)
             .align_items(Alignment::Center)
             .into()
+    }
+
+    fn value_line_owned(&self, label: String, value: Option<String>) -> Element<'_, Message> {
+        let value_text = value.unwrap_or_else(|| "N/A".to_string());
+
+        let label = text(label)
+            .size(13)
+            .width(Length::Fill)
+            .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a)));
+        let value = text(value_text)
+            .size(13)
+            .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37)));
+
+        row![label, value]
+            .spacing(12)
+            .align_items(Alignment::Center)
+            .into()
+    }
+
+    fn profile_choices(&self) -> Vec<ProfileChoice> {
+        let mut choices = vec![ProfileChoice::Auto];
+        choices.extend(
+            self.profile_index
+                .profile_ids()
+                .into_iter()
+                .map(ProfileChoice::Profile),
+        );
+        choices
+    }
+
+    fn profile_choice_for_record(&self, record: &PrinterRecord) -> ProfileChoice {
+        match record.profile_id.as_deref() {
+            Some(id) => ProfileChoice::Profile(id.to_string()),
+            None => ProfileChoice::Auto,
+        }
+    }
+
+    fn value_from_oid_input(
+        &self,
+        varbinds: &[SnmpVarBind],
+        input: &str,
+    ) -> Option<String> {
+        let oids = parse_oid_list(input).ok()?;
+        oids.iter()
+            .find_map(|oid| extract_value_string(varbinds, oid))
+    }
+
+    fn toner_value(
+        &self,
+        varbinds: &[SnmpVarBind],
+        oid: Option<&Oid>,
+    ) -> Option<String> {
+        oid.and_then(|oid| extract_value_string(varbinds, oid))
     }
 
     fn recording_table_header(&self) -> Element<'_, Message> {
