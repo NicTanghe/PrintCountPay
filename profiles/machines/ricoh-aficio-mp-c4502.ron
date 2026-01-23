@@ -1,7 +1,7 @@
 (
     id: "ricoh-aficio-mp-c4502",
     manufacturer: "ricoh",
-    firmware: "m183",
+    firmware: "m183.mib",
     matchers: [
         (
             sys_object_id_prefix: Some("1.3.6.1.4.1.367"),

@@ -24,6 +24,12 @@ pub(crate) struct TonerOidProfile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct OidLabel {
+    pub(crate) oid: Oid,
+    pub(crate) label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ManufacturerProfile {
     pub(crate) manufacturer: String,
     pub(crate) firmware: String,
@@ -32,7 +38,7 @@ pub(crate) struct ManufacturerProfile {
     #[serde(default)]
     pub(crate) toner: TonerOidProfile,
     #[serde(default)]
-    pub(crate) extra_poll_oids: Vec<Oid>,
+    pub(crate) extra_poll_labels: Vec<OidLabel>,
     #[serde(default)]
     pub(crate) counter_table: Option<String>,
 }

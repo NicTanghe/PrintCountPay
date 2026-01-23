@@ -866,9 +866,13 @@ impl PrintCountApp {
             self.counters_view(state, in_flight),
             self.poll_export_controls_view(),
         ]
-        .spacing(8);
+        .spacing(8)
+        .width(Length::Fill);
 
-        content.into()
+        scrollable(container(content).padding([0, 24, 0, 0]))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
     fn printer_oids_view(&self, record: &PrinterRecord) -> Element<'_, Message> {
@@ -1038,6 +1042,7 @@ impl PrintCountApp {
             } => {
                 let total_varbinds = varbinds.len();
                 let shown_varbinds = total_varbinds.min(MAX_VARBINDS_SHOWN);
+                let label_map = self.poll_label_map();
                 let mut rows = column![].spacing(4);
                 if varbinds.is_empty() {
                     rows = rows.push(
@@ -1047,10 +1052,12 @@ impl PrintCountApp {
                     );
                 } else {
                     for varbind in varbinds.iter().take(MAX_VARBINDS_SHOWN) {
+                        let label = label_map
+                            .get(&varbind.oid)
+                            .cloned()
+                            .unwrap_or_else(|| varbind.oid.to_string());
                         rows = rows.push(
-                            text(format!("{} = {}", varbind.oid, varbind.value))
-                                .size(13)
-                                .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37))),
+                            self.poll_varbind_row(&label, &varbind.value.to_string()),
                         );
                     }
                     if total_varbinds > shown_varbinds {
@@ -1064,15 +1071,11 @@ impl PrintCountApp {
                     }
                 }
 
-                let list = scrollable(rows)
-                    .height(Length::Fill)
-                    .width(Length::Fill);
-
                 let body = column![
                     text(format!("Varbinds: {shown_varbinds}/{total_varbinds}"))
                         .size(12)
                         .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-                    list
+                    rows
                 ]
                 .spacing(6)
                 .into();
@@ -1111,6 +1114,106 @@ impl PrintCountApp {
         column![header, body].spacing(6).into()
     }
 
+    fn poll_varbind_row(&self, label: &str, value: &str) -> Element<'_, Message> {
+        let label = text(label)
+            .size(13)
+            .width(Length::Fill)
+            .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a)));
+        let value = text(value)
+            .size(13)
+            .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37)));
+
+        row![label, value]
+            .spacing(12)
+            .align_items(Alignment::Center)
+            .into()
+    }
+
+    fn poll_label_map(&self) -> std::collections::HashMap<Oid, String> {
+        let mut map = std::collections::HashMap::new();
+        let mut insert_label = |oid: Oid, label: &str| {
+            map.entry(oid).or_insert_with(|| label.to_string());
+        };
+
+        insert_label(Oid::from_slice(&SYS_DESCR_OID), "System: Description");
+        insert_label(Oid::from_slice(&SYS_OBJECT_ID_OID), "System: Object ID");
+        insert_label(Oid::from_slice(&SYS_NAME_OID), "System: Name");
+        insert_label(Oid::from_slice(&SYS_UPTIME_OID), "System: Uptime");
+        insert_label(
+            Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID),
+            "Printer: Name",
+        );
+
+        if self
+            .active_profile
+            .as_ref()
+            .and_then(|profile| profile.counter_table.as_deref())
+            == Some("ricoh-m184")
+        {
+            for entry in &RICOH_COUNTER_TABLE {
+                insert_label(ricoh_counter_oid(entry.type_id), entry.label);
+            }
+        }
+
+        if let Ok(oids) = parse_oid_list(&self.recording_oids.copies_bw_input) {
+            for oid in oids {
+                insert_label(oid, "Recording: Copies B/W");
+            }
+        }
+        if let Ok(oids) = parse_oid_list(&self.recording_oids.copies_color_input) {
+            for oid in oids {
+                insert_label(oid, "Recording: Copies Color");
+            }
+        }
+        if let Ok(oids) = parse_oid_list(&self.recording_oids.prints_bw_input) {
+            for oid in oids {
+                insert_label(oid, "Recording: Prints B/W");
+            }
+        }
+        if let Ok(oids) = parse_oid_list(&self.recording_oids.prints_color_input) {
+            for oid in oids {
+                insert_label(oid, "Recording: Prints Color");
+            }
+        }
+
+        for oid in &self.counter_oids.bw {
+            insert_label(oid.clone(), "Clicks: B/W");
+        }
+        for oid in &self.counter_oids.color {
+            insert_label(oid.clone(), "Clicks: Color");
+        }
+        for oid in &self.counter_oids.total {
+            insert_label(oid.clone(), "Clicks: Total");
+        }
+
+        let default_toner = default_toner_oids();
+        let toner = self
+            .active_profile
+            .as_ref()
+            .map(|profile| &profile.toner)
+            .unwrap_or(&default_toner);
+        if let Some(oid) = toner.black.as_ref() {
+            insert_label(oid.clone(), "Toner: Black");
+        }
+        if let Some(oid) = toner.cyan.as_ref() {
+            insert_label(oid.clone(), "Toner: Cyan");
+        }
+        if let Some(oid) = toner.magenta.as_ref() {
+            insert_label(oid.clone(), "Toner: Magenta");
+        }
+        if let Some(oid) = toner.yellow.as_ref() {
+            insert_label(oid.clone(), "Toner: Yellow");
+        }
+
+        if let Some(profile) = self.active_profile.as_ref() {
+            for entry in &profile.extra_poll_labels {
+                map.insert(entry.oid.clone(), entry.label.clone());
+            }
+        }
+
+        map
+    }
+
     fn counters_view(&self, state: &SnmpPollStatus, in_flight: bool) -> Element<'_, Message> {
         let header = row![
             text("Counters")
@@ -1134,12 +1237,13 @@ impl PrintCountApp {
                     .as_ref()
                     .map(|profile| &profile.toner)
                     .unwrap_or(&default_toner);
-                let show_ricoh_table = self
-                    .active_profile
-                    .as_ref()
-                    .and_then(|profile| profile.counter_table.as_deref())
-                    .map(|table| table == "ricoh-m184")
-                    .unwrap_or(false);
+                let ricoh_table_label = self.active_profile.as_ref().and_then(|profile| {
+                    if profile.counter_table.as_deref() == Some("ricoh-m184") {
+                        Some(format!("Ricoh counter table ({})", profile.firmware))
+                    } else {
+                        None
+                    }
+                });
                 let mut lines = column![
                     text("Printer counts")
                         .size(13)
@@ -1197,9 +1301,9 @@ impl PrintCountApp {
                 ]
                 .spacing(4);
 
-                if show_ricoh_table {
+                if let Some(table_label) = ricoh_table_label {
                     lines = lines.push(
-                        text("Ricoh counter table (M184)")
+                        text(table_label)
                             .size(13)
                             .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                     );
@@ -1215,8 +1319,7 @@ impl PrintCountApp {
                             extract_value_string(varbinds, &ricoh_counter_oid(entry.type_id)),
                         ));
                     }
-                    let table = scrollable(table_rows).height(Length::Fixed(240.0));
-                    lines = lines.push(table);
+                    lines = lines.push(table_rows);
                 }
 
                 if self.counter_oids_empty() {

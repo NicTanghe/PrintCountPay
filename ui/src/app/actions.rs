@@ -467,11 +467,22 @@ impl PrintCountApp {
         };
 
         let default_toner = default_toner_oids();
-        let extra_poll_oids = self
-            .active_profile
-            .as_ref()
-            .map(|profile| profile.extra_poll_oids.as_slice())
-            .unwrap_or(&[]);
+        let mut extra_poll = Vec::new();
+        if let Some(profile) = self.active_profile.as_ref() {
+            extra_poll.extend(
+                profile
+                    .extra_poll_labels
+                    .iter()
+                    .map(|entry| entry.oid.clone()),
+            );
+            if profile.counter_table.as_deref() == Some("ricoh-m184") {
+                extra_poll.extend(
+                    RICOH_COUNTER_TABLE
+                        .iter()
+                        .map(|entry| ricoh_counter_oid(entry.type_id)),
+                );
+            }
+        }
         let toner_oids = self
             .active_profile
             .as_ref()
@@ -483,7 +494,7 @@ impl PrintCountApp {
             snmp_oids(
                 &self.counter_oids,
                 &self.recording_oids,
-                extra_poll_oids,
+                extra_poll.as_slice(),
                 toner_oids,
             ),
         );
@@ -733,18 +744,34 @@ impl PrintCountApp {
         printer_id: &PrinterId,
         sys_descr_override: Option<&str>,
     ) {
-        let record_snapshot = self.printers.iter().find(|record| &record.id == printer_id);
-        let Some(record_snapshot) = record_snapshot else {
-            return;
-        };
+        let (sys_object_id, sys_descr, model, mut profile_id) = {
+            let record_snapshot = self.printers.iter().find(|record| &record.id == printer_id);
+            let Some(record_snapshot) = record_snapshot else {
+                return;
+            };
 
-        let sys_object_id = record_snapshot.sys_object_id.clone();
-        let sys_descr = record_snapshot
-            .sys_descr
-            .as_deref()
-            .or(sys_descr_override);
-        let model = record_snapshot.model.clone();
-        let mut profile_id = record_snapshot.profile_id.clone();
+            (
+                record_snapshot.sys_object_id.clone(),
+                record_snapshot.sys_descr.clone(),
+                record_snapshot.model.clone(),
+                record_snapshot.profile_id.clone(),
+            )
+        };
+        let sys_descr = sys_descr.as_deref().or(sys_descr_override);
+        if let Some(ref id) = profile_id {
+            if self.profile_index.profile(id).is_none() {
+                if let Some(migrated) = self.migrate_profile_id(id) {
+                    profile_id = Some(migrated.clone());
+                    if let Some(record) = self
+                        .printers
+                        .iter_mut()
+                        .find(|record| &record.id == printer_id)
+                    {
+                        record.profile_id = Some(migrated);
+                    }
+                }
+            }
+        }
 
         if profile_id.is_none() {
             profile_id = self.profile_index.match_profile_id(
@@ -790,6 +817,17 @@ impl PrintCountApp {
         if self.selected_printer.as_ref() == Some(printer_id) {
             self.apply_active_profile(profile);
         }
+    }
+
+    fn migrate_profile_id(&self, profile_id: &str) -> Option<String> {
+        let (manufacturer, firmware) = profile_id.split_once('/')?;
+        if firmware.ends_with(".mib") {
+            return None;
+        }
+        let candidate = format!("{manufacturer}/{firmware}.mib");
+        self.profile_index
+            .profile(&candidate)
+            .map(|_| candidate)
     }
 
     fn apply_active_profile(&mut self, profile: ManufacturerProfile) {

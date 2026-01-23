@@ -147,7 +147,7 @@ mod tests {
             community: Some("public".to_string()),
             status: PrinterStatus::Online,
             last_seen: Some(1_725_000_000),
-            profile_id: Some("ricoh/m184".to_string()),
+            profile_id: Some("ricoh/m184.mib".to_string()),
         };
 
         let snapshot = CounterSnapshot {
