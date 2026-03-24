@@ -820,27 +820,16 @@ impl PrintCountApp {
     }
 
     fn migrate_profile_id(&self, profile_id: &str) -> Option<String> {
-        let (manufacturer, firmware) = profile_id.split_once('/')?;
-        if firmware.ends_with(".mib") {
-            return None;
-        }
-        let candidate = format!("{manufacturer}/{firmware}.mib");
-        self.profile_index
-            .profile(&candidate)
-            .map(|_| candidate)
+        self.profile_index.migrate_profile_id(profile_id)
     }
 
     fn apply_active_profile(&mut self, profile: ManufacturerProfile) {
         self.recording_oids = recording_settings_from_profile(&profile.recording);
         self.counter_oids = profile.counters.clone();
         self.oids_total_text = format_oid_list(&self.counter_oids.total);
-        self.oids_path = profile_path(
-            Path::new(&self.profiles_root),
-            &profile.manufacturer,
-            &profile.firmware,
-        )
-        .to_string_lossy()
-        .to_string();
+        self.oids_path = profile_path(Path::new(&self.profiles_root), &profile)
+            .to_string_lossy()
+            .to_string();
         self.active_profile = Some(profile);
     }
 
@@ -863,9 +852,7 @@ impl PrintCountApp {
             profile.counters = self.counter_oids.clone();
             profile.clone()
         };
-        self.profile_index
-            .profiles
-            .insert(updated.id(), updated);
+        self.profile_index.upsert_profile(updated);
         Ok(())
     }
 
@@ -919,9 +906,10 @@ impl PrintCountApp {
 
         match fs::read_to_string(&path) {
             Ok(contents) => {
-                if let Ok(profile) = from_str::<ManufacturerProfile>(&contents) {
+                if let Ok(mut profile) = from_str::<ManufacturerProfile>(&contents) {
+                    profile.source_path = Some(Path::new(&path).to_path_buf());
                     let id = profile.id();
-                    self.profile_index.profiles.insert(id.clone(), profile.clone());
+                    self.profile_index.upsert_profile(profile.clone());
                     self.apply_active_profile(profile);
                     self.oids_status = Some(format!("Loaded profile {id} from {path}."));
                     return;

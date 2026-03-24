@@ -2,18 +2,15 @@ use iced::advanced::layout::{self, Layout};
 use iced::advanced::mouse;
 use iced::advanced::overlay;
 use iced::advanced::renderer;
-use iced::advanced::text;
 use iced::advanced::widget::{self, Widget};
 use iced::advanced::{Clipboard, Shell};
-use iced::event::{self, Event};
+use iced::event::Event;
 use iced::{Element, Length, Pixels, Point, Rectangle, Size, Vector};
-use iced::widget::container;
 
 #[allow(missing_debug_implementations)]
 pub(crate) struct BadgeOverlay<'a, Message, Theme, Renderer>
 where
-    Theme: container::StyleSheet + widget::text::StyleSheet,
-    Renderer: text::Renderer,
+    Renderer: iced::advanced::Renderer,
 {
     content: Element<'a, Message, Theme, Renderer>,
     badge: Element<'a, Message, Theme, Renderer>,
@@ -23,8 +20,7 @@ where
 
 impl<'a, Message, Theme, Renderer> BadgeOverlay<'a, Message, Theme, Renderer>
 where
-    Theme: container::StyleSheet + widget::text::StyleSheet,
-    Renderer: text::Renderer,
+    Renderer: iced::advanced::Renderer,
 {
     const DEFAULT_MARGIN: f32 = 6.0;
 
@@ -50,8 +46,7 @@ where
 impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
     for BadgeOverlay<'a, Message, Theme, Renderer>
 where
-    Theme: container::StyleSheet + widget::text::StyleSheet,
-    Renderer: text::Renderer,
+    Renderer: iced::advanced::Renderer,
 {
     fn children(&self) -> Vec<widget::Tree> {
         vec![
@@ -76,28 +71,28 @@ where
     }
 
     fn layout(
-        &self,
+        &mut self,
         tree: &mut widget::Tree,
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
         self.content
-            .as_widget()
+            .as_widget_mut()
             .layout(&mut tree.children[0], renderer, limits)
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         tree: &mut widget::Tree,
-        event: Event,
+        event: &Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
-    ) -> event::Status {
-        self.content.as_widget_mut().on_event(
+    ) {
+        self.content.as_widget_mut().update(
             &mut tree.children[0],
             event,
             layout,
@@ -106,7 +101,7 @@ where
             clipboard,
             shell,
             viewport,
-        )
+        );
     }
 
     fn mouse_interaction(
@@ -150,8 +145,9 @@ where
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut widget::Tree,
-        layout: Layout<'_>,
+        layout: Layout<'b>,
         renderer: &Renderer,
+        viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
         let mut children = tree.children.iter_mut();
@@ -160,6 +156,7 @@ where
             children.next().unwrap(),
             layout,
             renderer,
+            viewport,
             translation,
         );
 
@@ -167,7 +164,7 @@ where
             Some(overlay::Element::new(Box::new(BadgeOverlayLayer {
                 position: layout.position() + translation,
                 content_bounds: layout.bounds(),
-                badge: &self.badge,
+                badge: &mut self.badge,
                 state: children.next().unwrap(),
                 margin: self.margin,
             })))
@@ -192,8 +189,8 @@ impl<'a, Message, Theme, Renderer> From<BadgeOverlay<'a, Message, Theme, Rendere
     for Element<'a, Message, Theme, Renderer>
 where
     Message: 'a,
-    Theme: container::StyleSheet + widget::text::StyleSheet + 'a,
-    Renderer: text::Renderer + 'a,
+    Theme: 'a,
+    Renderer: iced::advanced::Renderer + 'a,
 {
     fn from(
         overlay: BadgeOverlay<'a, Message, Theme, Renderer>,
@@ -204,12 +201,11 @@ where
 
 struct BadgeOverlayLayer<'a, 'b, Message, Theme, Renderer>
 where
-    Theme: container::StyleSheet + widget::text::StyleSheet,
-    Renderer: text::Renderer,
+    Renderer: iced::advanced::Renderer,
 {
     position: Point,
     content_bounds: Rectangle,
-    badge: &'b Element<'a, Message, Theme, Renderer>,
+    badge: &'b mut Element<'a, Message, Theme, Renderer>,
     state: &'b mut widget::Tree,
     margin: f32,
 }
@@ -218,11 +214,10 @@ impl<'a, 'b, Message, Theme, Renderer>
     overlay::Overlay<Message, Theme, Renderer>
     for BadgeOverlayLayer<'a, 'b, Message, Theme, Renderer>
 where
-    Theme: container::StyleSheet + widget::text::StyleSheet,
-    Renderer: text::Renderer,
+    Renderer: iced::advanced::Renderer,
 {
     fn layout(&mut self, renderer: &Renderer, bounds: Size) -> layout::Node {
-        let badge_layout = self.badge.as_widget().layout(
+        let badge_layout = self.badge.as_widget_mut().layout(
             self.state,
             renderer,
             &layout::Limits::new(Size::ZERO, bounds),
@@ -265,16 +260,8 @@ where
             inherited_style,
             layout.children().next().unwrap(),
             cursor,
-            &Rectangle::with_size(Size::INFINITY),
+            &Rectangle::with_size(Size::INFINITE),
         );
     }
 
-    fn is_over(
-        &self,
-        _layout: Layout<'_>,
-        _renderer: &Renderer,
-        _cursor_position: Point,
-    ) -> bool {
-        false
-    }
 }

@@ -30,8 +30,11 @@ pub(crate) struct OidLabel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct ManufacturerProfile {
+pub(crate) struct MachineProfile {
+    pub(crate) id: String,
+    #[serde(default)]
     pub(crate) manufacturer: String,
+    #[serde(default)]
     pub(crate) firmware: String,
     pub(crate) recording: RecordingOidProfile,
     pub(crate) counters: CounterOidSet,
@@ -41,21 +44,35 @@ pub(crate) struct ManufacturerProfile {
     pub(crate) extra_poll_labels: Vec<OidLabel>,
     #[serde(default)]
     pub(crate) counter_table: Option<String>,
+    #[serde(default)]
+    pub(crate) legacy_profile_ids: Vec<String>,
+    #[serde(default)]
+    pub(crate) matchers: Vec<MachineMatcher>,
+    #[serde(skip)]
+    pub(crate) source_path: Option<PathBuf>,
 }
 
-impl ManufacturerProfile {
+impl MachineProfile {
     pub(crate) fn id(&self) -> String {
-        format!("{}/{}", self.manufacturer, self.firmware)
+        self.id.clone()
+    }
+
+    pub(crate) fn legacy_profile_ids(&self) -> Vec<String> {
+        let mut ids = self.legacy_profile_ids.clone();
+        if !self.manufacturer.trim().is_empty() && !self.firmware.trim().is_empty() {
+            ids.push(format!("{}/{}", self.manufacturer, self.firmware));
+        }
+        ids.sort();
+        ids.dedup();
+        ids
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct MachineProfile {
-    pub(crate) id: String,
-    pub(crate) manufacturer: String,
-    pub(crate) firmware: String,
-    #[serde(default)]
-    pub(crate) matchers: Vec<MachineMatcher>,
+pub(crate) type ManufacturerProfile = MachineProfile;
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ProfileAliases {
+    legacy_to_current: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,6 +135,7 @@ impl MachineMatcher {
 pub(crate) struct ProfileIndex {
     pub(crate) profiles: HashMap<String, ManufacturerProfile>,
     pub(crate) machines: Vec<MachineProfile>,
+    aliases: ProfileAliases,
 }
 
 impl ProfileIndex {
@@ -129,6 +147,28 @@ impl ProfileIndex {
 
     pub(crate) fn profile(&self, id: &str) -> Option<&ManufacturerProfile> {
         self.profiles.get(id)
+    }
+
+    pub(crate) fn migrate_profile_id(&self, id: &str) -> Option<String> {
+        if self.profiles.contains_key(id) {
+            return Some(id.to_string());
+        }
+        self.aliases.legacy_to_current.get(id).cloned()
+    }
+
+    pub(crate) fn upsert_profile(&mut self, profile: MachineProfile) {
+        let id = profile.id();
+        self.profiles.insert(id.clone(), profile.clone());
+
+        if let Some(existing) = self.machines.iter_mut().find(|machine| machine.id == id) {
+            *existing = profile.clone();
+        } else {
+            self.machines.push(profile.clone());
+        }
+
+        for legacy_id in profile.legacy_profile_ids() {
+            self.aliases.legacy_to_current.insert(legacy_id, id.clone());
+        }
     }
 
     pub(crate) fn match_profile_id(
@@ -152,7 +192,7 @@ impl ProfileIndex {
                 continue;
             };
 
-            let profile_id = format!("{}/{}", machine.manufacturer, machine.firmware);
+            let profile_id = machine.id();
             match best {
                 None => {
                     best = Some((profile_id, score));
@@ -180,32 +220,46 @@ impl ProfileIndex {
 pub(crate) fn load_profile_index(root: &Path) -> (ProfileIndex, Option<String>) {
     let mut index = ProfileIndex::default();
     let mut errors = Vec::new();
-
-    let manufacturers_dir = root.join("manufacturers");
     let machines_dir = root.join("machines");
-
-    for path in collect_ron_files(&manufacturers_dir) {
-        match fs::read_to_string(&path) {
-            Ok(contents) => match from_str::<ManufacturerProfile>(&contents) {
-                Ok(profile) => {
-                    index.profiles.insert(profile.id(), profile);
-                }
-                Err(error) => errors.push(format!(
-                    "Failed to parse profile {}: {error}",
-                    path.display()
-                )),
-            },
-            Err(error) => errors.push(format!(
-                "Failed to read profile {}: {error}",
-                path.display()
-            )),
-        }
-    }
 
     for path in collect_ron_files(&machines_dir) {
         match fs::read_to_string(&path) {
             Ok(contents) => match from_str::<MachineProfile>(&contents) {
-                Ok(profile) => index.machines.push(profile),
+                Ok(mut profile) => {
+                    if profile.id.trim().is_empty() {
+                        errors.push(format!(
+                            "Failed to load machine {}: missing profile id",
+                            path.display()
+                        ));
+                        continue;
+                    }
+
+                    profile.source_path = Some(path.clone());
+                    let id = profile.id();
+
+                    if index.profiles.insert(id.clone(), profile.clone()).is_some() {
+                        errors.push(format!(
+                            "Duplicate machine profile id {id} at {}",
+                            path.display()
+                        ));
+                    }
+
+                    for legacy_id in profile.legacy_profile_ids() {
+                        if let Some(previous) = index
+                            .aliases
+                            .legacy_to_current
+                            .insert(legacy_id.clone(), id.clone())
+                        {
+                            if previous != id {
+                                errors.push(format!(
+                                    "Duplicate legacy profile id {legacy_id} for {previous} and {id}"
+                                ));
+                            }
+                        }
+                    }
+
+                    index.machines.push(profile);
+                }
                 Err(error) => errors.push(format!(
                     "Failed to parse machine {}: {error}",
                     path.display()
@@ -227,10 +281,11 @@ pub(crate) fn load_profile_index(root: &Path) -> (ProfileIndex, Option<String>) 
     (index, status)
 }
 
-pub(crate) fn profile_path(root: &Path, manufacturer: &str, firmware: &str) -> PathBuf {
-    root.join("manufacturers")
-        .join(manufacturer)
-        .join(format!("{firmware}.ron"))
+pub(crate) fn profile_path(root: &Path, profile: &MachineProfile) -> PathBuf {
+    profile
+        .source_path
+        .clone()
+        .unwrap_or_else(|| root.join("machines").join(format!("{}.ron", profile.id)))
 }
 
 fn collect_ron_files(root: &Path) -> Vec<PathBuf> {

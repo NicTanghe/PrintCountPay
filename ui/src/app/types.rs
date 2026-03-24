@@ -254,6 +254,7 @@ pub enum DiscoveryOutcome {
     Error(SnmpErrorInfo),
 }
 
+#[derive(Clone)]
 pub struct Flags {
     pub log_store: LogStore,
     pub reload_handle: ReloadHandle,

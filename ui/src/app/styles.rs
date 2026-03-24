@@ -1,104 +1,86 @@
-use iced::{Background, Border, Color, Theme, Vector};
+use iced::widget::{button, container, text};
+use iced::{Background, Border, Color, Shadow, Theme, Vector};
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct FirefoxTabStyle {
-    pub(crate) active: bool,
-}
-
-impl iced::widget::button::StyleSheet for FirefoxTabStyle {
-    type Style = Theme;
-
-    fn active(&self, style: &Self::Style) -> iced::widget::button::Appearance {
-        let palette = style.extended_palette();
-        let background = if self.active {
+pub(crate) fn firefox_tab_style(
+    active: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let palette = theme.extended_palette();
+        let background = if active {
             palette.background.base.color
         } else {
             palette.background.weak.color
         };
-        let text_color = if self.active {
+        let text_color = if active {
             palette.background.base.text
         } else {
             palette.background.weak.text
         };
 
-        iced::widget::button::Appearance {
+        let mut style = button::Style {
             background: Some(Background::Color(background)),
             text_color,
             border: Border {
                 color: palette.background.strong.color,
                 width: 1.0,
-                radius: [8.0, 8.0, 0.0, 0.0].into(),
+                radius: 8.0.into(),
             },
-            shadow_offset: if self.active {
-                Vector::new(0.0, 0.0)
+            shadow: if active {
+                Shadow::default()
             } else {
-                Vector::new(0.0, 1.0)
+                Shadow {
+                    offset: Vector::new(0.0, 1.0),
+                    ..Shadow::default()
+                }
             },
-            ..iced::widget::button::Appearance::default()
-        }
-    }
+            ..button::Style::default()
+        };
 
-    fn hovered(&self, style: &Self::Style) -> iced::widget::button::Appearance {
-        let mut appearance = self.active(style);
-        if !self.active {
-            if let Some(Background::Color(color)) = appearance.background {
-                let lifted = Color {
+        if matches!(status, button::Status::Hovered) && !active {
+            if let Some(Background::Color(color)) = style.background {
+                style.background = Some(Background::Color(Color {
                     r: (color.r + 0.05).min(1.0),
                     g: (color.g + 0.05).min(1.0),
                     b: (color.b + 0.05).min(1.0),
                     a: color.a,
-                };
-                appearance.background = Some(Background::Color(lifted));
+                }));
             }
         }
-        appearance
+
+        style
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct IndicatorButtonStyle {
-    pub(crate) color: Color,
-}
-
-impl iced::widget::button::StyleSheet for IndicatorButtonStyle {
-    type Style = Theme;
-
-    fn active(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
-        iced::widget::button::Appearance {
-            background: None,
-            text_color: self.color,
-            border: Border {
-                color: Color::from_rgb8(0x00, 0x00, 0x00),
-                width: 0.0,
-                radius: 0.0.into(),
-            },
-            shadow_offset: Vector::new(0.0, 0.0),
-            ..iced::widget::button::Appearance::default()
-        }
+pub(crate) fn indicator_button_style(
+    color: Color,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_theme, _status| button::Style {
+        background: None,
+        text_color: color,
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 0.0.into(),
+        },
+        shadow: Shadow::default(),
+        ..button::Style::default()
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct RecBadgeStyle {
-    pub(crate) active: bool,
-}
-
-impl iced::widget::container::StyleSheet for RecBadgeStyle {
-    type Style = Theme;
-
-    fn appearance(&self, _style: &Self::Style) -> iced::widget::container::Appearance {
-        let background = if self.active {
+pub(crate) fn rec_badge_style(active: bool) -> impl Fn(&Theme) -> container::Style {
+    move |_theme| {
+        let background = if active {
             Some(Background::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f)))
         } else {
             None
         };
-        let text_color = if self.active {
+        let text_color = if active {
             Some(Color::from_rgb8(0xff, 0xff, 0xff))
         } else {
             Some(Color::TRANSPARENT)
         };
 
-        iced::widget::container::Appearance {
+        container::Style {
             text_color,
             background,
             border: Border {
@@ -106,7 +88,61 @@ impl iced::widget::container::StyleSheet for RecBadgeStyle {
                 width: 0.0,
                 radius: 999.0.into(),
             },
-            ..iced::widget::container::Appearance::default()
+            ..container::Style::default()
+        }
+    }
+}
+
+#[allow(non_snake_case)]
+pub(crate) mod theme {
+    use super::*;
+
+    #[allow(non_snake_case)]
+    pub(crate) mod Button {
+        use super::*;
+
+        pub(crate) fn Primary(
+            theme: &Theme,
+            status: button::Status,
+        ) -> button::Style {
+            button::primary(theme, status)
+        }
+
+        pub(crate) fn Secondary(
+            theme: &Theme,
+            status: button::Status,
+        ) -> button::Style {
+            button::secondary(theme, status)
+        }
+
+        pub(crate) fn custom<'a>(
+            style: impl Fn(&Theme, button::Status) -> button::Style + 'a,
+        ) -> impl Fn(&Theme, button::Status) -> button::Style + 'a {
+            style
+        }
+    }
+
+    #[allow(non_snake_case)]
+    pub(crate) mod Text {
+        use super::*;
+
+        pub(crate) fn Color(color: Color) -> impl Fn(&Theme) -> text::Style {
+            move |_theme| text::Style { color: Some(color) }
+        }
+    }
+
+    #[allow(non_snake_case)]
+    pub(crate) mod Container {
+        use super::*;
+
+        pub(crate) fn Box(theme: &Theme) -> container::Style {
+            container::bordered_box(theme)
+        }
+
+        pub(crate) fn Custom<'a>(
+            style: impl Fn(&Theme) -> container::Style + 'a,
+        ) -> impl Fn(&Theme) -> container::Style + 'a {
+            style
         }
     }
 }

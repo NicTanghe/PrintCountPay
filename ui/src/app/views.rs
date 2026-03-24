@@ -54,13 +54,13 @@ impl PrintCountApp {
     fn top_bar_button(
         &self,
         label: &str,
-        style: theme::Button,
+        style: fn(&Theme, iced::widget::button::Status) -> iced::widget::button::Style,
         message: Message,
     ) -> Element<'_, Message> {
-        let label = container(text(label).size(12))
+        let label = container(text(label.to_string()).size(12))
             .height(Length::Fixed(16.0))
-            .center_x()
-            .center_y();
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center);
 
         button(label)
             .style(style)
@@ -93,11 +93,9 @@ impl PrintCountApp {
     }
 
     fn printer_tab_button(&self, tab: PrinterTab, label: &str) -> Element<'_, Message> {
-        let style = theme::Button::custom(FirefoxTabStyle {
-            active: self.printer_tab == tab,
-        });
+        let style = theme::Button::custom(firefox_tab_style(self.printer_tab == tab));
 
-        button(text(label))
+        button(text(label.to_string()))
             .padding([6, 12])
             .style(style)
             .on_press(Message::SelectPrinterTab(tab))
@@ -487,7 +485,7 @@ impl PrintCountApp {
                     prints_color_delta,
                     include_prints_color,
                 ),
-                Rule::horizontal(1),
+                rule::horizontal(1),
                 self.recording_table_row(
                     "Total B/W",
                     start_bw_total,
@@ -500,7 +498,7 @@ impl PrintCountApp {
                     end_color_total,
                     total_color_delta,
                 ),
-                Rule::horizontal(1),
+                rule::horizontal(1),
                 self.value_line("Total price", total_cents.map(format_cents)),
                 text(rounding_label)
                     .size(11)
@@ -602,10 +600,10 @@ impl PrintCountApp {
         ]
         .spacing(6);
 
-        let rounding_toggle =
-            checkbox("Round B/W to nearest 0.50 EUR", self.pricing.round_to_half_euro)
-                .on_toggle(Message::PricingRoundChanged)
-                .size(12);
+        let rounding_toggle = checkbox(self.pricing.round_to_half_euro)
+            .label("Round B/W to nearest 0.50 EUR")
+            .on_toggle(Message::PricingRoundChanged)
+            .size(12);
 
         let hint = text("Used for recording totals. Decimals accept . or ,")
             .size(11)
@@ -680,9 +678,10 @@ impl PrintCountApp {
             .ip_or_hostname
             .as_deref()
             .or_else(|| record.snmp_address.as_ref().map(|addr| addr.host.as_str()))
-            .unwrap_or("unknown host");
-        let name = record.model.as_deref().unwrap_or("Unknown name");
-        let status = status_label(record.status);
+            .unwrap_or("unknown host")
+            .to_string();
+        let name = record.model.as_deref().unwrap_or("Unknown name").to_string();
+        let status = status_label(record.status).to_string();
         let content = column![
             text(name)
                 .size(14)
@@ -851,7 +850,7 @@ impl PrintCountApp {
     }
 
     fn empty_printer_tab_view(&self, message: &str) -> Element<'_, Message> {
-        text(message)
+        text(message.to_string())
             .size(14)
             .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a)))
             .into()
@@ -869,7 +868,12 @@ impl PrintCountApp {
         .spacing(8)
         .width(Length::Fill);
 
-        scrollable(container(content).padding([0, 24, 0, 0]))
+        scrollable(container(content).padding(iced::Padding {
+            top: 0.0,
+            right: 24.0,
+            bottom: 0.0,
+            left: 0.0,
+        }))
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
@@ -994,7 +998,7 @@ impl PrintCountApp {
             .width(Length::Fill);
 
         column![
-            text(label)
+            text(label.to_string())
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
             input
@@ -1017,7 +1021,7 @@ impl PrintCountApp {
             .width(Length::Fill);
 
         column![
-            text(label)
+            text(label.to_string())
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
             input
@@ -1092,7 +1096,7 @@ impl PrintCountApp {
                     text(format!("Error: {}", summary))
                         .size(13)
                         .style(theme::Text::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f))),
-                    text(detail)
+                    text(detail.clone())
                         .size(12)
                         .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
                 ]
@@ -1115,11 +1119,11 @@ impl PrintCountApp {
     }
 
     fn poll_varbind_row(&self, label: &str, value: &str) -> Element<'_, Message> {
-        let label = text(label)
+        let label = text(label.to_string())
             .size(13)
             .width(Length::Fill)
             .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a)));
-        let value = text(value)
+        let value = text(value.to_string())
             .size(13)
             .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37)));
 
@@ -1371,7 +1375,7 @@ impl PrintCountApp {
             Color::TRANSPARENT
         };
 
-        text(label)
+        text(label.to_string())
             .size(12)
             .style(theme::Text::Color(color))
             .into()
@@ -1381,11 +1385,9 @@ impl PrintCountApp {
         container(text("REC").size(9))
             .width(Length::Fixed(24.0))
             .height(Length::Fixed(24.0))
-            .center_x()
-            .center_y()
-            .style(theme::Container::Custom(Box::new(RecBadgeStyle {
-                active,
-            })))
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center)
+            .style(theme::Container::Custom(rec_badge_style(active)))
             .into()
     }
 
@@ -1430,7 +1432,7 @@ impl PrintCountApp {
     fn counter_line(&self, label: &str, value: Option<u64>) -> Element<'_, Message> {
         let value_text = value.map(|value| value.to_string()).unwrap_or_else(|| "N/A".to_string());
 
-        let label = text(label)
+        let label = text(label.to_string())
             .size(13)
             .width(Length::Fill)
             .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a)));
@@ -1447,7 +1449,7 @@ impl PrintCountApp {
     fn value_line(&self, label: &str, value: Option<String>) -> Element<'_, Message> {
         let value_text = value.unwrap_or_else(|| "N/A".to_string());
 
-        let label = text(label)
+        let label = text(label.to_string())
             .size(13)
             .width(Length::Fill)
             .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a)));
@@ -1548,7 +1550,7 @@ impl PrintCountApp {
         end: Option<u64>,
         delta: Option<u64>,
     ) -> Element<'_, Message> {
-        let label = text(label)
+        let label = text(label.to_string())
             .size(13)
             .width(Length::FillPortion(2))
             .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a)));
@@ -1592,13 +1594,11 @@ impl PrintCountApp {
         let indicator = button(text("o").size(12))
             .on_press(Message::RecordingToggleInclude(category))
             .padding(2)
-            .style(theme::Button::custom(IndicatorButtonStyle {
-                color: indicator_color,
-            }));
+            .style(theme::Button::custom(indicator_button_style(indicator_color)));
 
         let label = row![
             indicator,
-            text(label)
+            text(label.to_string())
                 .size(13)
                 .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a)))
         ]
@@ -1671,7 +1671,8 @@ impl PrintCountApp {
         for target in self.sorted_targets() {
             let enabled = self.enabled_targets.contains(&target);
             filter_column = filter_column.push(
-                checkbox(target.clone(), enabled)
+                checkbox(enabled)
+                    .label(target.clone())
                     .on_toggle(move |value| Message::ToggleTarget(target.clone(), value)),
             );
         }

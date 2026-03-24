@@ -2,8 +2,6 @@ pub mod app;
 mod executor;
 pub mod logging;
 
-use iced::Application;
-
 pub use app::{Flags, PrintCountApp};
 pub use logging::{
     apply_log_level, init_logging, LogEntry, LogLevel, LogStore, ReloadHandle,
@@ -12,7 +10,14 @@ pub use logging::{
 pub type UiResult = iced::Result;
 
 pub fn run(flags: Flags) -> UiResult {
-    let mut settings = iced::Settings::with_flags(flags);
-    settings.window.decorations = false;
-    PrintCountApp::run(settings)
+    iced::application(
+        move || PrintCountApp::new(flags.clone()),
+        PrintCountApp::update,
+        PrintCountApp::view,
+    )
+    .title(PrintCountApp::title)
+    .subscription(PrintCountApp::subscription)
+    .decorations(false)
+    .executor::<crate::executor::StackSizedTokioExecutor>()
+    .run()
 }

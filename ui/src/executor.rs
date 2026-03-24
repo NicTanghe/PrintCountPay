@@ -28,6 +28,10 @@ impl Executor for StackSizedTokioExecutor {
         let _guard = self.runtime.enter();
         f()
     }
+
+    fn block_on<T>(&self, future: impl Future<Output = T>) -> T {
+        self.runtime.block_on(future)
+    }
 }
 
 

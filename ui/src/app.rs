@@ -5,12 +5,11 @@ use std::time::Duration;
 
 use iced::alignment::Horizontal;
 use iced::keyboard;
-use iced::theme;
 use iced::widget::{
-    button, checkbox, column, container, horizontal_space, mouse_area, pick_list, row, scrollable,
-    text, text_input, Rule,
+    button, checkbox, column, container, mouse_area, pick_list, row, rule, scrollable, text,
+    text_input, Space,
 };
-use iced::{window, Alignment, Application, Color, Command, Element, Length, Subscription, Theme};
+use iced::{window, Alignment, Color, Element, Length, Subscription, Task as Command, Theme};
 use ron::de::from_str;
 use ron::ser::{to_string_pretty, PrettyConfig};
 
@@ -92,13 +91,8 @@ pub struct PrintCountApp {
     pricing: PricingSettings,
 }
 
-impl Application for PrintCountApp {
-    type Executor = crate::executor::StackSizedTokioExecutor;
-    type Message = Message;
-    type Theme = Theme;
-    type Flags = Flags;
-
-    fn new(flags: Flags) -> (Self, Command<Message>) {
+impl PrintCountApp {
+    pub(crate) fn new(flags: Flags) -> (Self, Command<Message>) {
         let default_targets = [
             targets::DISCOVERY,
             targets::SNMP,
@@ -186,11 +180,11 @@ impl Application for PrintCountApp {
         (app, Command::none())
     }
 
-    fn title(&self) -> String {
+    pub(crate) fn title(&self) -> String {
         "Ricoh PrintCount".to_string()
     }
 
-    fn update(&mut self, message: Message) -> Command<Message> {
+    pub(crate) fn update(&mut self, message: Message) -> Command<Message> {
         match message {
             Message::LogTick => {
                 self.refresh_logs();
@@ -208,9 +202,11 @@ impl Application for PrintCountApp {
                 }
                 Command::none()
             }
-            Message::DragWindow => window::drag(window::Id::MAIN),
-            Message::MinimizeWindow => window::minimize(window::Id::MAIN, true),
-            Message::CloseWindow => window::close(window::Id::MAIN),
+            Message::DragWindow => window::latest().and_then(window::drag),
+            Message::MinimizeWindow => {
+                window::latest().and_then(|id| window::minimize(id, true))
+            }
+            Message::CloseWindow => window::latest().and_then(window::close),
             Message::LogLevelChanged(level) => {
                 self.log_level = level;
                 apply_log_level(&self.reload_handle, level);
@@ -523,14 +519,21 @@ impl Application for PrintCountApp {
         }
     }
 
-    fn subscription(&self) -> Subscription<Message> {
+    pub(crate) fn subscription(&self) -> Subscription<Message> {
         let log_tick = iced::time::every(Duration::from_millis(250)).map(|_| Message::LogTick);
         let poll_tick = iced::time::every(Duration::from_secs(5)).map(|_| Message::PollSelectedSnmp);
-        let delete_key = keyboard::on_key_press(delete_key_event);
+        let delete_key = iced::event::listen_with(|event, _status, _window| match event {
+            iced::Event::Keyboard(keyboard::Event::KeyPressed {
+                key,
+                modifiers,
+                ..
+            }) => delete_key_event(key.clone(), modifiers),
+            _ => None,
+        });
         Subscription::batch(vec![log_tick, poll_tick, delete_key])
     }
 
-    fn view(&self) -> Element<'_, Message> {
+    pub(crate) fn view(&self) -> Element<'_, Message> {
         let header = row![]
             .spacing(12)
             .align_items(Alignment::Center);
@@ -555,6 +558,48 @@ impl Application for PrintCountApp {
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
+    }
+}
+
+fn horizontal_space() -> Space {
+    Space::new().width(Length::Fill)
+}
+
+trait AlignItemsExt: Sized {
+    fn align_items(self, alignment: Alignment) -> Self;
+}
+
+impl<'a, Message, ThemeT, Renderer> AlignItemsExt
+    for iced::widget::Row<'a, Message, ThemeT, Renderer>
+where
+    Renderer: iced::advanced::Renderer,
+{
+    fn align_items(self, alignment: Alignment) -> Self {
+        self.align_y(alignment)
+    }
+}
+
+impl<'a, Message, ThemeT, Renderer> AlignItemsExt
+    for iced::widget::Column<'a, Message, ThemeT, Renderer>
+where
+    Renderer: iced::advanced::Renderer,
+{
+    fn align_items(self, alignment: Alignment) -> Self {
+        self.align_x(alignment)
+    }
+}
+
+trait TextCompatExt: Sized {
+    fn horizontal_alignment(self, alignment: Horizontal) -> Self;
+}
+
+impl<'a, ThemeT, Renderer> TextCompatExt for iced::widget::Text<'a, ThemeT, Renderer>
+where
+    ThemeT: iced::widget::text::Catalog,
+    Renderer: iced::advanced::text::Renderer,
+{
+    fn horizontal_alignment(self, alignment: Horizontal) -> Self {
+        self.align_x(alignment)
     }
 }
 
