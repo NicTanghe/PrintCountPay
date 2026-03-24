@@ -1,0 +1,62 @@
+(
+    id: "ricoh-pro-8200s",
+    manufacturer: "ricoh",
+    firmware: "csv-derived",
+    recording: (
+        copies_bw: [],
+        copies_color: [],
+        prints_bw: [
+            ([1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 19, 5, 1, 9, 11]),
+        ],
+        prints_color: [],
+    ),
+    counters: (
+        bw: [],
+        color: [],
+        total: [
+            ([1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 19, 5, 1, 9, 11]),
+        ],
+    ),
+    toner: (
+        black: None,
+        cyan: None,
+        magenta: None,
+        yellow: None,
+    ),
+    extra_poll_labels: [
+        (
+            oid: ([1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 19, 5, 1, 9, 3]),
+            label: "Observed counter 3",
+        ),
+        (
+            oid: ([1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 19, 5, 1, 9, 5]),
+            label: "Observed counter 5",
+        ),
+        (
+            oid: ([1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 19, 5, 1, 9, 9]),
+            label: "Observed counter 9",
+        ),
+        (
+            oid: ([1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 19, 5, 1, 9, 71]),
+            label: "Observed counter 71",
+        ),
+        (
+            oid: ([1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 19, 5, 1, 9, 72]),
+            label: "Observed counter 72",
+        ),
+    ],
+    counter_table: None,
+    legacy_profile_ids: [],
+    matchers: [
+        (
+            sys_object_id_prefix: Some("1.3.6.1.4.1.367"),
+            sys_descr_contains: Some("Pro 8200S"),
+            model_contains: Some("Pro 8200S"),
+        ),
+        (
+            sys_object_id_prefix: None,
+            sys_descr_contains: None,
+            model_contains: Some("Pro 8200S"),
+        ),
+    ],
+)

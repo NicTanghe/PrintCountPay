@@ -1,8 +1,8 @@
 use tracing::Level;
 
 use printcountpay_core::targets;
-use printcountpay_ui::logging::{init_logging, LogLevel, LogStore};
-use printcountpay_ui::{run, Flags, UiResult};
+use printcountpay_ui::logging::{LogLevel, LogStore, init_logging};
+use printcountpay_ui::{Flags, UiResult, run};
 
 fn main() -> UiResult {
     let log_store = LogStore::new(2000);

@@ -4,7 +4,9 @@ use iced::executor::Executor;
 use iced::futures;
 use tokio::runtime::{Builder, Runtime};
 
-const TOKIO_WORKER_STACK_SIZE_BYTES: usize = 4_194_304;
+// Discovery and SNMP polling can build fairly deep stacks in debug builds on Windows.
+// Keep the multithreaded runtime, but give each worker more headroom.
+const TOKIO_WORKER_STACK_SIZE_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Debug)]
 pub struct StackSizedTokioExecutor {

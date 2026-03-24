@@ -157,11 +157,9 @@ mod tests {
             },
         };
 
-        let ron = ron::ser::to_string_pretty(
-            &(record, snapshot),
-            ron::ser::PrettyConfig::default(),
-        )
-        .expect("serialize RON");
+        let ron =
+            ron::ser::to_string_pretty(&(record, snapshot), ron::ser::PrettyConfig::default())
+                .expect("serialize RON");
         let decoded: (PrinterRecord, CounterSnapshot) =
             ron::from_str(&ron).expect("deserialize RON");
 

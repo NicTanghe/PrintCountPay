@@ -56,10 +56,7 @@ where
     }
 
     fn diff(&self, tree: &mut widget::Tree) {
-        tree.diff_children(&[
-            self.content.as_widget(),
-            self.badge.as_widget(),
-        ]);
+        tree.diff_children(&[self.content.as_widget(), self.badge.as_widget()]);
     }
 
     fn size(&self) -> Size<Length> {
@@ -174,10 +171,7 @@ where
 
         if content.is_some() || badge.is_some() {
             Some(
-                overlay::Group::with_children(
-                    content.into_iter().chain(badge).collect(),
-                )
-                .overlay(),
+                overlay::Group::with_children(content.into_iter().chain(badge).collect()).overlay(),
             )
         } else {
             None
@@ -210,8 +204,7 @@ where
     margin: f32,
 }
 
-impl<'a, 'b, Message, Theme, Renderer>
-    overlay::Overlay<Message, Theme, Renderer>
+impl<'a, 'b, Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer>
     for BadgeOverlayLayer<'a, 'b, Message, Theme, Renderer>
 where
     Renderer: iced::advanced::Renderer,
@@ -224,12 +217,10 @@ where
         );
 
         let badge_bounds = badge_layout.bounds();
-        let mut x = self.position.x
-            + (self.content_bounds.width - badge_bounds.width)
-            - self.margin;
-        let mut y = self.position.y
-            + (self.content_bounds.height - badge_bounds.height)
-            - self.margin;
+        let mut x =
+            self.position.x + (self.content_bounds.width - badge_bounds.width) - self.margin;
+        let mut y =
+            self.position.y + (self.content_bounds.height - badge_bounds.height) - self.margin;
 
         if x < self.position.x {
             x = self.position.x;
@@ -238,11 +229,8 @@ where
             y = self.position.y;
         }
 
-        layout::Node::with_children(
-            badge_bounds.size(),
-            vec![badge_layout],
-        )
-        .translate(Vector::new(x, y))
+        layout::Node::with_children(badge_bounds.size(), vec![badge_layout])
+            .translate(Vector::new(x, y))
     }
 
     fn draw(
@@ -263,5 +251,4 @@ where
             &Rectangle::with_size(Size::INFINITE),
         );
     }
-
 }

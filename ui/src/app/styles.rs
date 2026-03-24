@@ -1,9 +1,7 @@
 use iced::widget::{button, container, text};
 use iced::{Background, Border, Color, Shadow, Theme, Vector};
 
-pub(crate) fn firefox_tab_style(
-    active: bool,
-) -> impl Fn(&Theme, button::Status) -> button::Style {
+pub(crate) fn firefox_tab_style(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
         let palette = theme.extended_palette();
         let background = if active {
@@ -36,7 +34,8 @@ pub(crate) fn firefox_tab_style(
             ..button::Style::default()
         };
 
-        if matches!(status, button::Status::Hovered) && !active
+        if matches!(status, button::Status::Hovered)
+            && !active
             && let Some(Background::Color(color)) = style.background
         {
             style.background = Some(Background::Color(Color {
@@ -101,17 +100,11 @@ pub(crate) mod theme {
     pub(crate) mod Button {
         use super::*;
 
-        pub(crate) fn Primary(
-            theme: &Theme,
-            status: button::Status,
-        ) -> button::Style {
+        pub(crate) fn Primary(theme: &Theme, status: button::Status) -> button::Style {
             button::primary(theme, status)
         }
 
-        pub(crate) fn Secondary(
-            theme: &Theme,
-            status: button::Status,
-        ) -> button::Style {
+        pub(crate) fn Secondary(theme: &Theme, status: button::Status) -> button::Style {
             button::secondary(theme, status)
         }
 

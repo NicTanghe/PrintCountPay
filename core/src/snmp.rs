@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use snmp2::{
-    snmp as snmp2_constants, AsyncSession, Error as Snmp2Error, Oid as Snmp2Oid,
-    Value as Snmp2Value,
+    AsyncSession, Error as Snmp2Error, Oid as Snmp2Oid, Value as Snmp2Value,
+    snmp as snmp2_constants,
 };
 
 use tokio::time::timeout;
@@ -351,8 +351,7 @@ impl fmt::Display for SnmpValue {
     }
 }
 
-pub type SnmpFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<SnmpResponse, Error>> + Send + 'a>>;
+pub type SnmpFuture<'a> = Pin<Box<dyn Future<Output = Result<SnmpResponse, Error>> + Send + 'a>>;
 
 pub trait SnmpClient: Send + Sync {
     fn get<'a>(&'a self, request: SnmpRequest) -> SnmpFuture<'a>;
@@ -807,14 +806,8 @@ async fn get_many_with_retries(
                     let mut varbinds = Vec::new();
                     for oid in oids {
                         varbinds.extend(
-                            get_one_with_retries(
-                                session,
-                                address,
-                                address_label,
-                                config,
-                                oid,
-                            )
-                            .await?,
+                            get_one_with_retries(session, address, address_label, config, oid)
+                                .await?,
                         );
                     }
                     return Ok(varbinds);
@@ -842,7 +835,6 @@ async fn get_many_with_retries(
     }
 }
 
-
 fn duration_ms(duration: Duration) -> u64 {
     duration.as_millis().min(u128::from(u64::MAX)) as u64
 }
@@ -856,7 +848,11 @@ fn to_snmp2_oids(address: &SnmpAddress, oids: &[Oid]) -> Result<Vec<Snmp2Oid<'st
 }
 
 fn to_snmp2_oid(address: &SnmpAddress, oid: &Oid) -> Result<Snmp2Oid<'static>, Error> {
-    let arcs: Vec<u64> = oid.as_slice().iter().map(|value| u64::from(*value)).collect();
+    let arcs: Vec<u64> = oid
+        .as_slice()
+        .iter()
+        .map(|value| u64::from(*value))
+        .collect();
     Snmp2Oid::from(arcs.as_slice()).map_err(|error| Error::SnmpFailure {
         address: address.to_string(),
         details: format!("Invalid OID {oid}: {error:?}"),
@@ -991,9 +987,7 @@ fn map_snmp2_value(address: &str, value: Snmp2Value<'_>) -> SnmpValue {
         Snmp2Value::NoSuchInstance => SnmpValue::NoSuchInstance,
         Snmp2Value::Sequence(_) => SnmpValue::Other("Sequence".to_string()),
         Snmp2Value::Set(_) => SnmpValue::Other("Set".to_string()),
-        Snmp2Value::Constructed(tag, _) => {
-            SnmpValue::Other(format!("Constructed({tag})"))
-        }
+        Snmp2Value::Constructed(tag, _) => SnmpValue::Other(format!("Constructed({tag})")),
         Snmp2Value::GetRequest(_) => SnmpValue::Other("GetRequest".to_string()),
         Snmp2Value::GetNextRequest(_) => SnmpValue::Other("GetNextRequest".to_string()),
         Snmp2Value::GetBulkRequest(_) => SnmpValue::Other("GetBulkRequest".to_string()),

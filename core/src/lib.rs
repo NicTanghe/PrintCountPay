@@ -1,19 +1,19 @@
-pub mod error;
 pub mod counters;
 pub mod discovery;
+pub mod error;
 pub mod model;
 pub mod ricoh;
 pub mod snmp;
 pub mod targets;
 
-pub use error::{Error, StorageAction};
 pub use counters::{
-    resolve_counters, CounterKind, CounterMode, CounterOidSet, CounterResolution, CounterWarning,
+    CounterKind, CounterMode, CounterOidSet, CounterResolution, CounterWarning, resolve_counters,
 };
-pub use discovery::{default_discovery_cidr, CidrParseError, CidrRange, probe_printer};
+pub use discovery::{CidrParseError, CidrRange, default_discovery_cidr, probe_printer};
+pub use error::{Error, StorageAction};
 pub use model::{
-    CounterOids, CounterSnapshot, EpochSeconds, PrinterId, PrinterRecord, PrinterStatus, SnmpAddress,
-    DEFAULT_SNMP_PORT,
+    CounterOids, CounterSnapshot, DEFAULT_SNMP_PORT, EpochSeconds, PrinterId, PrinterRecord,
+    PrinterStatus, SnmpAddress,
 };
 pub use ricoh::{CounterAvailability, CounterStrategy, RicohMatch, RicohProfile};
 pub use snmp::{

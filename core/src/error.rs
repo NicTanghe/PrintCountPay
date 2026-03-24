@@ -8,15 +8,9 @@ pub enum Error {
         details: Option<String>,
     },
     #[error("SNMP timeout for {address}")]
-    SnmpTimeout {
-        address: String,
-        timeout_ms: u64,
-    },
+    SnmpTimeout { address: String, timeout_ms: u64 },
     #[error("SNMP failure for {address}")]
-    SnmpFailure {
-        address: String,
-        details: String,
-    },
+    SnmpFailure { address: String, details: String },
     #[error("Unsupported Ricoh model: {model}")]
     UnsupportedModel {
         model: String,
@@ -125,17 +119,12 @@ impl Error {
             Error::MissingCounters {
                 printer_id,
                 missing,
-            } => format!(
-                "Missing counters for {printer_id}: {}.",
-                missing.join(", ")
-            ),
+            } => format!("Missing counters for {printer_id}: {}.", missing.join(", ")),
             Error::CounterReset {
                 printer_id,
                 previous,
                 current,
-            } => format!(
-                "Counter reset for {printer_id}: {previous} -> {current}."
-            ),
+            } => format!("Counter reset for {printer_id}: {previous} -> {current}."),
             Error::DiscoveryFailure { range, details } => {
                 let range = range
                     .as_ref()

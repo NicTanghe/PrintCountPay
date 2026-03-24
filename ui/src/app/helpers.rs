@@ -1,11 +1,9 @@
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use iced::keyboard;
 use iced::Color;
-use printcountpay_core::{
-    CounterOidSet, Oid, PrinterStatus, SnmpVarBind,
-};
+use iced::keyboard;
+use printcountpay_core::{CounterOidSet, Oid, PrinterStatus, SnmpVarBind};
 
 use crate::app::constants::{
     PRT_GENERAL_PRINTER_NAME_OID, PRT_MARKER_LIFECOUNT_1, PRT_MARKER_LIFECOUNT_2,
@@ -35,9 +33,7 @@ pub(crate) fn delete_key_event(
     _modifiers: keyboard::Modifiers,
 ) -> Option<Message> {
     match key {
-        keyboard::Key::Named(keyboard::key::Named::Delete) => {
-            Some(Message::DeleteSelectedPrinter)
-        }
+        keyboard::Key::Named(keyboard::key::Named::Delete) => Some(Message::DeleteSelectedPrinter),
         _ => None,
     }
 }
@@ -100,9 +96,7 @@ pub(crate) fn default_toner_oids() -> TonerOidProfile {
     }
 }
 
-pub(crate) fn recording_oids_from_counter_set(
-    set: &CounterOidSet,
-) -> RecordingOidSettings {
+pub(crate) fn recording_oids_from_counter_set(set: &CounterOidSet) -> RecordingOidSettings {
     let mut copies_bw = Vec::new();
     let mut prints_bw = Vec::new();
     let mut copies_color = Vec::new();
@@ -193,7 +187,6 @@ pub(crate) fn ricoh_counter_oid(type_id: u32) -> Oid {
     Oid(parts)
 }
 
-
 pub(crate) fn parse_oid_list(value: &str) -> Result<Vec<Oid>, String> {
     let mut oids = Vec::new();
     for token in value.split(|ch: char| ch == ',' || ch.is_whitespace()) {
@@ -216,7 +209,11 @@ pub(crate) fn delta_value(start: Option<u64>, end: Option<u64>) -> Option<u64> {
 }
 
 pub(crate) fn sum_two(left: Option<u64>, right: Option<u64>) -> Option<u64> {
-    Some(left? + right?)
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left + right),
+        (Some(value), None) | (None, Some(value)) => Some(value),
+        (None, None) => None,
+    }
 }
 
 pub(crate) fn bw_cost_cents(count: u64, pricing: BwPricing) -> u64 {
@@ -241,7 +238,9 @@ pub(crate) fn format_cents(cents: u64) -> String {
 }
 
 pub(crate) fn format_count(value: Option<u64>) -> String {
-    value.map(|value| value.to_string()).unwrap_or_else(|| "N/A".to_string())
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "N/A".to_string())
 }
 
 pub(crate) fn parse_count_input(value: &str) -> Result<Option<u64>, ()> {
@@ -328,15 +327,17 @@ pub(crate) fn sum_optional_included(
     values: impl IntoIterator<Item = (bool, Option<u64>)>,
 ) -> Option<u64> {
     let mut total = 0u64;
-    let mut included_any = false;
+    let mut has_numeric_value = false;
     for (included, value) in values {
         if !included {
             continue;
         }
-        included_any = true;
-        total = total.saturating_add(value?);
+        if let Some(value) = value {
+            has_numeric_value = true;
+            total = total.saturating_add(value);
+        }
     }
-    if included_any {
+    if has_numeric_value {
         Some(total)
     } else {
         Some(0)
@@ -369,9 +370,7 @@ pub(crate) fn counter_oids_from_walk(varbinds: &[SnmpVarBind]) -> CounterOidSet 
         if oid.as_slice() == PRT_MARKER_LIFECOUNT_2.as_slice() {
             mapping.color.push(oid.clone());
         }
-        if oid.as_slice() == PRT_MARKER_LIFECOUNT_3.as_slice()
-            && total_seen.insert(oid.clone())
-        {
+        if oid.as_slice() == PRT_MARKER_LIFECOUNT_3.as_slice() && total_seen.insert(oid.clone()) {
             total.push(oid.clone());
         }
     }
@@ -384,6 +383,38 @@ pub(crate) fn counter_oids_from_walk(varbinds: &[SnmpVarBind]) -> CounterOidSet 
 
     mapping.total = total;
     mapping
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{delta_value, sum_optional_included, sum_two};
+
+    #[test]
+    fn sum_two_ignores_missing_side() {
+        assert_eq!(sum_two(Some(120), None), Some(120));
+        assert_eq!(sum_two(None, Some(45)), Some(45));
+        assert_eq!(sum_two(None, None), None);
+    }
+
+    #[test]
+    fn included_sum_skips_missing_values() {
+        assert_eq!(
+            sum_optional_included([(true, None), (true, Some(749))]),
+            Some(749)
+        );
+        assert_eq!(
+            sum_optional_included([(true, None), (false, Some(30))]),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn partial_totals_still_produce_delta() {
+        let start_total = sum_two(None, Some(1_669_151));
+        let end_total = sum_two(None, Some(1_669_900));
+
+        assert_eq!(delta_value(start_total, end_total), Some(749));
+    }
 }
 
 pub(crate) fn snmp_oids(

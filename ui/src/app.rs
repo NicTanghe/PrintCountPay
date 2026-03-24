@@ -6,24 +6,24 @@ use std::time::Duration;
 use iced::alignment::Horizontal;
 use iced::keyboard;
 use iced::widget::{
-    button, checkbox, column, container, mouse_area, pick_list, row, rule, scrollable, text,
-    text_input, Space,
+    Space, button, checkbox, column, container, mouse_area, pick_list, row, rule, scrollable, text,
+    text_input,
 };
-use iced::{window, Alignment, Color, Element, Length, Subscription, Task as Command, Theme};
+use iced::{Alignment, Color, Element, Length, Subscription, Task as Command, Theme, window};
 use ron::de::from_str;
-use ron::ser::{to_string_pretty, PrettyConfig};
+use ron::ser::{PrettyConfig, to_string_pretty};
 
 use printcountpay_core::{
-    default_discovery_cidr, probe_printer, resolve_counters, targets, varbind_display_value,
-    varbind_numeric_value, varbind_text_value, CidrRange, CounterOidSet, Oid, PrinterId,
-    PrinterRecord, SnmpAddress, SnmpConfig, SnmpRequest, SnmpV2cClient, SnmpVarBind,
-    SnmpWalkRequest, DEFAULT_SNMP_PORT,
+    CidrRange, CounterOidSet, DEFAULT_SNMP_PORT, Oid, PrinterId, PrinterRecord, SnmpAddress,
+    SnmpConfig, SnmpRequest, SnmpV2cClient, SnmpVarBind, SnmpWalkRequest, default_discovery_cidr,
+    probe_printer, resolve_counters, targets, varbind_display_value, varbind_numeric_value,
+    varbind_text_value,
 };
 
-use crate::logging::{apply_log_level, LogEntry, LogLevel, LogStore, ReloadHandle};
+use crate::logging::{LogEntry, LogLevel, LogStore, ReloadHandle, apply_log_level};
 
-mod constants;
 mod badge_overlay;
+mod constants;
 mod helpers;
 mod profiles;
 mod styles;
@@ -34,8 +34,8 @@ pub use types::{
     RecordingCategory, SnmpErrorInfo, Tab,
 };
 
-use constants::*;
 use badge_overlay::BadgeOverlay;
+use constants::*;
 use helpers::*;
 use profiles::*;
 use styles::*;
@@ -100,13 +100,14 @@ impl PrintCountApp {
             targets::UI,
             targets::STORAGE,
         ];
-        let known_targets: HashSet<String> =
-            default_targets.iter().map(|value| value.to_string()).collect();
+        let known_targets: HashSet<String> = default_targets
+            .iter()
+            .map(|value| value.to_string())
+            .collect();
         let enabled_targets = known_targets.clone();
         let printers: Vec<PrinterRecord> = Vec::new();
         let profiles_root = "profiles".to_string();
-        let (profile_index, profile_status) =
-            load_profile_index(Path::new(&profiles_root));
+        let (profile_index, profile_status) = load_profile_index(Path::new(&profiles_root));
         let counter_oids = default_counter_oids();
         let oids_total_text = format_oid_list(&counter_oids.total);
         let recording_oids = default_recording_oid_inputs();
@@ -123,54 +124,54 @@ impl PrintCountApp {
         }
 
         let mut app = Self {
-                log_store: flags.log_store,
-                reload_handle: flags.reload_handle,
-                log_entries: Vec::new(),
-                log_level: LogLevel::default(),
-                known_targets,
-                enabled_targets,
-                copy_status: None,
-                advanced_mode: false,
-                active_tab: Tab::Printers,
-                printer_tab: PrinterTab::Recording,
-                discovery_cidr,
-                discovery_community: "public".to_string(),
-                discovery_status,
-                discovery_active: false,
-                discovery_queue: VecDeque::new(),
-                discovery_in_flight: 0,
-                discovery_total: 0,
-                discovery_scanned: 0,
-                discovery_found: 0,
-                discovery_errors: 0,
-                discovery_run_id: 0,
-                manual_name: String::new(),
-                manual_host: String::new(),
-                manual_port: DEFAULT_SNMP_PORT.to_string(),
-                manual_community: "public".to_string(),
-                manual_status: None,
-                printers_path: "printers.ron".to_string(),
-                printers_status: None,
-                printers,
-                selected_printer: None,
-                poll_states,
-                poll_in_flight: HashSet::new(),
-                poll_export_path: "polling_export.txt".to_string(),
-                poll_export_status: None,
-                snmp_config: SnmpConfig::default(),
-                counter_oids,
-                profiles_root,
-                profile_index,
-                profile_status,
-                active_profile: None,
-                oids_path: "counter_oids.ron".to_string(),
-                oids_total_text,
-                oids_status: None,
-                oids_crawl_in_flight: false,
-                recording_oids,
-                recording_sessions: HashMap::new(),
-                pricing: PricingSettings::default(),
-            };
+            log_store: flags.log_store,
+            reload_handle: flags.reload_handle,
+            log_entries: Vec::new(),
+            log_level: LogLevel::default(),
+            known_targets,
+            enabled_targets,
+            copy_status: None,
+            advanced_mode: false,
+            active_tab: Tab::Printers,
+            printer_tab: PrinterTab::Recording,
+            discovery_cidr,
+            discovery_community: "public".to_string(),
+            discovery_status,
+            discovery_active: false,
+            discovery_queue: VecDeque::new(),
+            discovery_in_flight: 0,
+            discovery_total: 0,
+            discovery_scanned: 0,
+            discovery_found: 0,
+            discovery_errors: 0,
+            discovery_run_id: 0,
+            manual_name: String::new(),
+            manual_host: String::new(),
+            manual_port: DEFAULT_SNMP_PORT.to_string(),
+            manual_community: "public".to_string(),
+            manual_status: None,
+            printers_path: "printers.ron".to_string(),
+            printers_status: None,
+            printers,
+            selected_printer: None,
+            poll_states,
+            poll_in_flight: HashSet::new(),
+            poll_export_path: "polling_export.txt".to_string(),
+            poll_export_status: None,
+            snmp_config: SnmpConfig::default(),
+            counter_oids,
+            profiles_root,
+            profile_index,
+            profile_status,
+            active_profile: None,
+            oids_path: "counter_oids.ron".to_string(),
+            oids_total_text,
+            oids_status: None,
+            oids_crawl_in_flight: false,
+            recording_oids,
+            recording_sessions: HashMap::new(),
+            pricing: PricingSettings::default(),
+        };
         if !app.advanced_mode {
             app.printers_path = "printers.ron".to_string();
             app.load_printers_from_path();
@@ -193,7 +194,10 @@ impl PrintCountApp {
                 self.advanced_mode = !self.advanced_mode;
                 if !self.advanced_mode {
                     self.active_tab = Tab::Printers;
-                    if !matches!(self.printer_tab, PrinterTab::Recording | PrinterTab::Pricing) {
+                    if !matches!(
+                        self.printer_tab,
+                        PrinterTab::Recording | PrinterTab::Pricing
+                    ) {
                         self.printer_tab = PrinterTab::Recording;
                     }
                     self.printers_path = "printers.ron".to_string();
@@ -202,9 +206,7 @@ impl PrintCountApp {
                 Command::none()
             }
             Message::DragWindow => window::latest().and_then(window::drag),
-            Message::MinimizeWindow => {
-                window::latest().and_then(|id| window::minimize(id, true))
-            }
+            Message::MinimizeWindow => window::latest().and_then(|id| window::minimize(id, true)),
             Message::CloseWindow => window::latest().and_then(window::close),
             Message::LogLevelChanged(level) => {
                 self.log_level = level;
@@ -277,8 +279,7 @@ impl PrintCountApp {
                 Command::none()
             }
             Message::SelectPrinterTab(tab) => {
-                if self.advanced_mode
-                    || matches!(tab, PrinterTab::Recording | PrinterTab::Pricing)
+                if self.advanced_mode || matches!(tab, PrinterTab::Recording | PrinterTab::Pricing)
                 {
                     self.printer_tab = tab;
                 }
@@ -333,17 +334,17 @@ impl PrintCountApp {
                         );
                         let sys_name =
                             varbind_text_value(&response.varbinds, &Oid::from_slice(&SYS_NAME_OID));
-                        sys_descr =
-                            varbind_text_value(&response.varbinds, &Oid::from_slice(&SYS_DESCR_OID));
+                        sys_descr = varbind_text_value(
+                            &response.varbinds,
+                            &Oid::from_slice(&SYS_DESCR_OID),
+                        );
                         sys_object_id = varbind_text_value(
                             &response.varbinds,
                             &Oid::from_slice(&SYS_OBJECT_ID_OID),
                         );
                         allow_override =
                             printer_name.is_some() || sys_name.is_some() || sys_descr.is_some();
-                        poll_name = printer_name
-                            .or(sys_name)
-                            .or_else(|| sys_descr.clone());
+                        poll_name = printer_name.or(sys_name).or_else(|| sys_descr.clone());
                         SnmpPollStatus::Ok {
                             received_at,
                             varbinds: response.varbinds,
@@ -457,30 +458,21 @@ impl PrintCountApp {
             }
             Message::RecordingStartChanged { category, value } => {
                 if let Some(printer_id) = self.selected_printer.clone() {
-                    let session = self
-                        .recording_sessions
-                        .entry(printer_id)
-                        .or_default();
+                    let session = self.recording_sessions.entry(printer_id).or_default();
                     session.edits.category_mut(category).start_input = value;
                 }
                 Command::none()
             }
             Message::RecordingEndChanged { category, value } => {
                 if let Some(printer_id) = self.selected_printer.clone() {
-                    let session = self
-                        .recording_sessions
-                        .entry(printer_id)
-                        .or_default();
+                    let session = self.recording_sessions.entry(printer_id).or_default();
                     session.edits.category_mut(category).end_input = value;
                 }
                 Command::none()
             }
             Message::RecordingToggleInclude(category) => {
                 if let Some(printer_id) = self.selected_printer.clone() {
-                    let session = self
-                        .recording_sessions
-                        .entry(printer_id)
-                        .or_default();
+                    let session = self.recording_sessions.entry(printer_id).or_default();
                     let entry = session.edits.category_mut(category);
                     entry.include_in_price = !entry.include_in_price;
                 }
@@ -511,22 +503,19 @@ impl PrintCountApp {
 
     pub(crate) fn subscription(&self) -> Subscription<Message> {
         let log_tick = iced::time::every(Duration::from_millis(250)).map(|_| Message::LogTick);
-        let poll_tick = iced::time::every(Duration::from_secs(5)).map(|_| Message::PollSelectedSnmp);
+        let poll_tick =
+            iced::time::every(Duration::from_secs(5)).map(|_| Message::PollSelectedSnmp);
         let delete_key = iced::event::listen_with(|event, _status, _window| match event {
-            iced::Event::Keyboard(keyboard::Event::KeyPressed {
-                key,
-                modifiers,
-                ..
-            }) => delete_key_event(key.clone(), modifiers),
+            iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                delete_key_event(key.clone(), modifiers)
+            }
             _ => None,
         });
         Subscription::batch(vec![log_tick, poll_tick, delete_key])
     }
 
     pub(crate) fn view(&self) -> Element<'_, Message> {
-        let header = row![]
-            .spacing(12)
-            .align_items(Alignment::Center);
+        let header = row![].spacing(12).align_items(Alignment::Center);
 
         let tabs = self.tab_bar();
 
@@ -539,8 +528,7 @@ impl PrintCountApp {
             self.printers_tab_view()
         };
 
-        let top_area = mouse_area(column![header, tabs].spacing(12))
-            .on_press(Message::DragWindow);
+        let top_area = mouse_area(column![header, tabs].spacing(12)).on_press(Message::DragWindow);
 
         let content = column![top_area, body].spacing(20).padding(16);
 
@@ -595,4 +583,3 @@ where
 
 include!("app/views.rs");
 include!("app/actions.rs");
-

@@ -44,12 +44,8 @@ impl fmt::Display for CounterWarning {
             CounterWarning::Missing { kind } => {
                 write!(f, "Missing {kind} counter")
             }
-            CounterWarning::UsedTotalFallback => {
-                f.write_str("Used total counter fallback")
-            }
-            CounterWarning::DerivedTotal => {
-                f.write_str("Total counter derived from BW + Color")
-            }
+            CounterWarning::UsedTotalFallback => f.write_str("Used total counter fallback"),
+            CounterWarning::DerivedTotal => f.write_str("Total counter derived from BW + Color"),
             CounterWarning::NonNumeric { kind, oid } => {
                 write!(f, "Non-numeric {kind} counter at OID {oid}")
             }
@@ -104,7 +100,9 @@ pub fn resolve_counters(
     } else if let Some(total_value) = total.value {
         snapshot.total = Some(total_value);
         if bw.value.is_none() {
-            warnings.push(CounterWarning::Missing { kind: CounterKind::Bw });
+            warnings.push(CounterWarning::Missing {
+                kind: CounterKind::Bw,
+            });
         }
         if color.value.is_none() {
             warnings.push(CounterWarning::Missing {
@@ -117,7 +115,9 @@ pub fn resolve_counters(
         snapshot.bw = bw.value;
         snapshot.color = color.value;
         if bw.value.is_none() {
-            warnings.push(CounterWarning::Missing { kind: CounterKind::Bw });
+            warnings.push(CounterWarning::Missing {
+                kind: CounterKind::Bw,
+            });
         }
         if color.value.is_none() {
             warnings.push(CounterWarning::Missing {
@@ -173,7 +173,10 @@ fn find_counter_value(
         }
     }
 
-    CounterValue { value: None, oid: None }
+    CounterValue {
+        value: None,
+        oid: None,
+    }
 }
 
 #[cfg(test)]
@@ -208,10 +211,12 @@ mod tests {
         assert_eq!(resolution.snapshot.bw, Some(100));
         assert_eq!(resolution.snapshot.color, Some(50));
         assert_eq!(resolution.snapshot.total, Some(150));
-        assert!(resolution
-            .warnings
-            .iter()
-            .any(|warning| matches!(warning, CounterWarning::DerivedTotal)));
+        assert!(
+            resolution
+                .warnings
+                .iter()
+                .any(|warning| matches!(warning, CounterWarning::DerivedTotal))
+        );
     }
 
     #[test]
@@ -229,10 +234,12 @@ mod tests {
         let resolution = resolve_counters(1_725_000_000, &oids, &varbinds);
         assert_eq!(resolution.mode, CounterMode::TotalOnly);
         assert_eq!(resolution.snapshot.total, Some(999));
-        assert!(resolution
-            .warnings
-            .iter()
-            .any(|warning| matches!(warning, CounterWarning::UsedTotalFallback)));
+        assert!(
+            resolution
+                .warnings
+                .iter()
+                .any(|warning| matches!(warning, CounterWarning::UsedTotalFallback))
+        );
     }
 
     #[test]
@@ -240,9 +247,11 @@ mod tests {
         let oids = CounterOidSet::default();
         let resolution = resolve_counters(1_725_000_000, &oids, &[]);
         assert_eq!(resolution.mode, CounterMode::Missing);
-        assert!(resolution
-            .warnings
-            .iter()
-            .any(|warning| matches!(warning, CounterWarning::Missing { .. })));
+        assert!(
+            resolution
+                .warnings
+                .iter()
+                .any(|warning| matches!(warning, CounterWarning::Missing { .. }))
+        );
     }
 }

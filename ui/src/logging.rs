@@ -7,7 +7,7 @@ use tracing::Subscriber;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::{reload, EnvFilter, Layer, Registry};
+use tracing_subscriber::{EnvFilter, Layer, Registry, reload};
 
 #[derive(Debug, Clone)]
 pub struct LogEntry {

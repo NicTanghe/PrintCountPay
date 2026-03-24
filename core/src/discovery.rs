@@ -2,15 +2,15 @@ use std::fmt;
 use std::net::Ipv4Addr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use get_if_addrs::{get_if_addrs, IfAddr};
+use get_if_addrs::{IfAddr, get_if_addrs};
 use tracing::{debug, info, warn};
 
 use crate::model::{EpochSeconds, PrinterId, PrinterRecord, PrinterStatus, SnmpAddress};
 use crate::snmp::{
-    Oid, SnmpConfig, SnmpRequest, SnmpV2cClient, varbind_numeric_value,
-    varbind_object_id_value, varbind_text_value,
+    Oid, SnmpConfig, SnmpRequest, SnmpV2cClient, varbind_numeric_value, varbind_object_id_value,
+    varbind_text_value,
 };
-use crate::{targets, Error};
+use crate::{Error, targets};
 
 const SYS_DESCR_OID: [u32; 9] = [1, 3, 6, 1, 2, 1, 1, 1, 0];
 const SYS_OBJECT_ID_OID: [u32; 9] = [1, 3, 6, 1, 2, 1, 1, 2, 0];
@@ -18,20 +18,8 @@ const PRT_GENERAL_PRINTER_NAME_OID: [u32; 12] = [1, 3, 6, 1, 2, 1, 43, 5, 1, 1, 
 const PRT_MARKER_LIFECOUNT_1_OID: [u32; 13] = [1, 3, 6, 1, 2, 1, 43, 10, 2, 1, 4, 1, 1];
 
 const FALLBACK_KEYWORDS: [&str; 14] = [
-    "printer",
-    "mfp",
-    "ricoh",
-    "xerox",
-    "canon",
-    "hp",
-    "hewlett",
-    "lexmark",
-    "konica",
-    "kyocera",
-    "brother",
-    "epson",
-    "sharp",
-    "samsung",
+    "printer", "mfp", "ricoh", "xerox", "canon", "hp", "hewlett", "lexmark", "konica", "kyocera",
+    "brother", "epson", "sharp", "samsung",
 ];
 
 #[derive(Debug, Clone)]
@@ -54,11 +42,9 @@ impl fmt::Display for CidrParseError {
 impl CidrRange {
     pub fn parse(value: &str) -> Result<Self, CidrParseError> {
         let value = value.trim();
-        let (addr, prefix) = value
-            .split_once('/')
-            .ok_or_else(|| CidrParseError {
-                details: "CIDR must include a /prefix".to_string(),
-            })?;
+        let (addr, prefix) = value.split_once('/').ok_or_else(|| CidrParseError {
+            details: "CIDR must include a /prefix".to_string(),
+        })?;
         let ip: Ipv4Addr = addr.parse().map_err(|_| CidrParseError {
             details: format!("Invalid IPv4 address: {addr}"),
         })?;
@@ -82,10 +68,7 @@ impl CidrRange {
             (network_u32, broadcast_u32)
         };
 
-        Ok(Self {
-            start,
-            end,
-        })
+        Ok(Self { start, end })
     }
 
     pub fn iter(&self) -> CidrIter {
@@ -229,9 +212,10 @@ async fn probe_printer_name(
     }
 
     match client.get(request).await {
-        Ok(response) => {
-            varbind_text_value(&response.varbinds, &Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID))
-        }
+        Ok(response) => varbind_text_value(
+            &response.varbinds,
+            &Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID),
+        ),
         Err(error) => {
             debug!(
                 target: targets::DISCOVERY,
@@ -258,10 +242,11 @@ async fn probe_marker_life_count(
     }
 
     match client.get(request).await {
-        Ok(response) => {
-            varbind_numeric_value(&response.varbinds, &Oid::from_slice(&PRT_MARKER_LIFECOUNT_1_OID))
-                .is_some()
-        }
+        Ok(response) => varbind_numeric_value(
+            &response.varbinds,
+            &Oid::from_slice(&PRT_MARKER_LIFECOUNT_1_OID),
+        )
+        .is_some(),
         Err(error) => {
             debug!(
                 target: targets::DISCOVERY,

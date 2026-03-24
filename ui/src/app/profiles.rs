@@ -203,11 +203,7 @@ impl ProfileIndex {
             }
         }
 
-        if tied {
-            None
-        } else {
-            best.map(|(id, _)| id)
-        }
+        if tied { None } else { best.map(|(id, _)| id) }
     }
 }
 

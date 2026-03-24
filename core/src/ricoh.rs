@@ -46,9 +46,7 @@ impl RicohProfile {
         let sys_object_id = sys_object_id
             .map(str::trim)
             .filter(|value| !value.is_empty());
-        let sys_descr = sys_descr
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
+        let sys_descr = sys_descr.map(str::trim).filter(|value| !value.is_empty());
 
         let ricoh_by_oid = sys_object_id.is_some_and(is_ricoh_sys_object_id);
         let ricoh_by_descr = sys_descr.is_some_and(contains_ricoh);
@@ -69,7 +67,11 @@ impl RicohProfile {
         };
 
         let (match_status, counters, strategy) = if !is_ricoh {
-            (RicohMatch::NotRicoh, CounterAvailability::NONE, CounterStrategy::Unknown)
+            (
+                RicohMatch::NotRicoh,
+                CounterAvailability::NONE,
+                CounterStrategy::Unknown,
+            )
         } else if let Some(model) = model.as_deref() {
             match infer_color_capable(model) {
                 Some(true) => (
@@ -171,12 +173,15 @@ mod tests {
 
     #[test]
     fn identifies_ricoh_from_oid() {
-        let profile = RicohProfile::identify(
-            Some("1.3.6.1.4.1.367.3.2.1"),
-            Some("Generic Printer"),
-        );
+        let profile =
+            RicohProfile::identify(Some("1.3.6.1.4.1.367.3.2.1"), Some("Generic Printer"));
         assert_eq!(profile.match_status, RicohMatch::Unmapped);
-        assert!(profile.notes.iter().any(|note| note.contains("Ricoh identified")));
+        assert!(
+            profile
+                .notes
+                .iter()
+                .any(|note| note.contains("Ricoh identified"))
+        );
     }
 
     #[test]

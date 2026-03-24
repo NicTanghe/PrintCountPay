@@ -3,9 +3,7 @@ mod executor;
 pub mod logging;
 
 pub use app::{Flags, PrintCountApp};
-pub use logging::{
-    apply_log_level, init_logging, LogEntry, LogLevel, LogStore, ReloadHandle,
-};
+pub use logging::{LogEntry, LogLevel, LogStore, ReloadHandle, apply_log_level, init_logging};
 
 pub type UiResult = iced::Result;
 
