@@ -274,6 +274,59 @@ impl SnmpValue {
     }
 }
 
+pub fn find_varbind<'a>(varbinds: &'a [SnmpVarBind], oid: &Oid) -> Option<&'a SnmpVarBind> {
+    varbinds.iter().find(|varbind| varbind.oid == *oid)
+}
+
+pub fn varbind_text_value(varbinds: &[SnmpVarBind], oid: &Oid) -> Option<String> {
+    let varbind = find_varbind(varbinds, oid)?;
+    if varbind.value.is_missing() {
+        return None;
+    }
+    normalize_non_empty_value(
+        varbind
+            .value
+            .as_text_lossy()
+            .unwrap_or_else(|| varbind.value.to_string()),
+    )
+}
+
+pub fn varbind_display_value(varbinds: &[SnmpVarBind], oid: &Oid) -> Option<String> {
+    let varbind = find_varbind(varbinds, oid)?;
+    if varbind.value.is_missing() {
+        return None;
+    }
+    if let Some(value) = varbind.value.as_u64() {
+        return Some(value.to_string());
+    }
+    normalize_non_empty_value(varbind.value.to_string())
+}
+
+pub fn varbind_numeric_value(varbinds: &[SnmpVarBind], oid: &Oid) -> Option<u64> {
+    let varbind = find_varbind(varbinds, oid)?;
+    if varbind.value.is_missing() {
+        return None;
+    }
+    varbind.value.as_u64()
+}
+
+pub fn varbind_object_id_value(varbinds: &[SnmpVarBind], oid: &Oid) -> Option<Oid> {
+    let varbind = find_varbind(varbinds, oid)?;
+    match &varbind.value {
+        SnmpValue::ObjectIdentifier(value) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn normalize_non_empty_value(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 impl fmt::Display for SnmpValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -439,6 +492,12 @@ impl SnmpClient for SnmpV2cClient {
 pub struct MockSnmpClient {
     config: SnmpConfig,
     queue: Arc<Mutex<VecDeque<Result<SnmpResponse, Error>>>>,
+}
+
+impl Default for MockSnmpClient {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MockSnmpClient {

@@ -50,8 +50,8 @@ impl RicohProfile {
             .map(str::trim)
             .filter(|value| !value.is_empty());
 
-        let ricoh_by_oid = sys_object_id.map_or(false, is_ricoh_sys_object_id);
-        let ricoh_by_descr = sys_descr.map_or(false, contains_ricoh);
+        let ricoh_by_oid = sys_object_id.is_some_and(is_ricoh_sys_object_id);
+        let ricoh_by_descr = sys_descr.is_some_and(contains_ricoh);
         let is_ricoh = ricoh_by_oid || ricoh_by_descr;
 
         let mut notes = Vec::new();
@@ -183,7 +183,7 @@ mod tests {
     fn identifies_color_model_from_descr() {
         let profile = RicohProfile::identify(None, Some("Ricoh IM C3000"));
         assert_eq!(profile.match_status, RicohMatch::Known);
-        assert_eq!(profile.counters.color, true);
+        assert!(profile.counters.color);
         assert_eq!(profile.strategy, CounterStrategy::BwColorPreferred);
         assert_eq!(profile.model.as_deref(), Some("IM C3000"));
     }
@@ -192,7 +192,7 @@ mod tests {
     fn identifies_mono_model_from_descr() {
         let profile = RicohProfile::identify(None, Some("RICOH IM 4000"));
         assert_eq!(profile.match_status, RicohMatch::Known);
-        assert_eq!(profile.counters.color, false);
+        assert!(!profile.counters.color);
         assert_eq!(profile.strategy, CounterStrategy::BwOnly);
         assert_eq!(profile.model.as_deref(), Some("IM 4000"));
     }

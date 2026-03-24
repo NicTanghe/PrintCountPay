@@ -1135,6 +1135,7 @@ impl PrintCountApp {
 
     fn poll_label_map(&self) -> std::collections::HashMap<Oid, String> {
         let mut map = std::collections::HashMap::new();
+        let recording_oids = recording_profile_from_settings_lossy(&self.recording_oids);
         let mut insert_label = |oid: Oid, label: &str| {
             map.entry(oid).or_insert_with(|| label.to_string());
         };
@@ -1159,25 +1160,17 @@ impl PrintCountApp {
             }
         }
 
-        if let Ok(oids) = parse_oid_list(&self.recording_oids.copies_bw_input) {
-            for oid in oids {
-                insert_label(oid, "Recording: Copies B/W");
-            }
+        for oid in &recording_oids.copies_bw {
+            insert_label(oid.clone(), "Recording: Copies B/W");
         }
-        if let Ok(oids) = parse_oid_list(&self.recording_oids.copies_color_input) {
-            for oid in oids {
-                insert_label(oid, "Recording: Copies Color");
-            }
+        for oid in &recording_oids.copies_color {
+            insert_label(oid.clone(), "Recording: Copies Color");
         }
-        if let Ok(oids) = parse_oid_list(&self.recording_oids.prints_bw_input) {
-            for oid in oids {
-                insert_label(oid, "Recording: Prints B/W");
-            }
+        for oid in &recording_oids.prints_bw {
+            insert_label(oid.clone(), "Recording: Prints B/W");
         }
-        if let Ok(oids) = parse_oid_list(&self.recording_oids.prints_color_input) {
-            for oid in oids {
-                insert_label(oid, "Recording: Prints Color");
-            }
+        for oid in &recording_oids.prints_color {
+            insert_label(oid.clone(), "Recording: Prints Color");
         }
 
         for oid in &self.counter_oids.bw {
@@ -1235,6 +1228,7 @@ impl PrintCountApp {
                 varbinds,
             } => {
                 let resolution = resolve_counters(*received_at, &self.counter_oids, varbinds);
+                let recording_oids = recording_profile_from_settings_lossy(&self.recording_oids);
                 let default_toner = default_toner_oids();
                 let toner = self
                     .active_profile
@@ -1254,28 +1248,22 @@ impl PrintCountApp {
                         .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                     self.value_line(
                         "B/W printer",
-                        self.value_from_oid_input(varbinds, &self.recording_oids.prints_bw_input),
+                        self.value_from_oids(varbinds, &recording_oids.prints_bw),
                     ),
                     self.value_line(
                         "Color printer",
-                        self.value_from_oid_input(
-                            varbinds,
-                            &self.recording_oids.prints_color_input,
-                        ),
+                        self.value_from_oids(varbinds, &recording_oids.prints_color),
                     ),
                     text("Copier counts")
                         .size(13)
                         .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                     self.value_line(
                         "B/W copier",
-                        self.value_from_oid_input(varbinds, &self.recording_oids.copies_bw_input),
+                        self.value_from_oids(varbinds, &recording_oids.copies_bw),
                     ),
                     self.value_line(
                         "Color copier",
-                        self.value_from_oid_input(
-                            varbinds,
-                            &self.recording_oids.copies_color_input,
-                        ),
+                        self.value_from_oids(varbinds, &recording_oids.copies_color),
                     ),
                     text("Click totals")
                         .size(13)
@@ -1320,7 +1308,7 @@ impl PrintCountApp {
                         );
                         table_rows = table_rows.push(self.value_line_owned(
                             label,
-                            extract_value_string(varbinds, &ricoh_counter_oid(entry.type_id)),
+                            varbind_display_value(varbinds, &ricoh_counter_oid(entry.type_id)),
                         ));
                     }
                     lines = lines.push(table_rows);
@@ -1498,14 +1486,13 @@ impl PrintCountApp {
         }
     }
 
-    fn value_from_oid_input(
+    fn value_from_oids(
         &self,
         varbinds: &[SnmpVarBind],
-        input: &str,
+        oids: &[Oid],
     ) -> Option<String> {
-        let oids = parse_oid_list(input).ok()?;
         oids.iter()
-            .find_map(|oid| extract_value_string(varbinds, oid))
+            .find_map(|oid| varbind_display_value(varbinds, oid))
     }
 
     fn toner_value(
@@ -1513,7 +1500,7 @@ impl PrintCountApp {
         varbinds: &[SnmpVarBind],
         oid: Option<&Oid>,
     ) -> Option<String> {
-        oid.and_then(|oid| extract_value_string(varbinds, oid))
+        oid.and_then(|oid| varbind_display_value(varbinds, oid))
     }
 
     fn recording_table_header(&self) -> Element<'_, Message> {
@@ -1716,10 +1703,6 @@ impl PrintCountApp {
             text("Persistence diagnostics: not captured yet.")
                 .size(14)
                 .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a))),
-            text(format!("Mock SNMP entries: {}", self.mock_snmp_count))
-                .size(14)
-                .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a))),
-            button("Add mock SNMP entry").on_press(Message::AddMockSnmp),
             button("Copy diagnostics").on_press(Message::CopyDiagnostics),
             text(format!("Clipboard: {copy_status}"))
                 .size(12)

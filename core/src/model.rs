@@ -54,18 +54,13 @@ fn default_snmp_port() -> u16 {
     DEFAULT_SNMP_PORT
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PrinterStatus {
+    #[default]
     Unknown,
     Online,
     Offline,
     Error,
-}
-
-impl Default for PrinterStatus {
-    fn default() -> Self {
-        PrinterStatus::Unknown
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

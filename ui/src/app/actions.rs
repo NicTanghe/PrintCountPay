@@ -43,7 +43,6 @@ impl PrintCountApp {
         if let Some(selected) = &self.selected_printer {
             output.push_str(&format!("Selected printer: {}\n", selected));
         }
-        output.push_str(&format!("Mock SNMP entries: {}\n", self.mock_snmp_count));
         output.push_str(&format!(
             "Targets enabled: {}\n",
             self.sorted_targets()
@@ -348,15 +347,15 @@ impl PrintCountApp {
         }
 
         let mut should_replace = false;
-        if let Some(sys_descr) = sys_descr.map(str::trim) {
-            if !sys_descr.is_empty() && existing == sys_descr {
-                should_replace = true;
-            }
+        if let Some(sys_descr) = sys_descr.map(str::trim)
+            && !sys_descr.is_empty() && existing == sys_descr
+        {
+            should_replace = true;
         }
-        if let Some(host) = record.ip_or_hostname.as_deref().map(str::trim) {
-            if !host.is_empty() && existing == host {
-                should_replace = true;
-            }
+        if let Some(host) = record.ip_or_hostname.as_deref().map(str::trim)
+            && !host.is_empty() && existing == host
+        {
+            should_replace = true;
         }
 
         if should_replace && existing != name {
@@ -488,12 +487,13 @@ impl PrintCountApp {
             .as_ref()
             .map(|profile| &profile.toner)
             .unwrap_or(&default_toner);
+        let recording_oids = recording_profile_from_settings_lossy(&self.recording_oids);
 
         let mut request = SnmpRequest::new(
             address,
             snmp_oids(
                 &self.counter_oids,
-                &self.recording_oids,
+                &recording_oids,
                 extra_poll.as_slice(),
                 toner_oids,
             ),
@@ -708,27 +708,24 @@ impl PrintCountApp {
         received_at: u64,
         varbinds: &[SnmpVarBind],
     ) -> RecordingSnapshot {
-        let copies_bw_oids =
-            parse_oid_list(&self.recording_oids.copies_bw_input).unwrap_or_default();
-        let copies_color_oids =
-            parse_oid_list(&self.recording_oids.copies_color_input).unwrap_or_default();
-        let prints_bw_oids =
-            parse_oid_list(&self.recording_oids.prints_bw_input).unwrap_or_default();
-        let prints_color_oids =
-            parse_oid_list(&self.recording_oids.prints_color_input).unwrap_or_default();
+        let recording_oids = recording_profile_from_settings_lossy(&self.recording_oids);
 
-        let copies_bw_value = copies_bw_oids
+        let copies_bw_value = recording_oids
+            .copies_bw
             .iter()
-            .find_map(|oid| extract_counter_u64(varbinds, oid));
-        let copies_color_value = copies_color_oids
+            .find_map(|oid| varbind_numeric_value(varbinds, oid));
+        let copies_color_value = recording_oids
+            .copies_color
             .iter()
-            .find_map(|oid| extract_counter_u64(varbinds, oid));
-        let prints_bw_value = prints_bw_oids
+            .find_map(|oid| varbind_numeric_value(varbinds, oid));
+        let prints_bw_value = recording_oids
+            .prints_bw
             .iter()
-            .find_map(|oid| extract_counter_u64(varbinds, oid));
-        let prints_color_value = prints_color_oids
+            .find_map(|oid| varbind_numeric_value(varbinds, oid));
+        let prints_color_value = recording_oids
+            .prints_color
             .iter()
-            .find_map(|oid| extract_counter_u64(varbinds, oid));
+            .find_map(|oid| varbind_numeric_value(varbinds, oid));
 
         RecordingSnapshot {
             received_at,
@@ -758,18 +755,17 @@ impl PrintCountApp {
             )
         };
         let sys_descr = sys_descr.as_deref().or(sys_descr_override);
-        if let Some(ref id) = profile_id {
-            if self.profile_index.profile(id).is_none() {
-                if let Some(migrated) = self.migrate_profile_id(id) {
-                    profile_id = Some(migrated.clone());
-                    if let Some(record) = self
-                        .printers
-                        .iter_mut()
-                        .find(|record| &record.id == printer_id)
-                    {
-                        record.profile_id = Some(migrated);
-                    }
-                }
+        if let Some(ref id) = profile_id
+            && self.profile_index.profile(id).is_none()
+            && let Some(migrated) = self.migrate_profile_id(id)
+        {
+            profile_id = Some(migrated.clone());
+            if let Some(record) = self
+                .printers
+                .iter_mut()
+                .find(|record| &record.id == printer_id)
+            {
+                record.profile_id = Some(migrated);
             }
         }
 
@@ -779,14 +775,13 @@ impl PrintCountApp {
                 sys_descr,
                 model.as_deref(),
             );
-            if let Some(ref id) = profile_id {
-                if let Some(record) = self
+            if let Some(ref id) = profile_id
+                && let Some(record) = self
                     .printers
                     .iter_mut()
                     .find(|record| &record.id == printer_id)
-                {
-                    record.profile_id = Some(id.clone());
-                }
+            {
+                record.profile_id = Some(id.clone());
             }
         }
 

@@ -36,15 +36,15 @@ pub(crate) fn firefox_tab_style(
             ..button::Style::default()
         };
 
-        if matches!(status, button::Status::Hovered) && !active {
-            if let Some(Background::Color(color)) = style.background {
-                style.background = Some(Background::Color(Color {
-                    r: (color.r + 0.05).min(1.0),
-                    g: (color.g + 0.05).min(1.0),
-                    b: (color.b + 0.05).min(1.0),
-                    a: color.a,
-                }));
-            }
+        if matches!(status, button::Status::Hovered) && !active
+            && let Some(Background::Color(color)) = style.background
+        {
+            style.background = Some(Background::Color(Color {
+                r: (color.r + 0.05).min(1.0),
+                g: (color.g + 0.05).min(1.0),
+                b: (color.b + 0.05).min(1.0),
+                a: color.a,
+            }));
         }
 
         style

@@ -6,7 +6,10 @@ use get_if_addrs::{get_if_addrs, IfAddr};
 use tracing::{debug, info, warn};
 
 use crate::model::{EpochSeconds, PrinterId, PrinterRecord, PrinterStatus, SnmpAddress};
-use crate::snmp::{Oid, SnmpConfig, SnmpRequest, SnmpV2cClient, SnmpValue, SnmpVarBind};
+use crate::snmp::{
+    Oid, SnmpConfig, SnmpRequest, SnmpV2cClient, varbind_numeric_value,
+    varbind_object_id_value, varbind_text_value,
+};
 use crate::{targets, Error};
 
 const SYS_DESCR_OID: [u32; 9] = [1, 3, 6, 1, 2, 1, 1, 1, 0];
@@ -35,8 +38,6 @@ const FALLBACK_KEYWORDS: [&str; 14] = [
 pub struct CidrRange {
     start: u32,
     end: u32,
-    network: Ipv4Addr,
-    prefix: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -84,8 +85,6 @@ impl CidrRange {
         Ok(Self {
             start,
             end,
-            network: u32_to_ipv4(network_u32),
-            prefix,
         })
     }
 
@@ -94,22 +93,6 @@ impl CidrRange {
             current: self.start,
             end: self.end,
         }
-    }
-
-    pub fn host_count(&self) -> u32 {
-        if self.end < self.start {
-            0
-        } else {
-            self.end - self.start + 1
-        }
-    }
-
-    pub fn network(&self) -> Ipv4Addr {
-        self.network
-    }
-
-    pub fn prefix(&self) -> u8 {
-        self.prefix
     }
 }
 
@@ -185,8 +168,9 @@ pub async fn probe_printer(
 
     let client = SnmpV2cClient::new(config);
     let response = client.get(request).await?;
-    let sys_descr = extract_text(&response.varbinds, &Oid::from_slice(&SYS_DESCR_OID));
-    let sys_object_id = extract_object_id(&response.varbinds, &Oid::from_slice(&SYS_OBJECT_ID_OID));
+    let sys_descr = varbind_text_value(&response.varbinds, &Oid::from_slice(&SYS_DESCR_OID));
+    let sys_object_id =
+        varbind_object_id_value(&response.varbinds, &Oid::from_slice(&SYS_OBJECT_ID_OID));
 
     let printer_name = probe_printer_name(&client, &address, community.as_deref()).await;
     let marker_present = if printer_name.is_none() {
@@ -246,7 +230,7 @@ async fn probe_printer_name(
 
     match client.get(request).await {
         Ok(response) => {
-            extract_text(&response.varbinds, &Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID))
+            varbind_text_value(&response.varbinds, &Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID))
         }
         Err(error) => {
             debug!(
@@ -275,7 +259,7 @@ async fn probe_marker_life_count(
 
     match client.get(request).await {
         Ok(response) => {
-            extract_numeric(&response.varbinds, &Oid::from_slice(&PRT_MARKER_LIFECOUNT_1_OID))
+            varbind_numeric_value(&response.varbinds, &Oid::from_slice(&PRT_MARKER_LIFECOUNT_1_OID))
                 .is_some()
         }
         Err(error) => {
@@ -287,30 +271,6 @@ async fn probe_marker_life_count(
             );
             false
         }
-    }
-}
-
-fn extract_text(varbinds: &[SnmpVarBind], oid: &Oid) -> Option<String> {
-    let varbind = varbinds.iter().find(|varbind| varbind.oid == *oid)?;
-    if varbind.value.is_missing() {
-        return None;
-    }
-    varbind
-        .value
-        .as_text_lossy()
-        .or_else(|| Some(varbind.value.to_string()))
-}
-
-fn extract_numeric(varbinds: &[SnmpVarBind], oid: &Oid) -> Option<u64> {
-    let varbind = varbinds.iter().find(|varbind| varbind.oid == *oid)?;
-    varbind.value.as_u64()
-}
-
-fn extract_object_id(varbinds: &[SnmpVarBind], oid: &Oid) -> Option<Oid> {
-    let varbind = varbinds.iter().find(|varbind| varbind.oid == *oid)?;
-    match &varbind.value {
-        SnmpValue::ObjectIdentifier(value) => Some(value.clone()),
-        _ => None,
     }
 }
 

@@ -69,7 +69,6 @@ pub struct CounterResolution {
     pub snapshot: CounterSnapshot,
     pub mode: CounterMode,
     pub warnings: Vec<CounterWarning>,
-    pub raw_varbinds: Vec<SnmpVarBind>,
 }
 
 pub fn resolve_counters(
@@ -77,7 +76,6 @@ pub fn resolve_counters(
     oids: &CounterOidSet,
     varbinds: &[SnmpVarBind],
 ) -> CounterResolution {
-    let raw_varbinds = varbinds.to_vec();
     let mut warnings = Vec::new();
 
     let bw = find_counter_value(CounterKind::Bw, &oids.bw, varbinds, &mut warnings);
@@ -141,7 +139,6 @@ pub fn resolve_counters(
         snapshot,
         mode,
         warnings,
-        raw_varbinds,
     }
 }
 

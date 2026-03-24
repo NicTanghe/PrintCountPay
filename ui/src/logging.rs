@@ -67,10 +67,11 @@ impl LogStore {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum LogLevel {
     Error,
     Warn,
+    #[default]
     Info,
     Debug,
     Trace,
@@ -93,12 +94,6 @@ impl LogLevel {
             LogLevel::Debug => LevelFilter::DEBUG,
             LogLevel::Trace => LevelFilter::TRACE,
         }
-    }
-}
-
-impl Default for LogLevel {
-    fn default() -> Self {
-        LogLevel::Info
     }
 }
 

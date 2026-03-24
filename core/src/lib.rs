@@ -18,5 +18,6 @@ pub use model::{
 pub use ricoh::{CounterAvailability, CounterStrategy, RicohMatch, RicohProfile};
 pub use snmp::{
     MockSnmpClient, Oid, OidParseError, SnmpClient, SnmpConfig, SnmpFuture, SnmpRequest,
-    SnmpResponse, SnmpV2cClient, SnmpValue, SnmpVarBind, SnmpWalkRequest,
+    SnmpResponse, SnmpV2cClient, SnmpValue, SnmpVarBind, SnmpWalkRequest, find_varbind,
+    varbind_display_value, varbind_numeric_value, varbind_object_id_value, varbind_text_value,
 };

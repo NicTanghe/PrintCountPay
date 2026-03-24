@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use iced::keyboard;
 use iced::Color;
 use printcountpay_core::{
-    CounterOidSet, Oid, PrinterRecord, PrinterStatus, SnmpVarBind,
+    CounterOidSet, Oid, PrinterStatus, SnmpVarBind,
 };
 
 use crate::app::constants::{
@@ -168,6 +168,17 @@ pub(crate) fn recording_profile_from_settings(
     })
 }
 
+pub(crate) fn recording_profile_from_settings_lossy(
+    settings: &RecordingOidSettings,
+) -> RecordingOidProfile {
+    RecordingOidProfile {
+        copies_bw: parse_oid_list(&settings.copies_bw_input).unwrap_or_default(),
+        copies_color: parse_oid_list(&settings.copies_color_input).unwrap_or_default(),
+        prints_bw: parse_oid_list(&settings.prints_bw_input).unwrap_or_default(),
+        prints_color: parse_oid_list(&settings.prints_color_input).unwrap_or_default(),
+    }
+}
+
 pub(crate) fn format_oid_list(oids: &[Oid]) -> String {
     oids.iter()
         .map(|oid| oid.to_string())
@@ -196,43 +207,6 @@ pub(crate) fn parse_oid_list(value: &str) -> Result<Vec<Oid>, String> {
         oids.push(oid);
     }
     Ok(oids)
-}
-
-
-pub(crate) fn extract_text(varbinds: &[SnmpVarBind], oid: &Oid) -> Option<String> {
-    let varbind = varbinds.iter().find(|varbind| varbind.oid == *oid)?;
-    if varbind.value.is_missing() {
-        return None;
-    }
-    let value = varbind
-        .value
-        .as_text_lossy()
-        .unwrap_or_else(|| varbind.value.to_string());
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
-
-pub(crate) fn extract_value_string(varbinds: &[SnmpVarBind], oid: &Oid) -> Option<String> {
-    let varbind = varbinds.iter().find(|varbind| varbind.oid == *oid)?;
-    if varbind.value.is_missing() {
-        return None;
-    }
-    if let Some(value) = varbind.value.as_u64() {
-        return Some(value.to_string());
-    }
-    Some(varbind.value.to_string())
-}
-
-pub(crate) fn extract_counter_u64(varbinds: &[SnmpVarBind], oid: &Oid) -> Option<u64> {
-    let varbind = varbinds.iter().find(|varbind| varbind.oid == *oid)?;
-    if varbind.value.is_missing() {
-        return None;
-    }
-    varbind.value.as_u64()
 }
 
 pub(crate) fn delta_value(start: Option<u64>, end: Option<u64>) -> Option<u64> {
@@ -395,10 +369,10 @@ pub(crate) fn counter_oids_from_walk(varbinds: &[SnmpVarBind]) -> CounterOidSet 
         if oid.as_slice() == PRT_MARKER_LIFECOUNT_2.as_slice() {
             mapping.color.push(oid.clone());
         }
-        if oid.as_slice() == PRT_MARKER_LIFECOUNT_3.as_slice() {
-            if total_seen.insert(oid.clone()) {
-                total.push(oid.clone());
-            }
+        if oid.as_slice() == PRT_MARKER_LIFECOUNT_3.as_slice()
+            && total_seen.insert(oid.clone())
+        {
+            total.push(oid.clone());
         }
     }
 
@@ -414,7 +388,7 @@ pub(crate) fn counter_oids_from_walk(varbinds: &[SnmpVarBind]) -> CounterOidSet 
 
 pub(crate) fn snmp_oids(
     counter_oids: &CounterOidSet,
-    recording_oids: &RecordingOidSettings,
+    recording_oids: &RecordingOidProfile,
     extra_poll_oids: &[Oid],
     toner_oids: &TonerOidProfile,
 ) -> Vec<Oid> {
@@ -433,25 +407,17 @@ pub(crate) fn snmp_oids(
     push(Oid::from_slice(&SYS_UPTIME_OID));
     push(Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID));
 
-    if let Ok(oids) = parse_oid_list(&recording_oids.copies_bw_input) {
-        for oid in oids {
-            push(oid);
-        }
+    for oid in &recording_oids.copies_bw {
+        push(oid.clone());
     }
-    if let Ok(oids) = parse_oid_list(&recording_oids.prints_bw_input) {
-        for oid in oids {
-            push(oid);
-        }
+    for oid in &recording_oids.prints_bw {
+        push(oid.clone());
     }
-    if let Ok(oids) = parse_oid_list(&recording_oids.copies_color_input) {
-        for oid in oids {
-            push(oid);
-        }
+    for oid in &recording_oids.copies_color {
+        push(oid.clone());
     }
-    if let Ok(oids) = parse_oid_list(&recording_oids.prints_color_input) {
-        for oid in oids {
-            push(oid);
-        }
+    for oid in &recording_oids.prints_color {
+        push(oid.clone());
     }
 
     for oid in extra_poll_oids {
@@ -482,8 +448,4 @@ pub(crate) fn snmp_oids(
     }
 
     oids
-}
-
-pub(crate) fn seed_printers() -> Vec<PrinterRecord> {
-    Vec::new()
 }

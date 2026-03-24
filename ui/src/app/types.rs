@@ -27,7 +27,6 @@ pub enum Message {
     LogLevelChanged(LogLevel),
     ToggleTarget(String, bool),
     CopyDiagnostics,
-    AddMockSnmp,
     ManualNameChanged(String),
     ManualHostChanged(String),
     ManualPortChanged(String),

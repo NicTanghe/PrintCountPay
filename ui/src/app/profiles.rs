@@ -92,9 +92,7 @@ impl MachineMatcher {
         let mut score = 0u8;
 
         if let Some(prefix) = self.sys_object_id_prefix.as_deref() {
-            let Some(value) = sys_object_id else {
-                return None;
-            };
+            let value = sys_object_id?;
             if !value.trim().starts_with(prefix.trim()) {
                 return None;
             }
@@ -102,9 +100,7 @@ impl MachineMatcher {
         }
 
         if let Some(needle) = self.sys_descr_contains.as_deref() {
-            let Some(value) = sys_descr else {
-                return None;
-            };
+            let value = sys_descr?;
             if !value
                 .to_ascii_lowercase()
                 .contains(&needle.to_ascii_lowercase())
@@ -115,9 +111,7 @@ impl MachineMatcher {
         }
 
         if let Some(needle) = self.model_contains.as_deref() {
-            let Some(value) = model else {
-                return None;
-            };
+            let value = model?;
             if !value
                 .to_ascii_lowercase()
                 .contains(&needle.to_ascii_lowercase())
@@ -249,12 +243,11 @@ pub(crate) fn load_profile_index(root: &Path) -> (ProfileIndex, Option<String>) 
                             .aliases
                             .legacy_to_current
                             .insert(legacy_id.clone(), id.clone())
+                            && previous != id
                         {
-                            if previous != id {
-                                errors.push(format!(
-                                    "Duplicate legacy profile id {legacy_id} for {previous} and {id}"
-                                ));
-                            }
+                            errors.push(format!(
+                                "Duplicate legacy profile id {legacy_id} for {previous} and {id}"
+                            ));
                         }
                     }
 

@@ -14,9 +14,10 @@ use ron::de::from_str;
 use ron::ser::{to_string_pretty, PrettyConfig};
 
 use printcountpay_core::{
-    default_discovery_cidr, probe_printer, resolve_counters, targets, CidrRange, CounterOidSet, Oid,
-    PrinterId, PrinterRecord, SnmpAddress, SnmpConfig, SnmpRequest,
-    SnmpV2cClient, SnmpVarBind, SnmpWalkRequest, DEFAULT_SNMP_PORT,
+    default_discovery_cidr, probe_printer, resolve_counters, targets, varbind_display_value,
+    varbind_numeric_value, varbind_text_value, CidrRange, CounterOidSet, Oid, PrinterId,
+    PrinterRecord, SnmpAddress, SnmpConfig, SnmpRequest, SnmpV2cClient, SnmpVarBind,
+    SnmpWalkRequest, DEFAULT_SNMP_PORT,
 };
 
 use crate::logging::{apply_log_level, LogEntry, LogLevel, LogStore, ReloadHandle};
@@ -48,7 +49,6 @@ pub struct PrintCountApp {
     known_targets: HashSet<String>,
     enabled_targets: HashSet<String>,
     copy_status: Option<String>,
-    mock_snmp_count: u32,
     advanced_mode: bool,
     active_tab: Tab,
     printer_tab: PrinterTab,
@@ -103,7 +103,7 @@ impl PrintCountApp {
         let known_targets: HashSet<String> =
             default_targets.iter().map(|value| value.to_string()).collect();
         let enabled_targets = known_targets.clone();
-        let printers = seed_printers();
+        let printers: Vec<PrinterRecord> = Vec::new();
         let profiles_root = "profiles".to_string();
         let (profile_index, profile_status) =
             load_profile_index(Path::new(&profiles_root));
@@ -130,7 +130,6 @@ impl PrintCountApp {
                 known_targets,
                 enabled_targets,
                 copy_status: None,
-                mock_snmp_count: 0,
                 advanced_mode: false,
                 active_tab: Tab::Printers,
                 printer_tab: PrinterTab::Recording,
@@ -223,15 +222,6 @@ impl PrintCountApp {
             }
             Message::CopyDiagnostics => {
                 self.copy_status = Some(self.copy_diagnostics());
-                Command::none()
-            }
-            Message::AddMockSnmp => {
-                self.mock_snmp_count = self.mock_snmp_count.saturating_add(1);
-                tracing::info!(
-                    target: targets::SNMP,
-                    count = self.mock_snmp_count,
-                    "Mock SNMP entry added"
-                );
                 Command::none()
             }
             Message::ManualNameChanged(value) => {
@@ -337,15 +327,15 @@ impl PrintCountApp {
                 let mut sys_object_id = None;
                 let state = match result {
                     Ok(response) => {
-                        let printer_name = extract_text(
+                        let printer_name = varbind_text_value(
                             &response.varbinds,
                             &Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID),
                         );
                         let sys_name =
-                            extract_text(&response.varbinds, &Oid::from_slice(&SYS_NAME_OID));
+                            varbind_text_value(&response.varbinds, &Oid::from_slice(&SYS_NAME_OID));
                         sys_descr =
-                            extract_text(&response.varbinds, &Oid::from_slice(&SYS_DESCR_OID));
-                        sys_object_id = extract_text(
+                            varbind_text_value(&response.varbinds, &Oid::from_slice(&SYS_DESCR_OID));
+                        sys_object_id = varbind_text_value(
                             &response.varbinds,
                             &Oid::from_slice(&SYS_OBJECT_ID_OID),
                         );
