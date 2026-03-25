@@ -24,5 +24,6 @@
         community: Some("public"),
         status: Online,
         last_seen: Some(1768389688),
+        profile_id: Some("ricoh-pro-c7200s-light"),
     ),
 ]
