@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use iced::Color;
 use iced::keyboard;
 use printcountpay_core::{CounterOidSet, Oid, PrinterStatus, SnmpVarBind};
+use time::{OffsetDateTime, UtcOffset};
 
 use crate::app::constants::{
     PRT_MARKER_LIFECOUNT_1, PRT_MARKER_LIFECOUNT_2, PRT_MARKER_LIFECOUNT_3,
@@ -15,7 +16,7 @@ use crate::app::constants::{
 use crate::app::profiles::{RecordingOidProfile, TonerOidProfile};
 use crate::app::types::{
     BwPricing, Message, PricingSettings, RecordingCategory, RecordingOidSettings, RecordingSession,
-    RecordingSnapshot,
+    RecordingSnapshot, SnmpPollStatus,
 };
 
 pub(crate) fn level_color(level: tracing::Level) -> Color {
@@ -121,6 +122,39 @@ pub(crate) fn format_elapsed_hms(total_seconds: u64) -> String {
     let seconds = total_seconds % 60;
 
     format!("{hours:02}:{minutes:02}:{seconds:02}")
+}
+
+pub(crate) fn format_clock_hms(epoch_seconds: u64) -> String {
+    let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
+    format_clock_hms_with_offset(epoch_seconds, offset)
+}
+
+fn format_clock_hms_with_offset(epoch_seconds: u64, offset: UtcOffset) -> String {
+    if epoch_seconds > i64::MAX as u64 {
+        return "n/a".to_string();
+    }
+
+    match OffsetDateTime::from_unix_timestamp(epoch_seconds as i64) {
+        Ok(timestamp) => {
+            let local = timestamp.to_offset(offset);
+            format!(
+                "{:02}:{:02}:{:02}",
+                local.hour(),
+                local.minute(),
+                local.second()
+            )
+        }
+        Err(_) => "n/a".to_string(),
+    }
+}
+
+pub(crate) fn poll_received_at(state: &SnmpPollStatus) -> Option<u64> {
+    match state {
+        SnmpPollStatus::Idle => None,
+        SnmpPollStatus::Ok { received_at, .. } | SnmpPollStatus::Error { received_at, .. } => {
+            Some(*received_at)
+        }
+    }
 }
 
 pub(crate) fn default_counter_oids() -> CounterOidSet {
@@ -457,11 +491,13 @@ pub(crate) fn counter_oids_from_walk(varbinds: &[SnmpVarBind]) -> CounterOidSet 
 #[cfg(test)]
 mod tests {
     use super::{
-        default_recording_oid_inputs, default_toner_oids, delta_value, format_elapsed_hms,
-        recording_profile_from_settings_lossy, snmp_oids, sum_optional_included, sum_two,
+        default_recording_oid_inputs, default_toner_oids, delta_value,
+        format_clock_hms_with_offset, format_elapsed_hms, recording_profile_from_settings_lossy,
+        snmp_oids, sum_optional_included, sum_two,
     };
     use crate::app::constants::PRT_GENERAL_PRINTER_NAME_OID;
     use printcountpay_core::{CounterOidSet, Oid};
+    use time::UtcOffset;
 
     #[test]
     fn sum_two_ignores_missing_side() {
@@ -495,6 +531,16 @@ mod tests {
         assert_eq!(format_elapsed_hms(0), "00:00:00");
         assert_eq!(format_elapsed_hms(59), "00:00:59");
         assert_eq!(format_elapsed_hms(3_661), "01:01:01");
+    }
+
+    #[test]
+    fn clock_time_formats_as_hours_minutes_seconds() {
+        assert_eq!(format_clock_hms_with_offset(0, UtcOffset::UTC), "00:00:00");
+        assert_eq!(format_clock_hms_with_offset(59, UtcOffset::UTC), "00:00:59");
+        assert_eq!(
+            format_clock_hms_with_offset(3_661, UtcOffset::UTC),
+            "01:01:01"
+        );
     }
 
     #[test]

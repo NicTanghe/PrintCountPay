@@ -337,13 +337,31 @@ impl PrintCountApp {
             .and_then(|id| self.recording_sessions.get(id))
             .cloned()
             .unwrap_or_default();
+        let last_poll_received_at = selected_id
+            .and_then(|id| self.poll_states.get(id))
+            .and_then(poll_received_at);
         let live_snapshot = if session.active {
             selected_id.and_then(|id| self.snapshot_for_printer(id).ok())
         } else {
             None
         };
 
-        let status = session.status.as_deref().unwrap_or("Ready.");
+        let status = session.status.clone().unwrap_or_else(|| {
+            if session.active {
+                let elapsed = last_poll_received_at
+                    .map(|received_at| {
+                        format_elapsed_hms(now_epoch_seconds().saturating_sub(received_at))
+                    })
+                    .unwrap_or_else(|| "n/a".to_string());
+                format!("Time since last poll: {elapsed}")
+            } else {
+                last_poll_received_at
+                    .or_else(|| session.end.as_ref().map(|snapshot| snapshot.received_at))
+                    .or_else(|| session.start.as_ref().map(|snapshot| snapshot.received_at))
+                    .map(|received_at| format!("Last poll at: {}", format_clock_hms(received_at)))
+                    .unwrap_or_else(|| "Ready.".to_string())
+            }
+        });
         let state_label = if session.active {
             "Recording active"
         } else {

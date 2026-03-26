@@ -556,10 +556,7 @@ impl PrintCountApp {
                 session.start = Some(snapshot.clone());
                 session.end = None;
                 session.edits.apply_start_snapshot(&snapshot);
-                session.status = Some(format!(
-                    "Recording started at {}.",
-                    snapshot.received_at
-                ));
+                session.status = None;
             }
             Err(error) => {
                 session.status = Some(format!("Start failed: {error}"));
@@ -597,10 +594,7 @@ impl PrintCountApp {
                 session.active = false;
                 session.end = Some(snapshot.clone());
                 session.edits.apply_end_snapshot(&snapshot);
-                session.status = Some(format!(
-                    "Recording stopped at {}.",
-                    snapshot.received_at
-                ));
+                session.status = None;
             }
             Err(error) => {
                 session.status = Some(format!("Stop failed: {error}"));
