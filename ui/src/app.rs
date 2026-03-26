@@ -530,9 +530,17 @@ impl PrintCountApp {
 
         let top_area = mouse_area(column![header, tabs].spacing(12)).on_press(Message::DragWindow);
 
-        let content = column![top_area, body].spacing(20).padding(16);
+        let content = column![top_area, body].spacing(18);
 
-        container(content)
+        let shell = container(content)
+            .padding(14)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .clip(true)
+            .style(theme::Container::Custom(window_shell_style()));
+
+        container(shell)
+            .padding(12)
             .width(Length::Fill)
             .height(Length::Fill)
             .into()

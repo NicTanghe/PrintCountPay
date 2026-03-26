@@ -287,7 +287,7 @@ impl PrintCountApp {
         let details = self.printer_details_view();
 
         row![list, details]
-            .spacing(16)
+            .spacing(0)
             .align_items(Alignment::Start)
             .into()
     }
@@ -619,7 +619,7 @@ impl PrintCountApp {
     }
 
     fn printer_list_view(&self) -> Element<'_, Message> {
-        let mut list_items = column![].spacing(6);
+        let mut list_items = column![].spacing(10);
 
         if self.printers.is_empty() {
             list_items = list_items.push(
@@ -633,37 +633,31 @@ impl PrintCountApp {
             }
         }
 
-        let content = if self.advanced_mode {
-            column![
-                self.printer_storage_controls_view(),
-                text("Printers")
-                    .size(20)
-                    .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-                text("Discovery and manual entries appear here.")
-                    .size(12)
-                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-                list_items,
-            ]
-            .spacing(12)
-        } else {
-            column![
-                text("Printers")
-                    .size(20)
-                    .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-                list_items,
-            ]
-            .spacing(12)
-        };
-
-        let scroll = scrollable(content)
+        let scroll = scrollable(list_items)
             .height(Length::Fill)
             .width(Length::Fill);
+        let mut content = column![
+            text("Printers")
+                .size(28)
+                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+            scroll,
+        ]
+        .spacing(18);
 
-        container(scroll)
-            .padding(12)
+        if self.advanced_mode {
+            content = column![self.printer_storage_controls_view(), content].spacing(16);
+        }
+
+        container(content)
+            .padding(iced::Padding {
+                top: 20.0,
+                right: 18.0,
+                bottom: 16.0,
+                left: 18.0,
+            })
             .width(Length::FillPortion(1))
             .height(Length::Fill)
-            .style(theme::Container::Box)
+            .style(theme::Container::Custom(sidebar_panel_style()))
             .into()
     }
 
@@ -682,28 +676,54 @@ impl PrintCountApp {
             .to_string();
         let name = record.model.as_deref().unwrap_or("Unknown name").to_string();
         let status = status_label(record.status).to_string();
-        let content = column![
-            text(name)
-                .size(14)
-                .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37))),
-            text(address)
-                .size(12)
-                .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a))),
-            text(status)
-                .size(12)
-                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-        ]
-        .spacing(2);
-
-        let style = if is_selected {
-            theme::Button::Primary
+        let name_color = if is_selected {
+            Color::from_rgb8(0xff, 0xff, 0xff)
         } else {
-            theme::Button::Secondary
+            Color::from_rgb8(0x1f, 0x2a, 0x37)
+        };
+        let secondary_color = if is_selected {
+            Color::from_rgba8(0xff, 0xff, 0xff, 0.82)
+        } else {
+            Color::from_rgb8(0x5a, 0x66, 0x78)
+        };
+        let status_color = if is_selected {
+            Color::from_rgba8(0xff, 0xff, 0xff, 0.86)
+        } else {
+            match record.status {
+                printcountpay_core::PrinterStatus::Online => Color::from_rgb8(0x4d, 0x8f, 0x6a),
+                printcountpay_core::PrinterStatus::Offline => Color::from_rgb8(0x8a, 0x93, 0xa3),
+                printcountpay_core::PrinterStatus::Error => Color::from_rgb8(0xd2, 0x57, 0x57),
+                printcountpay_core::PrinterStatus::Unknown => Color::from_rgb8(0xb1, 0x87, 0x38),
+            }
         };
 
+        let details = row![
+            text(address)
+                .size(13)
+                .style(theme::Text::Color(secondary_color)),
+            text("|")
+                .size(13)
+                .style(theme::Text::Color(secondary_color)),
+            text(status)
+                .size(13)
+                .style(theme::Text::Color(status_color)),
+        ]
+        .spacing(8)
+        .align_items(Alignment::Center);
+
+        let content = column![
+            text(name)
+                .size(16)
+                .style(theme::Text::Color(name_color)),
+            details,
+        ]
+        .spacing(6);
+
         let base = button(content)
-            .style(style)
+            .style(theme::Button::custom(printer_card_style(is_selected)))
             .width(Length::Fill)
+            .padding([14, 16])
+            .clip(true)
             .on_press(Message::SelectPrinter(record.id.clone()));
 
         BadgeOverlay::new(base, self.recording_badge(is_recording), is_recording)
