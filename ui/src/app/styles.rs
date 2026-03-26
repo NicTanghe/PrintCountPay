@@ -98,8 +98,8 @@ pub(crate) fn sidebar_panel_style() -> impl Fn(&Theme) -> container::Style {
                 .into(),
         ),
         border: Border {
-            color: Color::from_rgba8(0xd7, 0xdd, 0xe8, 0.9),
-            width: 1.0,
+            color: Color::TRANSPARENT,
+            width: 0.0,
             radius: 0.0.into(),
         },
         shadow: Shadow::default(),

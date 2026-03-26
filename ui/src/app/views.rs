@@ -8,6 +8,10 @@ impl PrintCountApp {
             left_tabs = left_tabs.push(self.tab_button(Tab::Debug, "Debug"));
         }
 
+        left_tabs.into()
+    }
+
+    fn window_controls_bar(&self) -> Element<'_, Message> {
         let right_controls = row![
             self.advanced_toggle_button(),
             self.window_button("-", Message::MinimizeWindow),
@@ -16,7 +20,7 @@ impl PrintCountApp {
         .spacing(6)
         .align_items(Alignment::Center);
 
-        row![left_tabs, horizontal_space(), right_controls]
+        row![horizontal_space(), right_controls]
             .spacing(8)
             .align_items(Alignment::Center)
             .into()
@@ -279,16 +283,6 @@ impl PrintCountApp {
         container(content)
             .padding(8)
             .style(theme::Container::Box)
-            .into()
-    }
-
-    fn printers_tab_view(&self) -> Element<'_, Message> {
-        let list = self.printer_list_view();
-        let details = self.printer_details_view();
-
-        row![list, details]
-            .spacing(0)
-            .align_items(Alignment::Start)
             .into()
     }
 
@@ -637,16 +631,18 @@ impl PrintCountApp {
             .height(Length::Fill)
             .width(Length::Fill);
         let mut content = column![
+            self.tab_bar(),
             text("Printers")
                 .size(28)
                 .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-            scroll,
         ]
         .spacing(18);
 
         if self.advanced_mode {
-            content = column![self.printer_storage_controls_view(), content].spacing(16);
+            content = content.push(self.printer_storage_controls_view());
         }
+
+        content = content.push(scroll);
 
         container(content)
             .padding(iced::Padding {

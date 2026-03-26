@@ -515,22 +515,22 @@ impl PrintCountApp {
     }
 
     pub(crate) fn view(&self) -> Element<'_, Message> {
-        let header = row![].spacing(12).align_items(Alignment::Center);
-
-        let tabs = self.tab_bar();
-
-        let body = if self.advanced_mode {
-            match self.active_tab {
-                Tab::Printers => self.printers_tab_view(),
-                Tab::Debug => self.debug_tab_view(),
-            }
+        let sidebar = self.printer_list_view();
+        let main_content = if self.advanced_mode && self.active_tab == Tab::Debug {
+            self.debug_tab_view()
         } else {
-            self.printers_tab_view()
+            self.printer_details_view()
         };
+        let top_area = mouse_area(self.window_controls_bar()).on_press(Message::DragWindow);
+        let right_column = column![top_area, main_content]
+            .spacing(12)
+            .width(Length::FillPortion(2))
+            .height(Length::Fill);
 
-        let top_area = mouse_area(column![header, tabs].spacing(12)).on_press(Message::DragWindow);
-
-        let content = column![top_area, body].spacing(18);
+        let content = row![sidebar, right_column]
+            .spacing(0)
+            .width(Length::Fill)
+            .height(Length::Fill);
 
         let shell = container(content)
             .padding(14)
