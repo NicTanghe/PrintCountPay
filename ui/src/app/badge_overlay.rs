@@ -219,8 +219,7 @@ where
         let badge_bounds = badge_layout.bounds();
         let mut x =
             self.position.x + (self.content_bounds.width - badge_bounds.width) - self.margin;
-        let mut y =
-            self.position.y + (self.content_bounds.height - badge_bounds.height) - self.margin;
+        let mut y = self.position.y + self.margin;
 
         if x < self.position.x {
             x = self.position.x;

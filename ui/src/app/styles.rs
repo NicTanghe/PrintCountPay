@@ -299,6 +299,7 @@ pub(crate) fn rec_badge_style(active: bool) -> impl Fn(&Theme) -> container::Sty
                 width: 0.0,
                 radius: 999.0.into(),
             },
+            shadow: Shadow::default(),
             ..container::Style::default()
         }
     }

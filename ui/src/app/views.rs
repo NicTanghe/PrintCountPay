@@ -1777,7 +1777,11 @@ impl PrintCountApp {
             text("Persistence diagnostics: not captured yet.")
                 .size(14)
                 .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a))),
-            button("Copy diagnostics").on_press(Message::CopyDiagnostics),
+            button("Copy diagnostics")
+                .style(theme::Button::custom(solid_brand_button_style(
+                    CONTENT_BRAND_SAMPLE,
+                )))
+                .on_press(Message::CopyDiagnostics),
             text(format!("Clipboard: {copy_status}"))
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
