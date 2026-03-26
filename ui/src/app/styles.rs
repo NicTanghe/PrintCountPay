@@ -1,6 +1,6 @@
 use iced::gradient::Linear;
 use iced::widget::{button, container, text};
-use iced::{Background, Border, Color, Shadow, Theme, Vector};
+use iced::{Background, Border, Color, Shadow, Theme, Vector, border};
 
 pub(crate) fn firefox_tab_style(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
@@ -100,7 +100,7 @@ pub(crate) fn sidebar_panel_style() -> impl Fn(&Theme) -> container::Style {
         border: Border {
             color: Color::TRANSPARENT,
             width: 0.0,
-            radius: 0.0.into(),
+            radius: border::left(10.0),
         },
         shadow: Shadow::default(),
         ..container::Style::default()
