@@ -524,16 +524,19 @@ impl PrintCountApp {
         let top_area = mouse_area(self.window_controls_bar()).on_press(Message::DragWindow);
         let right_column = column![top_area, main_content]
             .spacing(12)
+            .width(Length::Fill)
+            .height(Length::Fill);
+        let right_panel = container(right_column)
+            .padding(14)
             .width(Length::FillPortion(2))
             .height(Length::Fill);
 
-        let content = row![sidebar, right_column]
+        let content = row![sidebar, right_panel]
             .spacing(0)
             .width(Length::Fill)
             .height(Length::Fill);
 
         let shell = container(content)
-            .padding(14)
             .width(Length::Fill)
             .height(Length::Fill)
             .clip(true)
