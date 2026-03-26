@@ -47,11 +47,80 @@ pub(crate) fn status_label(status: PrinterStatus) -> &'static str {
     }
 }
 
+pub(crate) fn printer_card_tint(index: usize, total: usize) -> Color {
+    let start = (231.0, 0.13, 0.89);
+    let end = (232.0, 0.12, 0.87);
+    let t = if total <= 1 {
+        0.0
+    } else {
+        index as f32 / (total.saturating_sub(1)) as f32
+    };
+
+    hsl_to_rgb(
+        lerp(start.0, end.0, t),
+        lerp(start.1, end.1, t),
+        lerp(start.2, end.2, t),
+    )
+}
+
+fn lerp(start: f32, end: f32, t: f32) -> f32 {
+    start + (end - start) * t.clamp(0.0, 1.0)
+}
+
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Color {
+    let h = (h.rem_euclid(360.0)) / 360.0;
+
+    if s <= f32::EPSILON {
+        return Color::from_rgb(l, l, l);
+    }
+
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
+    let p = 2.0 * l - q;
+
+    Color::from_rgb(
+        hue_to_rgb(p, q, h + 1.0 / 3.0),
+        hue_to_rgb(p, q, h),
+        hue_to_rgb(p, q, h - 1.0 / 3.0),
+    )
+}
+
+fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
+    if t < 0.0 {
+        t += 1.0;
+    }
+    if t > 1.0 {
+        t -= 1.0;
+    }
+    if t < 1.0 / 6.0 {
+        return p + (q - p) * 6.0 * t;
+    }
+    if t < 1.0 / 2.0 {
+        return q;
+    }
+    if t < 2.0 / 3.0 {
+        return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+    }
+
+    p
+}
+
 pub(crate) fn now_epoch_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+pub(crate) fn format_elapsed_hms(total_seconds: u64) -> String {
+    let hours = total_seconds / 3_600;
+    let minutes = (total_seconds % 3_600) / 60;
+    let seconds = total_seconds % 60;
+
+    format!("{hours:02}:{minutes:02}:{seconds:02}")
 }
 
 pub(crate) fn default_counter_oids() -> CounterOidSet {
@@ -388,7 +457,7 @@ pub(crate) fn counter_oids_from_walk(varbinds: &[SnmpVarBind]) -> CounterOidSet 
 #[cfg(test)]
 mod tests {
     use super::{
-        default_recording_oid_inputs, default_toner_oids, delta_value,
+        default_recording_oid_inputs, default_toner_oids, delta_value, format_elapsed_hms,
         recording_profile_from_settings_lossy, snmp_oids, sum_optional_included, sum_two,
     };
     use crate::app::constants::PRT_GENERAL_PRINTER_NAME_OID;
@@ -419,6 +488,13 @@ mod tests {
         let end_total = sum_two(None, Some(1_669_900));
 
         assert_eq!(delta_value(start_total, end_total), Some(749));
+    }
+
+    #[test]
+    fn elapsed_time_formats_as_hours_minutes_seconds() {
+        assert_eq!(format_elapsed_hms(0), "00:00:00");
+        assert_eq!(format_elapsed_hms(59), "00:00:59");
+        assert_eq!(format_elapsed_hms(3_661), "01:01:01");
     }
 
     #[test]

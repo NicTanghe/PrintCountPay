@@ -27,13 +27,15 @@ impl PrintCountApp {
     }
 
     fn tab_button(&self, tab: Tab, label: &str) -> Element<'_, Message> {
-        let style = if self.active_tab == tab {
-            theme::Button::Primary
+        if self.active_tab == tab {
+            self.top_bar_button(
+                label,
+                solid_brand_button_style(SIDEBAR_BRAND_SAMPLE),
+                Message::SelectTab(tab),
+            )
         } else {
-            theme::Button::Secondary
-        };
-
-        self.top_bar_button(label, style, Message::SelectTab(tab))
+            self.top_bar_button(label, theme::Button::Secondary, Message::SelectTab(tab))
+        }
     }
 
     fn advanced_toggle_button(&self) -> Element<'_, Message> {
@@ -42,13 +44,15 @@ impl PrintCountApp {
         } else {
             "Advanced: Off"
         };
-        let style = if self.advanced_mode {
-            theme::Button::Primary
+        if self.advanced_mode {
+            self.top_bar_button(
+                label,
+                solid_brand_button_style(CONTROLS_BRAND_SAMPLE),
+                Message::ToggleAdvancedMode,
+            )
         } else {
-            theme::Button::Secondary
-        };
-
-        self.top_bar_button(label, style, Message::ToggleAdvancedMode)
+            self.top_bar_button(label, theme::Button::Secondary, Message::ToggleAdvancedMode)
+        }
     }
 
     fn window_button(&self, label: &str, message: Message) -> Element<'_, Message> {
@@ -58,7 +62,7 @@ impl PrintCountApp {
     fn top_bar_button(
         &self,
         label: &str,
-        style: fn(&Theme, iced::widget::button::Status) -> iced::widget::button::Style,
+        style: impl Fn(&Theme, iced::widget::button::Status) -> iced::widget::button::Style + 'static,
         message: Message,
     ) -> Element<'_, Message> {
         let label = container(text(label.to_string()).size(12))
@@ -119,9 +123,17 @@ impl PrintCountApp {
             .width(Length::Fill);
 
         let action_button = if self.discovery_active {
-            button("Stop").on_press(Message::StopDiscovery)
+            button("Stop")
+                .style(theme::Button::custom(solid_brand_button_style(
+                    CONTENT_BRAND_SAMPLE,
+                )))
+                .on_press(Message::StopDiscovery)
         } else {
-            button("Start").on_press(Message::StartDiscovery)
+            button("Start")
+                .style(theme::Button::custom(solid_brand_button_style(
+                    CONTENT_BRAND_SAMPLE,
+                )))
+                .on_press(Message::StartDiscovery)
         };
 
         let status = self
@@ -232,7 +244,13 @@ impl PrintCountApp {
                 community_input,
             ]
             .spacing(4),
-            row![button("Add printer").on_press(Message::AddManualPrinter)]
+            row![
+                button("Add printer")
+                    .style(theme::Button::custom(solid_brand_button_style(
+                        CONTENT_BRAND_SAMPLE,
+                    )))
+                    .on_press(Message::AddManualPrinter)
+            ]
                 .spacing(8)
                 .align_items(Alignment::Center),
             text(format!("Status: {status}"))
@@ -257,8 +275,16 @@ impl PrintCountApp {
 
         let path_controls = row![
             path_input,
-            button("Load").on_press(Message::LoadPrinters),
-            button("Export").on_press(Message::SavePrinters),
+            button("Load")
+                .style(theme::Button::custom(solid_brand_button_style(
+                    SIDEBAR_BRAND_SAMPLE,
+                )))
+                .on_press(Message::LoadPrinters),
+            button("Export")
+                .style(theme::Button::custom(solid_brand_button_style(
+                    SIDEBAR_BRAND_SAMPLE,
+                )))
+                .on_press(Message::SavePrinters),
         ]
         .spacing(8)
         .align_items(Alignment::Center);
@@ -328,27 +354,34 @@ impl PrintCountApp {
         let start_button = if !controls_enabled || session.active {
             button("Start recording").style(theme::Button::Secondary)
         } else {
-            button("Start recording").on_press(Message::StartRecording)
+            button("Start recording")
+                .style(theme::Button::custom(solid_brand_button_style(
+                    CONTENT_BRAND_SAMPLE,
+                )))
+                .on_press(Message::StartRecording)
         };
         let stop_button = if !controls_enabled || !session.active {
             button("Stop recording").style(theme::Button::Secondary)
         } else {
-            button("Stop recording").on_press(Message::StopRecording)
+            button("Stop recording")
+                .style(theme::Button::custom(solid_brand_button_style(
+                    CONTENT_BRAND_SAMPLE,
+                )))
+                .on_press(Message::StopRecording)
         };
 
-        let start_time = session
+        let elapsed_time = session
             .start
             .as_ref()
-            .map(|snapshot| snapshot.received_at.to_string())
-            .unwrap_or_else(|| "n/a".to_string());
-        let end_time = session
-            .end
-            .as_ref()
-            .map(|snapshot| snapshot.received_at.to_string())
-            .or_else(|| {
-                live_snapshot
+            .map(|start_snapshot| {
+                let end_received_at = session
+                    .end
                     .as_ref()
-                    .map(|snapshot| format!("live {}", snapshot.received_at))
+                    .map(|snapshot| snapshot.received_at)
+                    .or_else(|| live_snapshot.as_ref().map(|snapshot| snapshot.received_at))
+                    .unwrap_or(start_snapshot.received_at);
+
+                format_elapsed_hms(end_received_at.saturating_sub(start_snapshot.received_at))
             })
             .unwrap_or_else(|| "n/a".to_string());
 
@@ -531,12 +564,7 @@ impl PrintCountApp {
                 .align_items(Alignment::Center),
         );
         content = content.push(
-            text(format!("Start snapshot: {start_time}"))
-                .size(12)
-                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-        );
-        content = content.push(
-            text(format!("End snapshot: {end_time}"))
+            text(format!("Elapsed: {elapsed_time}"))
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
         );
@@ -597,7 +625,10 @@ impl PrintCountApp {
         let rounding_toggle = checkbox(self.pricing.round_to_half_euro)
             .label("Round B/W to nearest 0.50 EUR")
             .on_toggle(Message::PricingRoundChanged)
-            .size(12);
+            .size(12)
+            .style(theme::Checkbox::custom(brand_checkbox_style(
+                CONTENT_BRAND_SAMPLE,
+            )));
 
         let hint = text("Used for recording totals. Decimals accept . or ,")
             .size(11)
@@ -622,8 +653,9 @@ impl PrintCountApp {
                     .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a))),
             );
         } else {
-            for record in &self.printers {
-                list_items = list_items.push(self.printer_row(record));
+            let total = self.printers.len();
+            for (index, record) in self.printers.iter().enumerate() {
+                list_items = list_items.push(self.printer_row(record, index, total));
             }
         }
 
@@ -638,11 +670,11 @@ impl PrintCountApp {
         ]
         .spacing(18);
 
+        content = content.push(scroll);
+
         if self.advanced_mode {
             content = content.push(self.printer_storage_controls_view());
         }
-
-        content = content.push(scroll);
 
         container(content)
             .padding(iced::Padding {
@@ -657,13 +689,14 @@ impl PrintCountApp {
             .into()
     }
 
-    fn printer_row(&self, record: &PrinterRecord) -> Element<'_, Message> {
+    fn printer_row(&self, record: &PrinterRecord, index: usize, total: usize) -> Element<'_, Message> {
         let is_selected = self.selected_printer.as_ref() == Some(&record.id);
         let is_recording = self
             .recording_sessions
             .get(&record.id)
             .map(|session| session.active)
             .unwrap_or(false);
+        let base_color = printer_card_tint(index, total);
         let address = record
             .ip_or_hostname
             .as_deref()
@@ -716,7 +749,10 @@ impl PrintCountApp {
         .spacing(6);
 
         let base = button(content)
-            .style(theme::Button::custom(printer_card_style(is_selected)))
+            .style(theme::Button::custom(printer_card_style(
+                is_selected,
+                base_color,
+            )))
             .width(Length::Fill)
             .padding([14, 16])
             .clip(true)
@@ -911,8 +947,16 @@ impl PrintCountApp {
 
         let path_controls = row![
             path_input,
-            button("Load").on_press(Message::LoadOids),
-            button("Save").on_press(Message::SaveOids),
+            button("Load")
+                .style(theme::Button::custom(solid_brand_button_style(
+                    CONTENT_BRAND_SAMPLE,
+                )))
+                .on_press(Message::LoadOids),
+            button("Save")
+                .style(theme::Button::custom(solid_brand_button_style(
+                    CONTENT_BRAND_SAMPLE,
+                )))
+                .on_press(Message::SaveOids),
         ]
         .spacing(8)
         .align_items(Alignment::Center);
@@ -960,10 +1004,21 @@ impl PrintCountApp {
         let crawl_button = if self.oids_crawl_in_flight {
             button(crawl_label).style(theme::Button::Secondary)
         } else {
-            button(crawl_label).on_press(Message::CrawlOids)
+            button(crawl_label)
+                .style(theme::Button::custom(solid_brand_button_style(
+                    CONTENT_BRAND_SAMPLE,
+                )))
+                .on_press(Message::CrawlOids)
         };
 
-        let actions = row![button("Apply mapping").on_press(Message::ApplyOids), crawl_button]
+        let actions = row![
+            button("Apply mapping")
+                .style(theme::Button::custom(solid_brand_button_style(
+                    CONTENT_BRAND_SAMPLE,
+                )))
+                .on_press(Message::ApplyOids),
+            crawl_button
+        ]
             .spacing(8)
             .align_items(Alignment::Center);
 
@@ -1676,7 +1731,10 @@ impl PrintCountApp {
             filter_column = filter_column.push(
                 checkbox(enabled)
                     .label(target.clone())
-                    .on_toggle(move |value| Message::ToggleTarget(target.clone(), value)),
+                    .on_toggle(move |value| Message::ToggleTarget(target.clone(), value))
+                    .style(theme::Checkbox::custom(brand_checkbox_style(
+                        CONTENT_BRAND_SAMPLE,
+                    ))),
             );
         }
 

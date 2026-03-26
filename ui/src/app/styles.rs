@@ -1,6 +1,42 @@
 use iced::gradient::Linear;
-use iced::widget::{button, container, text};
+use iced::widget::{button, checkbox, container, text};
 use iced::{Background, Border, Color, Shadow, Theme, Vector, border};
+
+pub(crate) const SIDEBAR_BRAND_SAMPLE: f32 = 1.0 / 6.0;
+pub(crate) const CONTENT_BRAND_SAMPLE: f32 = 2.0 / 3.0;
+pub(crate) const CONTROLS_BRAND_SAMPLE: f32 = 5.0 / 6.0;
+
+fn brand_gradient_start() -> Color {
+    Color::from_rgb8(0x51, 0xb0, 0xdb)
+}
+
+fn brand_gradient_end() -> Color {
+    Color::from_rgb8(0x55, 0xbf, 0xec)
+}
+
+fn interpolate_color(start: Color, end: Color, t: f32) -> Color {
+    let t = t.clamp(0.0, 1.0);
+
+    Color {
+        r: start.r + (end.r - start.r) * t,
+        g: start.g + (end.g - start.g) * t,
+        b: start.b + (end.b - start.b) * t,
+        a: start.a + (end.a - start.a) * t,
+    }
+}
+
+fn shift_color(color: Color, amount: f32) -> Color {
+    Color {
+        r: (color.r + amount).clamp(0.0, 1.0),
+        g: (color.g + amount).clamp(0.0, 1.0),
+        b: (color.b + amount).clamp(0.0, 1.0),
+        a: color.a,
+    }
+}
+
+pub(crate) fn sampled_brand_color(position: f32) -> Color {
+    interpolate_color(brand_gradient_start(), brand_gradient_end(), position)
+}
 
 pub(crate) fn firefox_tab_style(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
@@ -67,6 +103,71 @@ pub(crate) fn indicator_button_style(
     }
 }
 
+pub(crate) fn solid_brand_button_style(
+    position: f32,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_theme, status| {
+        let base_color = sampled_brand_color(position);
+        let background = match status {
+            button::Status::Pressed => shift_color(base_color, -0.04),
+            button::Status::Hovered => shift_color(base_color, 0.03),
+            button::Status::Disabled => Color {
+                a: 0.55,
+                ..base_color
+            },
+            button::Status::Active => base_color,
+        };
+
+        button::Style {
+            background: Some(Background::Color(background)),
+            text_color: Color::WHITE,
+            border: Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: 6.0.into(),
+            },
+            shadow: Shadow {
+                color: Color::from_rgba8(0x12, 0x45, 0x5d, 0.12),
+                offset: Vector::new(0.0, 2.0),
+                blur_radius: 6.0,
+            },
+            ..button::Style::default()
+        }
+    }
+}
+
+pub(crate) fn brand_checkbox_style(
+    position: f32,
+) -> impl Fn(&Theme, checkbox::Status) -> checkbox::Style {
+    move |_theme, status| {
+        let accent = sampled_brand_color(position);
+        let unchecked = Color::from_rgb8(0xff, 0xff, 0xff);
+
+        match status {
+            checkbox::Status::Active { is_checked }
+            | checkbox::Status::Hovered { is_checked }
+            | checkbox::Status::Disabled { is_checked } => checkbox::Style {
+                background: Background::Color(if is_checked { accent } else { unchecked }),
+                icon_color: if is_checked {
+                    Color::WHITE
+                } else {
+                    Color::TRANSPARENT
+                },
+                border: Border {
+                    color: if is_checked {
+                        accent
+                    } else {
+                        Color::from_rgb8(0xc5, 0xc6, 0xd0)
+                    },
+                    width: if is_checked { 0.0 } else { 1.0 },
+                    radius: 4.0.into(),
+                },
+                text_color: None,
+            },
+        }
+    }
+}
+
 pub(crate) fn window_shell_style() -> impl Fn(&Theme) -> container::Style {
     move |_theme| container::Style {
         background: Some(
@@ -92,9 +193,9 @@ pub(crate) fn window_shell_style() -> impl Fn(&Theme) -> container::Style {
 pub(crate) fn sidebar_panel_style() -> impl Fn(&Theme) -> container::Style {
     move |_theme| container::Style {
         background: Some(
-            Linear::new(2.25)
-                .add_stop(0.0, Color::from_rgba8(0xf5, 0xf6, 0xfa, 0.96))
-                .add_stop(1.0, Color::from_rgba8(0xef, 0xf1, 0xf6, 0.94))
+            Linear::new(std::f32::consts::FRAC_PI_2)
+                .add_stop(0.0, Color::from_rgb8(0xe8, 0xe8, 0xed))
+                .add_stop(1.0, Color::from_rgb8(0xdf, 0xe0, 0xe7))
                 .into(),
         ),
         border: Border {
@@ -109,28 +210,40 @@ pub(crate) fn sidebar_panel_style() -> impl Fn(&Theme) -> container::Style {
 
 pub(crate) fn printer_card_style(
     selected: bool,
+    base_color: Color,
 ) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_theme, status| {
         let background = if selected {
-            match status {
-                button::Status::Pressed => Linear::new(1.15)
-                    .add_stop(0.0, Color::from_rgb8(0x4a, 0x68, 0xe0))
-                    .add_stop(1.0, Color::from_rgb8(0x3f, 0x5f, 0xda))
-                    .into(),
-                button::Status::Hovered => Linear::new(1.15)
-                    .add_stop(0.0, Color::from_rgb8(0x6c, 0x89, 0xff))
-                    .add_stop(1.0, Color::from_rgb8(0x5b, 0x7b, 0xf5))
-                    .into(),
-                _ => Linear::new(1.15)
-                    .add_stop(0.0, Color::from_rgb8(0x66, 0x84, 0xff))
-                    .add_stop(1.0, Color::from_rgb8(0x55, 0x75, 0xf0))
-                    .into(),
-            }
+            let selected_color = sampled_brand_color(SIDEBAR_BRAND_SAMPLE);
+            let color = match status {
+                button::Status::Pressed => shift_color(selected_color, -0.04),
+                button::Status::Hovered => shift_color(selected_color, 0.03),
+                button::Status::Disabled => Color {
+                    a: 0.75,
+                    ..selected_color
+                },
+                button::Status::Active => selected_color,
+            };
+
+            Background::Color(color)
         } else {
             let color = match status {
-                button::Status::Pressed => Color::from_rgba8(0xec, 0xf0, 0xf8, 0.98),
-                button::Status::Hovered => Color::from_rgba8(0xf8, 0xfa, 0xfe, 0.98),
-                _ => Color::from_rgba8(0xff, 0xff, 0xff, 0.94),
+                button::Status::Pressed => Color {
+                    r: (base_color.r - 0.02).max(0.0),
+                    g: (base_color.g - 0.02).max(0.0),
+                    b: (base_color.b - 0.02).max(0.0),
+                    a: 0.98,
+                },
+                button::Status::Hovered => Color {
+                    r: (base_color.r + 0.01).min(1.0),
+                    g: (base_color.g + 0.01).min(1.0),
+                    b: (base_color.b + 0.01).min(1.0),
+                    a: 0.98,
+                },
+                _ => Color {
+                    a: 0.96,
+                    ..base_color
+                },
             };
             Background::Color(color)
         };
@@ -144,11 +257,11 @@ pub(crate) fn printer_card_style(
             },
             border: Border {
                 color: if selected {
-                    Color::from_rgba8(0x5f, 0x7d, 0xf1, 0.95)
+                    Color::TRANSPARENT
                 } else {
-                    Color::from_rgba8(0xd4, 0xdc, 0xea, 0.9)
+                    Color::from_rgb8(0xc5, 0xc6, 0xd0)
                 },
-                width: 1.0,
+                width: if selected { 0.0 } else { 1.0 },
                 radius: 6.0.into(),
             },
             shadow: Shadow {
@@ -199,10 +312,6 @@ pub(crate) mod theme {
     pub(crate) mod Button {
         use super::*;
 
-        pub(crate) fn Primary(theme: &Theme, status: button::Status) -> button::Style {
-            button::primary(theme, status)
-        }
-
         pub(crate) fn Secondary(theme: &Theme, status: button::Status) -> button::Style {
             button::secondary(theme, status)
         }
@@ -210,6 +319,17 @@ pub(crate) mod theme {
         pub(crate) fn custom<'a>(
             style: impl Fn(&Theme, button::Status) -> button::Style + 'a,
         ) -> impl Fn(&Theme, button::Status) -> button::Style + 'a {
+            style
+        }
+    }
+
+    #[allow(non_snake_case)]
+    pub(crate) mod Checkbox {
+        use super::*;
+
+        pub(crate) fn custom<'a>(
+            style: impl Fn(&Theme, checkbox::Status) -> checkbox::Style + 'a,
+        ) -> impl Fn(&Theme, checkbox::Status) -> checkbox::Style + 'a {
             style
         }
     }
