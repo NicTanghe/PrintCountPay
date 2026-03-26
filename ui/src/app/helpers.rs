@@ -6,11 +6,11 @@ use iced::keyboard;
 use printcountpay_core::{CounterOidSet, Oid, PrinterStatus, SnmpVarBind};
 
 use crate::app::constants::{
-    PRT_GENERAL_PRINTER_NAME_OID, PRT_MARKER_LIFECOUNT_1, PRT_MARKER_LIFECOUNT_2,
-    PRT_MARKER_LIFECOUNT_3, RICOH_BW_COPIER_COUNT_OID, RICOH_BW_PRINTER_COUNT_OID,
-    RICOH_COLOR_COPIER_COUNT_OID, RICOH_COLOR_PRINTER_COUNT_OID, RICOH_COUNTER_VALUE_ROOT,
-    RICOH_TONER_BLACK_OID, RICOH_TONER_CYAN_OID, RICOH_TONER_MAGENTA_OID, RICOH_TONER_YELLOW_OID,
-    SYS_DESCR_OID, SYS_NAME_OID, SYS_OBJECT_ID_OID, SYS_UPTIME_OID,
+    PRT_MARKER_LIFECOUNT_1, PRT_MARKER_LIFECOUNT_2, PRT_MARKER_LIFECOUNT_3,
+    RICOH_BW_COPIER_COUNT_OID, RICOH_BW_PRINTER_COUNT_OID, RICOH_COLOR_COPIER_COUNT_OID,
+    RICOH_COLOR_PRINTER_COUNT_OID, RICOH_COUNTER_VALUE_ROOT, RICOH_TONER_BLACK_OID,
+    RICOH_TONER_CYAN_OID, RICOH_TONER_MAGENTA_OID, RICOH_TONER_YELLOW_OID, SYS_DESCR_OID,
+    SYS_NAME_OID, SYS_OBJECT_ID_OID, SYS_UPTIME_OID,
 };
 use crate::app::profiles::{RecordingOidProfile, TonerOidProfile};
 use crate::app::types::{
@@ -387,7 +387,12 @@ pub(crate) fn counter_oids_from_walk(varbinds: &[SnmpVarBind]) -> CounterOidSet 
 
 #[cfg(test)]
 mod tests {
-    use super::{delta_value, sum_optional_included, sum_two};
+    use super::{
+        default_recording_oid_inputs, default_toner_oids, delta_value,
+        recording_profile_from_settings_lossy, snmp_oids, sum_optional_included, sum_two,
+    };
+    use crate::app::constants::PRT_GENERAL_PRINTER_NAME_OID;
+    use printcountpay_core::{CounterOidSet, Oid};
 
     #[test]
     fn sum_two_ignores_missing_side() {
@@ -415,6 +420,21 @@ mod tests {
 
         assert_eq!(delta_value(start_total, end_total), Some(749));
     }
+
+    #[test]
+    fn recurring_poll_omits_printer_name_oid() {
+        let oids = snmp_oids(
+            &CounterOidSet::default(),
+            &recording_profile_from_settings_lossy(&default_recording_oid_inputs()),
+            &[],
+            &default_toner_oids(),
+        );
+
+        assert!(
+            !oids.contains(&Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID)),
+            "recurring polling should not request the discovery-only printer name OID"
+        );
+    }
 }
 
 pub(crate) fn snmp_oids(
@@ -436,7 +456,6 @@ pub(crate) fn snmp_oids(
     push(Oid::from_slice(&SYS_OBJECT_ID_OID));
     push(Oid::from_slice(&SYS_NAME_OID));
     push(Oid::from_slice(&SYS_UPTIME_OID));
-    push(Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID));
 
     for oid in &recording_oids.copies_bw {
         push(oid.clone());
