@@ -529,7 +529,8 @@ impl PrintCountApp {
         let right_panel = container(right_column)
             .padding(14)
             .width(Length::FillPortion(2))
-            .height(Length::Fill);
+            .height(Length::Fill)
+            .style(theme::Container::Custom(right_panel_style()));
 
         let content = row![sidebar, right_panel]
             .spacing(0)

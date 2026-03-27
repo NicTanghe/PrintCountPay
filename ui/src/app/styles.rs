@@ -14,6 +14,18 @@ fn brand_gradient_end() -> Color {
     Color::from_rgb8(0x55, 0xbf, 0xec)
 }
 
+fn right_panel_background_color() -> Color {
+    Color::from_rgb8(0xf5, 0xf3, 0xf7)
+}
+
+fn right_content_background_color() -> Color {
+    Color::from_rgb8(0xf8, 0xf7, 0xf8)
+}
+
+fn top_controls_button_color() -> Color {
+    Color::from_rgb8(0xd8, 0xda, 0xdf)
+}
+
 fn interpolate_color(start: Color, end: Color, t: f32) -> Color {
     let t = t.clamp(0.0, 1.0);
 
@@ -123,6 +135,37 @@ pub(crate) fn solid_recording_button_style() -> impl Fn(&Theme, button::Status) 
     )
 }
 
+pub(crate) fn top_controls_button_style() -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_theme, status| {
+        let base_color = top_controls_button_color();
+        let background = match status {
+            button::Status::Pressed => shift_color(base_color, -0.04),
+            button::Status::Hovered => shift_color(base_color, 0.02),
+            button::Status::Disabled => Color {
+                a: 0.6,
+                ..base_color
+            },
+            button::Status::Active => base_color,
+        };
+
+        button::Style {
+            background: Some(Background::Color(background)),
+            text_color: Color::from_rgb8(0x2a, 0x2f, 0x39),
+            border: Border {
+                color: shift_color(base_color, -0.07),
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            shadow: Shadow {
+                color: Color::from_rgba8(0x10, 0x19, 0x2b, 0.04),
+                offset: Vector::new(0.0, 1.0),
+                blur_radius: 4.0,
+            },
+            ..button::Style::default()
+        }
+    }
+}
+
 fn solid_color_button_style(
     base_color: Color,
     shadow_color: Color,
@@ -205,6 +248,30 @@ pub(crate) fn window_shell_style() -> impl Fn(&Theme) -> container::Style {
             color: Color::from_rgba8(0x10, 0x19, 0x2b, 0.16),
             offset: Vector::new(0.0, 12.0),
             blur_radius: 28.0,
+        },
+        ..container::Style::default()
+    }
+}
+
+pub(crate) fn right_panel_style() -> impl Fn(&Theme) -> container::Style {
+    move |_theme| container::Style {
+        background: Some(Background::Color(right_panel_background_color())),
+        ..container::Style::default()
+    }
+}
+
+pub(crate) fn right_content_panel_style() -> impl Fn(&Theme) -> container::Style {
+    move |_theme| container::Style {
+        background: Some(Background::Color(right_content_background_color())),
+        border: Border {
+            color: Color::from_rgba8(0xd8, 0xd5, 0xdc, 0.9),
+            width: 1.0,
+            radius: 10.0.into(),
+        },
+        shadow: Shadow {
+            color: Color::from_rgba8(0x10, 0x19, 0x2b, 0.04),
+            offset: Vector::new(0.0, 4.0),
+            blur_radius: 12.0,
         },
         ..container::Style::default()
     }

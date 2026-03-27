@@ -51,12 +51,16 @@ impl PrintCountApp {
                 Message::ToggleAdvancedMode,
             )
         } else {
-            self.top_bar_button(label, theme::Button::Secondary, Message::ToggleAdvancedMode)
+            self.top_bar_button(
+                label,
+                theme::Button::custom(top_controls_button_style()),
+                Message::ToggleAdvancedMode,
+            )
         }
     }
 
     fn window_button(&self, label: &str, message: Message) -> Element<'_, Message> {
-        self.top_bar_button(label, theme::Button::Secondary, message)
+        self.top_bar_button(label, theme::Button::custom(top_controls_button_style()), message)
     }
 
     fn top_bar_button(
@@ -904,9 +908,9 @@ impl PrintCountApp {
 
         container(content)
             .padding(12)
-            .width(Length::FillPortion(2))
+            .width(Length::Fill)
             .height(Length::Fill)
-            .style(theme::Container::Box)
+            .style(theme::Container::Custom(right_content_panel_style()))
             .into()
     }
 
@@ -1730,10 +1734,16 @@ impl PrintCountApp {
 
         let debug_panel = self.debug_panel_view();
 
-        row![console, debug_panel]
-            .spacing(16)
-            .align_items(Alignment::Start)
-            .into()
+        container(
+            row![console, debug_panel]
+                .spacing(16)
+                .align_items(Alignment::Start),
+        )
+        .padding(12)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(theme::Container::Custom(right_content_panel_style()))
+        .into()
     }
 
     fn target_filters_view(&self) -> Element<'_, Message> {
