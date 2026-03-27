@@ -324,6 +324,11 @@ fn subtle_button_style(
 pub(crate) fn right_panel_style() -> impl Fn(&Theme) -> container::Style {
     move |_theme| container::Style {
         background: Some(Background::Color(right_panel_background_color())),
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: border::right(10.0),
+        },
         ..container::Style::default()
     }
 }
