@@ -682,7 +682,23 @@ impl PrintCountApp {
             }
         }
 
-        let scroll = scrollable(list_items)
+        let scroll = scrollable(
+            container(list_items)
+                .width(Length::Fill)
+                .padding(iced::Padding {
+                    top: 0.0,
+                    right: 16.0,
+                    bottom: 0.0,
+                    left: 0.0,
+                }),
+        )
+            .direction(scrollable::Direction::Vertical(
+                scrollable::Scrollbar::new()
+                    .width(8)
+                    .margin(2)
+                    .scroller_width(8),
+            ))
+            .style(printer_list_scrollable_style())
             .height(Length::Fill)
             .width(Length::Fill);
         let mut content = column![
@@ -702,7 +718,7 @@ impl PrintCountApp {
         container(content)
             .padding(iced::Padding {
                 top: 20.0,
-                right: 18.0,
+                right: 2.0,
                 bottom: 16.0,
                 left: 18.0,
             })

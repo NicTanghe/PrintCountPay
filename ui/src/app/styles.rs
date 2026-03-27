@@ -1,6 +1,6 @@
 use iced::gradient::Linear;
 use iced::overlay::menu;
-use iced::widget::{button, checkbox, container, pick_list, text};
+use iced::widget::{button, checkbox, container, pick_list, scrollable, text};
 use iced::{Background, Border, Color, Shadow, Theme, Vector, border};
 
 pub(crate) const SIDEBAR_BRAND_SAMPLE: f32 = 1.0 / 6.0;
@@ -197,6 +197,46 @@ pub(crate) fn profile_pick_list_menu_style() -> impl Fn(&Theme) -> menu::Style {
                 blur_radius: 10.0,
             },
         }
+    }
+}
+
+pub(crate) fn printer_list_scrollable_style(
+) -> impl Fn(&Theme, scrollable::Status) -> scrollable::Style {
+    move |theme, status| {
+        let mut style = scrollable::default(theme, status);
+        let brand = sampled_brand_color(CONTENT_BRAND_SAMPLE);
+        let scroller_color = match status {
+            scrollable::Status::Hovered {
+                is_vertical_scrollbar_hovered: true,
+                ..
+            }
+            | scrollable::Status::Dragged {
+                is_vertical_scrollbar_dragged: true,
+                ..
+            } => brand,
+            _ => Color::from_rgba8(0xc3, 0xcd, 0xd8, 0.95),
+        };
+
+        style.vertical_rail = scrollable::Rail {
+            background: Some(Background::Color(Color::from_rgba8(
+                0xe7, 0xec, 0xf2, 0.72,
+            ))),
+            border: Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: 999.0.into(),
+            },
+            scroller: scrollable::Scroller {
+                background: Background::Color(scroller_color),
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 999.0.into(),
+                },
+            },
+        };
+
+        style
     }
 }
 
