@@ -29,12 +29,10 @@ impl PrintCountApp {
     fn tab_button(&self, tab: Tab, label: &str) -> Element<'_, Message> {
         let style: Box<
             dyn Fn(&Theme, iced::widget::button::Status) -> iced::widget::button::Style,
-        > = if tab == Tab::Debug {
-            Box::new(theme::Button::custom(top_controls_button_style()))
-        } else if self.active_tab == tab {
+        > = if self.active_tab == tab {
             Box::new(solid_brand_button_style(SIDEBAR_BRAND_SAMPLE))
         } else {
-            Box::new(theme::Button::Secondary)
+            Box::new(theme::Button::custom(top_controls_button_style()))
         };
 
         self.top_bar_button(label, style, Message::SelectTab(tab))
