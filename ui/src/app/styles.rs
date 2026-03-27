@@ -34,6 +34,10 @@ fn shift_color(color: Color, amount: f32) -> Color {
     }
 }
 
+pub(crate) fn recording_active_color() -> Color {
+    Color::from_rgb8(0xe0, 0x4f, 0x4f)
+}
+
 pub(crate) fn sampled_brand_color(position: f32) -> Color {
     interpolate_color(brand_gradient_start(), brand_gradient_end(), position)
 }
@@ -106,8 +110,24 @@ pub(crate) fn indicator_button_style(
 pub(crate) fn solid_brand_button_style(
     position: f32,
 ) -> impl Fn(&Theme, button::Status) -> button::Style {
+    solid_color_button_style(
+        sampled_brand_color(position),
+        Color::from_rgba8(0x12, 0x45, 0x5d, 0.12),
+    )
+}
+
+pub(crate) fn solid_recording_button_style() -> impl Fn(&Theme, button::Status) -> button::Style {
+    solid_color_button_style(
+        recording_active_color(),
+        Color::from_rgba8(0x6e, 0x19, 0x19, 0.14),
+    )
+}
+
+fn solid_color_button_style(
+    base_color: Color,
+    shadow_color: Color,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_theme, status| {
-        let base_color = sampled_brand_color(position);
         let background = match status {
             button::Status::Pressed => shift_color(base_color, -0.04),
             button::Status::Hovered => shift_color(base_color, 0.03),
@@ -127,7 +147,7 @@ pub(crate) fn solid_brand_button_style(
                 radius: 6.0.into(),
             },
             shadow: Shadow {
-                color: Color::from_rgba8(0x12, 0x45, 0x5d, 0.12),
+                color: shadow_color,
                 offset: Vector::new(0.0, 2.0),
                 blur_radius: 6.0,
             },
@@ -281,7 +301,7 @@ pub(crate) fn printer_card_style(
 pub(crate) fn rec_badge_style(active: bool) -> impl Fn(&Theme) -> container::Style {
     move |_theme| {
         let background = if active {
-            Some(Background::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f)))
+            Some(Background::Color(recording_active_color()))
         } else {
             None
         };

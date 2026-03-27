@@ -369,23 +369,23 @@ impl PrintCountApp {
         };
 
         let controls_enabled = selected_id.is_some();
-        let start_button = if !controls_enabled || session.active {
-            button("Start recording").style(theme::Button::Secondary)
+        let recording_button_label = if session.active {
+            "Stop recording"
         } else {
-            button("Start recording")
+            "Start recording"
+        };
+        let recording_button = if !controls_enabled {
+            button(recording_button_label).style(theme::Button::Secondary)
+        } else if session.active {
+            button(recording_button_label)
+                .style(theme::Button::custom(solid_recording_button_style()))
+                .on_press(Message::StopRecording)
+        } else {
+            button(recording_button_label)
                 .style(theme::Button::custom(solid_brand_button_style(
                     CONTENT_BRAND_SAMPLE,
                 )))
                 .on_press(Message::StartRecording)
-        };
-        let stop_button = if !controls_enabled || !session.active {
-            button("Stop recording").style(theme::Button::Secondary)
-        } else {
-            button("Stop recording")
-                .style(theme::Button::custom(solid_brand_button_style(
-                    CONTENT_BRAND_SAMPLE,
-                )))
-                .on_press(Message::StopRecording)
         };
 
         let elapsed_time = session
@@ -577,7 +577,7 @@ impl PrintCountApp {
             );
         }
         content = content.push(
-            row![start_button, stop_button]
+            row![recording_button]
                 .spacing(8)
                 .align_items(Alignment::Center),
         );
