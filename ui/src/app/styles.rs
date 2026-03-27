@@ -26,6 +26,14 @@ fn top_controls_button_color() -> Color {
     Color::from_rgb8(0xd8, 0xda, 0xdf)
 }
 
+fn debug_tab_active_color() -> Color {
+    Color::from_rgb8(0x63, 0x69, 0x7d)
+}
+
+fn debug_tab_inactive_color() -> Color {
+    Color::from_rgb8(0xef, 0xec, 0xf2)
+}
+
 fn interpolate_color(start: Color, end: Color, t: f32) -> Color {
     let t = t.clamp(0.0, 1.0);
 
@@ -160,6 +168,53 @@ pub(crate) fn top_controls_button_style() -> impl Fn(&Theme, button::Status) -> 
                 color: Color::from_rgba8(0x10, 0x19, 0x2b, 0.04),
                 offset: Vector::new(0.0, 1.0),
                 blur_radius: 4.0,
+            },
+            ..button::Style::default()
+        }
+    }
+}
+
+pub(crate) fn debug_tab_button_style(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_theme, status| {
+        let base_color = if active {
+            debug_tab_active_color()
+        } else {
+            debug_tab_inactive_color()
+        };
+        let background = match status {
+            button::Status::Pressed => shift_color(base_color, if active { -0.04 } else { -0.03 }),
+            button::Status::Hovered => shift_color(base_color, if active { 0.03 } else { 0.02 }),
+            button::Status::Disabled => Color {
+                a: 0.6,
+                ..base_color
+            },
+            button::Status::Active => base_color,
+        };
+
+        button::Style {
+            background: Some(Background::Color(background)),
+            text_color: if active {
+                Color::WHITE
+            } else {
+                Color::from_rgb8(0x45, 0x49, 0x57)
+            },
+            border: Border {
+                color: if active {
+                    Color::TRANSPARENT
+                } else {
+                    Color::from_rgb8(0xd1, 0xcc, 0xd8)
+                },
+                width: if active { 0.0 } else { 1.0 },
+                radius: 8.0.into(),
+            },
+            shadow: Shadow {
+                color: if active {
+                    Color::from_rgba8(0x1b, 0x22, 0x33, 0.10)
+                } else {
+                    Color::from_rgba8(0x10, 0x19, 0x2b, 0.03)
+                },
+                offset: Vector::new(0.0, if active { 2.0 } else { 1.0 }),
+                blur_radius: if active { 8.0 } else { 4.0 },
             },
             ..button::Style::default()
         }
