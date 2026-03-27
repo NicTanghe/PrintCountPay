@@ -27,16 +27,16 @@ impl PrintCountApp {
     }
 
     fn tab_button(&self, tab: Tab, label: &str) -> Element<'_, Message> {
-        if tab == Tab::Debug {
-            self.top_bar_button(
-                label,
-                theme::Button::custom(debug_tab_button_style(self.active_tab == tab)),
-                Message::SelectTab(tab),
-            )
-        } else if self.active_tab == tab {
+        if self.active_tab == tab {
             self.top_bar_button(
                 label,
                 solid_brand_button_style(SIDEBAR_BRAND_SAMPLE),
+                Message::SelectTab(tab),
+            )
+        } else if tab == Tab::Debug {
+            self.top_bar_button(
+                label,
+                theme::Button::custom(top_controls_button_style()),
                 Message::SelectTab(tab),
             )
         } else {
