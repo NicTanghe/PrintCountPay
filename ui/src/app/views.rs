@@ -109,8 +109,8 @@ impl PrintCountApp {
     fn printer_tab_button(&self, tab: PrinterTab, label: &str) -> Element<'_, Message> {
         let style = theme::Button::custom(firefox_tab_style(self.printer_tab == tab));
 
-        button(text(label.to_string()))
-            .padding([6, 12])
+        button(text(label.to_string()).size(12))
+            .padding([4, 10])
             .style(style)
             .on_press(Message::SelectPrinterTab(tab))
             .into()
@@ -381,7 +381,8 @@ impl PrintCountApp {
             "Start recording"
         };
         let recording_button = if !controls_enabled {
-            button(recording_button_label).style(theme::Button::Secondary)
+            button(recording_button_label)
+                .style(theme::Button::custom(muted_content_button_style()))
         } else if session.active {
             button(recording_button_label)
                 .style(theme::Button::custom(solid_recording_button_style()))
@@ -830,7 +831,9 @@ impl PrintCountApp {
                             Some(selected_profile),
                             Message::ProfileChoiceChanged,
                         )
-                        .placeholder("Auto match");
+                        .placeholder("Auto match")
+                        .style(profile_pick_list_style())
+                        .menu_style(profile_pick_list_menu_style());
                         content = content.push(
                             text(format!("ID: {}", record.id))
                                 .size(13)

@@ -1,5 +1,6 @@
 use iced::gradient::Linear;
-use iced::widget::{button, checkbox, container, text};
+use iced::overlay::menu;
+use iced::widget::{button, checkbox, container, pick_list, text};
 use iced::{Background, Border, Color, Shadow, Theme, Vector, border};
 
 pub(crate) const SIDEBAR_BRAND_SAMPLE: f32 = 1.0 / 6.0;
@@ -24,6 +25,10 @@ fn right_content_background_color() -> Color {
 
 fn top_controls_button_color() -> Color {
     Color::from_rgb8(0xd8, 0xda, 0xdf)
+}
+
+fn muted_content_button_color() -> Color {
+    Color::from_rgb8(0xec, 0xef, 0xf3)
 }
 
 fn interpolate_color(start: Color, end: Color, t: f32) -> Color {
@@ -55,51 +60,49 @@ pub(crate) fn sampled_brand_color(position: f32) -> Color {
 }
 
 pub(crate) fn firefox_tab_style(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
-    move |theme, status| {
-        let palette = theme.extended_palette();
-        let background = if active {
-            palette.background.base.color
+    move |_theme, status| {
+        let base_background = if active {
+            sampled_brand_color(CONTENT_BRAND_SAMPLE)
         } else {
-            palette.background.weak.color
+            Color::from_rgb8(0xef, 0xf1, 0xf4)
         };
-        let text_color = if active {
-            palette.background.base.text
-        } else {
-            palette.background.weak.text
+        let background = match status {
+            button::Status::Pressed => shift_color(base_background, if active { -0.04 } else { -0.02 }),
+            button::Status::Hovered => shift_color(base_background, if active { 0.03 } else { 0.01 }),
+            button::Status::Disabled => Color {
+                a: 0.6,
+                ..base_background
+            },
+            button::Status::Active => base_background,
         };
 
-        let mut style = button::Style {
+        button::Style {
             background: Some(Background::Color(background)),
-            text_color,
+            text_color: if active {
+                Color::WHITE
+            } else {
+                Color::from_rgb8(0x3e, 0x43, 0x4b)
+            },
             border: Border {
-                color: palette.background.strong.color,
-                width: 1.0,
-                radius: 8.0.into(),
+                color: if active {
+                    Color::TRANSPARENT
+                } else {
+                    Color::from_rgb8(0xd7, 0xdc, 0xe2)
+                },
+                width: if active { 0.0 } else { 1.0 },
+                radius: 7.0.into(),
             },
             shadow: if active {
-                Shadow::default()
-            } else {
                 Shadow {
-                    offset: Vector::new(0.0, 1.0),
-                    ..Shadow::default()
+                    color: Color::from_rgba8(0x12, 0x45, 0x5d, 0.10),
+                    offset: Vector::new(0.0, 2.0),
+                    blur_radius: 6.0,
                 }
+            } else {
+                Shadow::default()
             },
             ..button::Style::default()
-        };
-
-        if matches!(status, button::Status::Hovered)
-            && !active
-            && let Some(Background::Color(color)) = style.background
-        {
-            style.background = Some(Background::Color(Color {
-                r: (color.r + 0.05).min(1.0),
-                g: (color.g + 0.05).min(1.0),
-                b: (color.b + 0.05).min(1.0),
-                a: color.a,
-            }));
         }
-
-        style
     }
 }
 
@@ -136,32 +139,63 @@ pub(crate) fn solid_recording_button_style() -> impl Fn(&Theme, button::Status) 
 }
 
 pub(crate) fn top_controls_button_style() -> impl Fn(&Theme, button::Status) -> button::Style {
+    subtle_button_style(
+        top_controls_button_color(),
+        shift_color(top_controls_button_color(), -0.07),
+        Color::from_rgb8(0x2a, 0x2f, 0x39),
+    )
+}
+
+pub(crate) fn muted_content_button_style() -> impl Fn(&Theme, button::Status) -> button::Style {
+    subtle_button_style(
+        muted_content_button_color(),
+        Color::from_rgb8(0xd9, 0xdd, 0xe4),
+        Color::from_rgb8(0x5b, 0x63, 0x70),
+    )
+}
+
+pub(crate) fn profile_pick_list_style() -> impl Fn(&Theme, pick_list::Status) -> pick_list::Style {
     move |_theme, status| {
-        let base_color = top_controls_button_color();
-        let background = match status {
-            button::Status::Pressed => shift_color(base_color, -0.04),
-            button::Status::Hovered => shift_color(base_color, 0.02),
-            button::Status::Disabled => Color {
-                a: 0.6,
-                ..base_color
-            },
-            button::Status::Active => base_color,
+        let accent = sampled_brand_color(CONTENT_BRAND_SAMPLE);
+        let background = Background::Color(Color::from_rgb8(0xf1, 0xf4, 0xf8));
+        let border_color = match status {
+            pick_list::Status::Hovered | pick_list::Status::Opened { .. } => accent,
+            pick_list::Status::Active => Color::from_rgb8(0xd4, 0xda, 0xe2),
         };
 
-        button::Style {
-            background: Some(Background::Color(background)),
-            text_color: Color::from_rgb8(0x2a, 0x2f, 0x39),
+        pick_list::Style {
+            text_color: Color::from_rgb8(0x2f, 0x36, 0x42),
+            placeholder_color: Color::from_rgb8(0x6f, 0x78, 0x86),
+            handle_color: accent,
+            background,
             border: Border {
-                color: shift_color(base_color, -0.07),
+                color: border_color,
                 width: 1.0,
-                radius: 6.0.into(),
+                radius: 7.0.into(),
             },
+        }
+    }
+}
+
+pub(crate) fn profile_pick_list_menu_style() -> impl Fn(&Theme) -> menu::Style {
+    move |_theme| {
+        let accent = sampled_brand_color(CONTENT_BRAND_SAMPLE);
+
+        menu::Style {
+            background: Background::Color(Color::from_rgb8(0xf8, 0xf9, 0xfb)),
+            border: Border {
+                color: Color::from_rgb8(0xd7, 0xdc, 0xe2),
+                width: 1.0,
+                radius: 7.0.into(),
+            },
+            text_color: Color::from_rgb8(0x2f, 0x36, 0x42),
+            selected_text_color: Color::WHITE,
+            selected_background: Background::Color(accent),
             shadow: Shadow {
-                color: Color::from_rgba8(0x10, 0x19, 0x2b, 0.04),
-                offset: Vector::new(0.0, 1.0),
-                blur_radius: 4.0,
+                color: Color::from_rgba8(0x10, 0x19, 0x2b, 0.06),
+                offset: Vector::new(0.0, 4.0),
+                blur_radius: 10.0,
             },
-            ..button::Style::default()
         }
     }
 }
@@ -250,6 +284,40 @@ pub(crate) fn window_shell_style() -> impl Fn(&Theme) -> container::Style {
             blur_radius: 28.0,
         },
         ..container::Style::default()
+    }
+}
+
+fn subtle_button_style(
+    base_color: Color,
+    border_color: Color,
+    text_color: Color,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_theme, status| {
+        let background = match status {
+            button::Status::Pressed => shift_color(base_color, -0.03),
+            button::Status::Hovered => shift_color(base_color, 0.015),
+            button::Status::Disabled => Color {
+                a: 0.65,
+                ..base_color
+            },
+            button::Status::Active => base_color,
+        };
+
+        button::Style {
+            background: Some(Background::Color(background)),
+            text_color,
+            border: Border {
+                color: border_color,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            shadow: Shadow {
+                color: Color::from_rgba8(0x10, 0x19, 0x2b, 0.03),
+                offset: Vector::new(0.0, 1.0),
+                blur_radius: 4.0,
+            },
+            ..button::Style::default()
+        }
     }
 }
 
