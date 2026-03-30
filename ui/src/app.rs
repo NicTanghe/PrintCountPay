@@ -15,9 +15,9 @@ use ron::ser::{PrettyConfig, to_string_pretty};
 
 use printcountpay_core::{
     CidrRange, CounterOidSet, DEFAULT_SNMP_PORT, Oid, PrinterId, PrinterRecord, PrinterStatus,
-    SnmpAddress, SnmpConfig, SnmpRequest, SnmpResponse, SnmpV2cClient, SnmpVarBind, SnmpWalkRequest,
-    default_discovery_cidr, probe_printer, resolve_counters, targets, varbind_display_value,
-    varbind_numeric_value, varbind_text_value,
+    SnmpAddress, SnmpConfig, SnmpRequest, SnmpResponse, SnmpV2cClient, SnmpVarBind,
+    SnmpWalkRequest, default_discovery_cidr, probe_printer, resolve_counters, targets,
+    varbind_display_value, varbind_numeric_value, varbind_text_value,
 };
 
 use crate::logging::{LogEntry, LogLevel, LogStore, ReloadHandle, apply_log_level};
@@ -26,6 +26,7 @@ use crate::sync::{self, SharedState, SyncCommand, SyncEvent, SyncRole};
 mod badge_overlay;
 mod constants;
 mod helpers;
+mod paths;
 mod profiles;
 mod styles;
 mod types;
@@ -39,9 +40,23 @@ pub(crate) use types::{PricingSettings, RecordingSession, SnmpPollStatus};
 use badge_overlay::BadgeOverlay;
 use constants::*;
 use helpers::*;
+use paths::*;
 use profiles::*;
 use styles::*;
 use types::*;
+
+fn merge_status_messages(primary: Option<String>, secondary: Option<String>) -> Option<String> {
+    match (primary, secondary) {
+        (Some(primary), Some(secondary)) => Some(format!("{primary} | {secondary}")),
+        (Some(primary), None) => Some(primary),
+        (None, Some(secondary)) => Some(secondary),
+        (None, None) => None,
+    }
+}
+
+fn display_path(path: &Path) -> String {
+    path.to_string_lossy().to_string()
+}
 
 pub struct PrintCountApp {
     log_store: LogStore,
@@ -80,6 +95,7 @@ pub struct PrintCountApp {
     poll_export_status: Option<String>,
     snmp_config: SnmpConfig,
     counter_oids: CounterOidSet,
+    data_root: String,
     profiles_root: String,
     profile_index: ProfileIndex,
     profile_status: Option<String>,
@@ -112,8 +128,18 @@ impl PrintCountApp {
             .collect();
         let enabled_targets = known_targets.clone();
         let printers: Vec<PrinterRecord> = Vec::new();
-        let profiles_root = "profiles".to_string();
+        let AppPaths {
+            data_root,
+            profiles_root,
+            printers_file,
+            counter_oids_file,
+            poll_export_file,
+            status: path_status,
+        } = resolve_app_paths();
+        let data_root = display_path(&data_root);
+        let profiles_root = display_path(&profiles_root);
         let (profile_index, profile_status) = load_profile_index(Path::new(&profiles_root));
+        let profile_status = merge_status_messages(path_status, profile_status);
         let counter_oids = default_counter_oids();
         let oids_total_text = format_oid_list(&counter_oids.total);
         let recording_oids = default_recording_oid_inputs();
@@ -156,21 +182,22 @@ impl PrintCountApp {
             manual_port: DEFAULT_SNMP_PORT.to_string(),
             manual_community: "public".to_string(),
             manual_status: None,
-            printers_path: "printers.ron".to_string(),
+            printers_path: display_path(&printers_file),
             printers_status: None,
             printers,
             selected_printer: None,
             poll_states,
             poll_in_flight: HashSet::new(),
-            poll_export_path: "polling_export.txt".to_string(),
+            poll_export_path: display_path(&poll_export_file),
             poll_export_status: None,
             snmp_config: SnmpConfig::default(),
             counter_oids,
+            data_root,
             profiles_root,
             profile_index,
             profile_status,
             active_profile: None,
-            oids_path: "counter_oids.ron".to_string(),
+            oids_path: display_path(&counter_oids_file),
             oids_total_text,
             oids_status: None,
             oids_crawl_in_flight: false,
@@ -187,8 +214,8 @@ impl PrintCountApp {
             last_shared_state: SharedState::default(),
         };
         if !app.advanced_mode {
-            app.printers_path = "printers.ron".to_string();
-            app.load_printers_from_path();
+            app.printers_path = app.default_printers_path();
+            app.load_printers_if_present();
         }
         app.last_shared_state = app.build_shared_state(app.last_shared_state.revision);
 
@@ -220,8 +247,8 @@ impl PrintCountApp {
                     ) {
                         self.printer_tab = PrinterTab::Recording;
                     }
-                    self.printers_path = "printers.ron".to_string();
-                    self.load_printers_from_path();
+                    self.printers_path = self.default_printers_path();
+                    self.load_printers_if_present();
                 }
                 Command::none()
             }

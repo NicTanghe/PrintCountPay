@@ -1,4 +1,28 @@
 impl PrintCountApp {
+    fn default_printers_path(&self) -> String {
+        Path::new(&self.data_root)
+            .join("printers.ron")
+            .to_string_lossy()
+            .to_string()
+    }
+
+    fn default_counter_oids_path(&self) -> String {
+        Path::new(&self.data_root)
+            .join("counter_oids.ron")
+            .to_string_lossy()
+            .to_string()
+    }
+
+    fn load_printers_if_present(&mut self) {
+        let path = self.printers_path.trim();
+        if path.is_empty() || !Path::new(path).is_file() {
+            self.printers_status = None;
+            return;
+        }
+
+        self.load_printers_from_path();
+    }
+
     fn refresh_logs(&mut self) {
         let entries = self.log_store.snapshot();
         for entry in &entries {
@@ -956,7 +980,7 @@ impl PrintCountApp {
         self.counter_oids = default_counter_oids();
         self.recording_oids = default_recording_oid_inputs();
         self.oids_total_text = format_oid_list(&self.counter_oids.total);
-        self.oids_path = "counter_oids.ron".to_string();
+        self.oids_path = self.default_counter_oids_path();
     }
 
     fn sync_active_profile_from_inputs(&mut self) -> Result<(), String> {
