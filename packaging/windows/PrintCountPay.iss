@@ -10,10 +10,6 @@
   #define MyAppVersion "0.1.0"
 #endif
 
-#ifndef MyOutputBaseFilename
-  #define MyOutputBaseFilename "PrintCountPay-Setup-{#MyAppVersion}"
-#endif
-
 [Setup]
 AppId={#MyAppId}
 AppName={#MyAppName}
@@ -29,7 +25,11 @@ Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
 OutputDir={#OutputRoot}
+#ifdef MyOutputBaseFilename
 OutputBaseFilename={#MyOutputBaseFilename}
+#else
+OutputBaseFilename=PrintCountPay-Setup-{#MyAppVersion}
+#endif
 UninstallDisplayIcon={app}\{#MyAppExeName}
 CloseApplications=yes
 RestartApplications=no
