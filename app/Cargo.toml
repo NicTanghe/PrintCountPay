@@ -2,6 +2,7 @@
 name = "printcountpay-app"
 version.workspace = true
 edition.workspace = true
+build = "build.rs"
 
 [dependencies]
 printcountpay-core = { path = "../core" }
