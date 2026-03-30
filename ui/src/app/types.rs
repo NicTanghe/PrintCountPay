@@ -2,8 +2,10 @@ use printcountpay_core::{
     CounterOidSet, Error as CoreError, PrinterId, PrinterRecord, PrinterStatus, SnmpResponse,
     SnmpVarBind,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::logging::{LogLevel, LogStore, ReloadHandle};
+use crate::sync::SyncEvent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -23,6 +25,8 @@ pub enum PrinterTab {
 #[derive(Debug, Clone)]
 pub enum Message {
     LogTick,
+    SyncTick,
+    SyncEvent(SyncEvent),
     ToggleAdvancedMode,
     DragWindow,
     MinimizeWindow,
@@ -49,6 +53,7 @@ pub enum Message {
     ProfileChoiceChanged(ProfileChoice),
     DeleteSelectedPrinter,
     PollSelectedSnmp,
+    PollPrinterById(PrinterId),
     PollExportPathChanged(String),
     ExportPollData,
     SnmpPolled {
@@ -84,7 +89,7 @@ pub enum Message {
     PricingRoundChanged(bool),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SnmpErrorInfo {
     pub(crate) status: PrinterStatus,
     pub(crate) summary: String,
@@ -132,8 +137,8 @@ fn is_reachability_error(details: &str) -> bool {
     .any(|needle| detail.contains(needle))
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum SnmpPollStatus {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SnmpPollStatus {
     Idle,
     Ok {
         received_at: u64,
@@ -146,7 +151,7 @@ pub(crate) enum SnmpPollStatus {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct RecordingSnapshot {
     pub(crate) received_at: u64,
     pub(crate) bw_printer: Option<u64>,
@@ -163,7 +168,7 @@ pub enum RecordingCategory {
     PrintsColor,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct RecordingCategoryEdits {
     pub(crate) include_in_price: bool,
     pub(crate) start_input: String,
@@ -180,7 +185,7 @@ impl Default for RecordingCategoryEdits {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct RecordingEdits {
     pub(crate) copies_bw: RecordingCategoryEdits,
     pub(crate) copies_color: RecordingCategoryEdits,
@@ -240,8 +245,8 @@ fn set_input(target: &mut String, value: Option<u64>) {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub(crate) struct RecordingSession {
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecordingSession {
     pub(crate) active: bool,
     pub(crate) start: Option<RecordingSnapshot>,
     pub(crate) end: Option<RecordingSnapshot>,
@@ -249,7 +254,7 @@ pub(crate) struct RecordingSession {
     pub(crate) edits: RecordingEdits,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct RecordingOidSettings {
     pub(crate) copies_bw_input: String,
     pub(crate) copies_color_input: String,
@@ -257,8 +262,8 @@ pub(crate) struct RecordingOidSettings {
     pub(crate) prints_color_input: String,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct PricingSettings {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PricingSettings {
     pub(crate) bw_first_input: String,
     pub(crate) bw_next_input: String,
     pub(crate) bw_rest_input: String,

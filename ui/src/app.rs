@@ -21,6 +21,7 @@ use printcountpay_core::{
 };
 
 use crate::logging::{LogEntry, LogLevel, LogStore, ReloadHandle, apply_log_level};
+use crate::sync::{self, SharedState, SyncCommand, SyncEvent, SyncRole};
 
 mod badge_overlay;
 mod constants;
@@ -33,6 +34,7 @@ pub use types::{
     DiscoveryOutcome, DiscoveryProbeResult, Flags, Message, PrinterTab, ProfileChoice,
     RecordingCategory, SnmpErrorInfo, Tab,
 };
+pub(crate) use types::{PricingSettings, RecordingSession, SnmpPollStatus};
 
 use badge_overlay::BadgeOverlay;
 use constants::*;
@@ -89,6 +91,10 @@ pub struct PrintCountApp {
     recording_oids: RecordingOidSettings,
     recording_sessions: HashMap<PrinterId, RecordingSession>,
     pricing: PricingSettings,
+    sync_sender: Option<tokio::sync::mpsc::UnboundedSender<SyncCommand>>,
+    sync_role: SyncRole,
+    sync_status_detail: String,
+    last_shared_state: SharedState,
 }
 
 impl PrintCountApp {
@@ -171,11 +177,20 @@ impl PrintCountApp {
             recording_oids,
             recording_sessions: HashMap::new(),
             pricing: PricingSettings::default(),
+            sync_sender: None,
+            sync_role: SyncRole::Searching,
+            sync_status_detail: format!(
+                "Searching for sync host on UDP {} / TCP {}.",
+                sync::SYNC_DISCOVERY_PORT,
+                sync::SYNC_PORT
+            ),
+            last_shared_state: SharedState::default(),
         };
         if !app.advanced_mode {
             app.printers_path = "printers.ron".to_string();
             app.load_printers_from_path();
         }
+        app.last_shared_state = app.build_shared_state(app.last_shared_state.revision);
 
         (app, Command::none())
     }
@@ -190,6 +205,11 @@ impl PrintCountApp {
                 self.refresh_logs();
                 Command::none()
             }
+            Message::SyncTick => {
+                self.flush_shared_state();
+                Command::none()
+            }
+            Message::SyncEvent(event) => self.handle_sync_event(event),
             Message::ToggleAdvancedMode => {
                 self.advanced_mode = !self.advanced_mode;
                 if !self.advanced_mode {
@@ -311,6 +331,7 @@ impl PrintCountApp {
                 Command::none()
             }
             Message::PollSelectedSnmp => self.poll_selected_printer(),
+            Message::PollPrinterById(printer_id) => self.poll_printer(printer_id),
             Message::PollExportPathChanged(value) => {
                 self.poll_export_path = value;
                 Command::none()
@@ -441,13 +462,21 @@ impl PrintCountApp {
         let log_tick = iced::time::every(Duration::from_millis(250)).map(|_| Message::LogTick);
         let poll_tick =
             iced::time::every(Duration::from_secs(5)).map(|_| Message::PollSelectedSnmp);
+        let sync_tick = iced::time::every(sync::SYNC_FLUSH_INTERVAL).map(|_| Message::SyncTick);
+        let sync_subscription = sync::subscription().map(Message::SyncEvent);
         let delete_key = iced::event::listen_with(|event, _status, _window| match event {
             iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
                 delete_key_event(key.clone(), modifiers)
             }
             _ => None,
         });
-        Subscription::batch(vec![log_tick, poll_tick, delete_key])
+        Subscription::batch(vec![
+            log_tick,
+            poll_tick,
+            sync_tick,
+            sync_subscription,
+            delete_key,
+        ])
     }
 
     pub(crate) fn view(&self) -> Element<'_, Message> {

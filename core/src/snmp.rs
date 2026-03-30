@@ -95,7 +95,7 @@ pub struct SnmpResponse {
     pub varbinds: Vec<SnmpVarBind>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SnmpVarBind {
     pub oid: Oid,
     pub value: SnmpValue,
@@ -178,7 +178,7 @@ impl FromStr for Oid {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SnmpValue {
     Null,
     EndOfMibView,

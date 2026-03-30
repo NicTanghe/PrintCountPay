@@ -1,6 +1,7 @@
 pub mod app;
 mod executor;
 pub mod logging;
+pub mod sync;
 
 use iced::{Color, Theme, theme};
 

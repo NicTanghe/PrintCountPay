@@ -15,6 +15,6 @@ serde = { version = "1.0.210", features = ["derive"] }
 snmp2 = { version = "0.5.0", features = ["tokio"] }
 thiserror = "2.0.11"
 time = { version = "0.3.37", features = ["local-offset"] }
-tokio = { version = "1.49.0", features = ["rt", "time"] }
+tokio = { version = "1.49.0", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }

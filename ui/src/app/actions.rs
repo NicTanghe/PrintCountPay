@@ -40,6 +40,8 @@ impl PrintCountApp {
         let mut output = String::new();
         output.push_str("PrintCount diagnostics\n");
         output.push_str(&format!("Log level: {}\n", self.log_level));
+        output.push_str(&format!("Sync role: {:?}\n", self.sync_role));
+        output.push_str(&format!("Sync status: {}\n", self.sync_status_detail));
         if let Some(selected) = &self.selected_printer {
             output.push_str(&format!("Selected printer: {}\n", selected));
         }
@@ -516,6 +518,17 @@ impl PrintCountApp {
             return Command::none();
         };
 
+        if self.sync_role == SyncRole::Client {
+            if !self.recent_poll_is_fresh(&printer_id) {
+                self.request_remote_poll(&printer_id);
+            }
+            return Command::none();
+        }
+
+        self.poll_printer(printer_id)
+    }
+
+    fn poll_printer(&mut self, printer_id: PrinterId) -> Command<Message> {
         if self.poll_in_flight.contains(&printer_id) {
             return Command::none();
         }
@@ -540,9 +553,25 @@ impl PrintCountApp {
             return Command::none();
         };
 
+        let using_selected_context = self.selected_printer.as_ref() == Some(&printer_id);
+        let poll_profile = if using_selected_context {
+            self.active_profile.clone()
+        } else {
+            self.profile_for_poll(&printer_id)
+        };
+        let (counter_oids, recording_settings) = if using_selected_context {
+            (self.counter_oids.clone(), self.recording_oids.clone())
+        } else if let Some(profile) = poll_profile.as_ref() {
+            (
+                profile.counters.clone(),
+                recording_settings_from_profile(&profile.recording),
+            )
+        } else {
+            (default_counter_oids(), default_recording_oid_inputs())
+        };
         let default_toner = default_toner_oids();
         let mut extra_poll = Vec::new();
-        if let Some(profile) = self.active_profile.as_ref() {
+        if let Some(profile) = poll_profile.as_ref() {
             extra_poll.extend(
                 profile
                     .extra_poll_labels
@@ -557,17 +586,16 @@ impl PrintCountApp {
                 );
             }
         }
-        let toner_oids = self
-            .active_profile
+        let toner_oids = poll_profile
             .as_ref()
             .map(|profile| &profile.toner)
             .unwrap_or(&default_toner);
-        let recording_oids = recording_profile_from_settings_lossy(&self.recording_oids);
+        let recording_oids = recording_profile_from_settings_lossy(&recording_settings);
 
         let mut request = SnmpRequest::new(
             address,
             snmp_oids(
-                &self.counter_oids,
+                &counter_oids,
                 &recording_oids,
                 extra_poll.as_slice(),
                 toner_oids,
@@ -595,6 +623,35 @@ impl PrintCountApp {
             },
             move |result| Message::SnmpPolled { printer_id, result },
         )
+    }
+
+    fn profile_for_poll(&self, printer_id: &PrinterId) -> Option<ManufacturerProfile> {
+        let record = self.printers.iter().find(|record| &record.id == printer_id)?;
+        let profile_id = record.profile_id.clone().or_else(|| {
+            self.profile_index.match_profile_id(
+                record.sys_object_id.as_deref(),
+                record.sys_descr.as_deref(),
+                record.model.as_deref(),
+            )
+        })?;
+
+        self.profile_index.profile(&profile_id).cloned()
+    }
+
+    fn recent_poll_is_fresh(&self, printer_id: &PrinterId) -> bool {
+        let Some(received_at) = self.poll_states.get(printer_id).and_then(poll_received_at) else {
+            return false;
+        };
+
+        now_epoch_seconds().saturating_sub(received_at) <= 3
+    }
+
+    fn request_remote_poll(&self, printer_id: &PrinterId) {
+        let Some(sender) = self.sync_sender.as_ref() else {
+            return;
+        };
+
+        let _ = sender.send(SyncCommand::RequestPoll(printer_id.clone()));
     }
 
     fn start_recording(&mut self) {
@@ -1085,6 +1142,127 @@ impl PrintCountApp {
             },
             Message::OidsCrawled,
         )
+    }
+
+    fn handle_sync_event(&mut self, event: SyncEvent) -> Command<Message> {
+        match event {
+            SyncEvent::Ready(sender) => {
+                self.sync_sender = Some(sender);
+                self.last_shared_state = self.build_shared_state(self.last_shared_state.revision);
+                self.send_shared_state(self.last_shared_state.clone());
+                Command::none()
+            }
+            SyncEvent::StatusChanged(status) => {
+                self.sync_role = status.role;
+                self.sync_status_detail = status.detail.clone();
+                tracing::info!(target: "sync", "{}", status.detail);
+                Command::none()
+            }
+            SyncEvent::SnapshotReceived(snapshot) => {
+                if snapshot.revision < self.last_shared_state.revision {
+                    return Command::none();
+                }
+                self.apply_shared_state(snapshot);
+                Command::none()
+            }
+            SyncEvent::PollRequested(printer_id) => {
+                if self.sync_role == SyncRole::Master && !self.recent_poll_is_fresh(&printer_id) {
+                    self.poll_printer(printer_id)
+                } else {
+                    Command::none()
+                }
+            }
+        }
+    }
+
+    fn flush_shared_state(&mut self) {
+        let snapshot = self.build_shared_state(self.last_shared_state.revision);
+        if snapshot == self.last_shared_state {
+            return;
+        }
+
+        let next = self.build_shared_state(self.last_shared_state.revision.saturating_add(1));
+        self.last_shared_state = next.clone();
+        self.send_shared_state(next);
+    }
+
+    fn send_shared_state(&self, snapshot: SharedState) {
+        let Some(sender) = self.sync_sender.as_ref() else {
+            return;
+        };
+
+        let _ = sender.send(SyncCommand::SetSnapshot(snapshot));
+    }
+
+    fn build_shared_state(&self, revision: u64) -> SharedState {
+        let mut poll_states: Vec<_> = self
+            .poll_states
+            .iter()
+            .map(|(printer_id, state)| sync::PollStateEntry {
+                printer_id: printer_id.clone(),
+                state: state.clone(),
+            })
+            .collect();
+        poll_states.sort_by(|left, right| left.printer_id.0.cmp(&right.printer_id.0));
+
+        let mut recording_sessions: Vec<_> = self
+            .recording_sessions
+            .iter()
+            .map(|(printer_id, session)| sync::RecordingSessionEntry {
+                printer_id: printer_id.clone(),
+                session: session.clone(),
+            })
+            .collect();
+        recording_sessions.sort_by(|left, right| left.printer_id.0.cmp(&right.printer_id.0));
+
+        SharedState {
+            revision,
+            printers: self.printers.clone(),
+            poll_states,
+            recording_sessions,
+            pricing: self.pricing.clone(),
+        }
+    }
+
+    fn apply_shared_state(&mut self, snapshot: SharedState) {
+        let selected = self.selected_printer.clone();
+        let SharedState {
+            revision,
+            printers,
+            poll_states,
+            recording_sessions,
+            pricing,
+        } = snapshot;
+
+        self.printers = printers;
+        self.pricing = pricing;
+        self.poll_states = poll_states
+            .into_iter()
+            .map(|entry| (entry.printer_id, entry.state))
+            .collect();
+
+        for record in &self.printers {
+            self.poll_states
+                .entry(record.id.clone())
+                .or_insert(SnmpPollStatus::Idle);
+        }
+
+        let known_ids: HashSet<PrinterId> = self.printers.iter().map(|record| record.id.clone()).collect();
+        self.recording_sessions = recording_sessions
+            .into_iter()
+            .filter(|entry| known_ids.contains(&entry.printer_id))
+            .map(|entry| (entry.printer_id, entry.session))
+            .collect();
+        self.poll_in_flight.retain(|printer_id| known_ids.contains(printer_id));
+
+        self.selected_printer = selected.filter(|printer_id| known_ids.contains(printer_id));
+        if let Some(selected) = self.selected_printer.clone() {
+            self.apply_profile_for_printer(&selected, None);
+        } else {
+            self.clear_active_profile();
+        }
+
+        self.last_shared_state = self.build_shared_state(revision);
     }
 
     fn counter_oids_empty(&self) -> bool {
