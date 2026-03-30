@@ -1,4 +1,7 @@
-use printcountpay_core::{CounterOidSet, PrinterId, PrinterRecord, SnmpResponse, SnmpVarBind};
+use printcountpay_core::{
+    CounterOidSet, Error as CoreError, PrinterId, PrinterRecord, PrinterStatus, SnmpResponse,
+    SnmpVarBind,
+};
 
 use crate::logging::{LogLevel, LogStore, ReloadHandle};
 
@@ -83,8 +86,50 @@ pub enum Message {
 
 #[derive(Debug, Clone)]
 pub struct SnmpErrorInfo {
+    pub(crate) status: PrinterStatus,
     pub(crate) summary: String,
     pub(crate) detail: String,
+}
+
+impl SnmpErrorInfo {
+    pub(crate) fn new(
+        status: PrinterStatus,
+        summary: impl Into<String>,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self {
+            status,
+            summary: summary.into(),
+            detail: detail.into(),
+        }
+    }
+
+    pub(crate) fn from_error(error: CoreError) -> Self {
+        let status = match &error {
+            CoreError::SnmpTimeout { .. } => PrinterStatus::Offline,
+            CoreError::SnmpFailure { details, .. } if is_reachability_error(details) => {
+                PrinterStatus::Offline
+            }
+            CoreError::SnmpAuth { .. } | CoreError::SnmpFailure { .. } => PrinterStatus::Error,
+            _ => PrinterStatus::Error,
+        };
+
+        Self::new(status, error.user_summary(), error.technical_detail())
+    }
+}
+
+fn is_reachability_error(details: &str) -> bool {
+    let detail = details.to_ascii_lowercase();
+    [
+        "timed out",
+        "unreachable",
+        "no route to host",
+        "host is down",
+        "network is unreachable",
+        "network name is no longer available",
+    ]
+    .iter()
+    .any(|needle| detail.contains(needle))
 }
 
 #[derive(Debug, Clone)]

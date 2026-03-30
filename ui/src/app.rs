@@ -14,10 +14,10 @@ use ron::de::from_str;
 use ron::ser::{PrettyConfig, to_string_pretty};
 
 use printcountpay_core::{
-    CidrRange, CounterOidSet, DEFAULT_SNMP_PORT, Oid, PrinterId, PrinterRecord, SnmpAddress,
-    SnmpConfig, SnmpRequest, SnmpV2cClient, SnmpVarBind, SnmpWalkRequest, default_discovery_cidr,
-    probe_printer, resolve_counters, targets, varbind_display_value, varbind_numeric_value,
-    varbind_text_value,
+    CidrRange, CounterOidSet, DEFAULT_SNMP_PORT, Oid, PrinterId, PrinterRecord, PrinterStatus,
+    SnmpAddress, SnmpConfig, SnmpRequest, SnmpResponse, SnmpV2cClient, SnmpVarBind, SnmpWalkRequest,
+    default_discovery_cidr, probe_printer, resolve_counters, targets, varbind_display_value,
+    varbind_numeric_value, varbind_text_value,
 };
 
 use crate::logging::{LogEntry, LogLevel, LogStore, ReloadHandle, apply_log_level};
@@ -320,71 +320,7 @@ impl PrintCountApp {
                 Command::none()
             }
             Message::SnmpPolled { printer_id, result } => {
-                self.poll_in_flight.remove(&printer_id);
-                let received_at = now_epoch_seconds();
-                let mut poll_name = None;
-                let mut allow_override = false;
-                let mut sys_descr = None;
-                let mut sys_object_id = None;
-                let state = match result {
-                    Ok(response) => {
-                        let printer_name = varbind_text_value(
-                            &response.varbinds,
-                            &Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID),
-                        );
-                        let sys_name =
-                            varbind_text_value(&response.varbinds, &Oid::from_slice(&SYS_NAME_OID));
-                        sys_descr = varbind_text_value(
-                            &response.varbinds,
-                            &Oid::from_slice(&SYS_DESCR_OID),
-                        );
-                        sys_object_id = varbind_text_value(
-                            &response.varbinds,
-                            &Oid::from_slice(&SYS_OBJECT_ID_OID),
-                        );
-                        allow_override =
-                            printer_name.is_some() || sys_name.is_some() || sys_descr.is_some();
-                        poll_name = printer_name.or(sys_name).or_else(|| sys_descr.clone());
-                        SnmpPollStatus::Ok {
-                            received_at,
-                            varbinds: response.varbinds,
-                        }
-                    }
-                    Err(error) => SnmpPollStatus::Error {
-                        received_at,
-                        summary: error.summary,
-                        detail: error.detail,
-                    },
-                };
-                if let Some(name) = poll_name {
-                    self.apply_printer_name_fallback(
-                        &printer_id,
-                        name,
-                        allow_override,
-                        sys_descr.as_deref(),
-                    );
-                }
-                if let Some(record) = self
-                    .printers
-                    .iter_mut()
-                    .find(|record| record.id == printer_id)
-                {
-                    record.sys_object_id = sys_object_id;
-                    record.sys_descr = sys_descr.clone();
-                }
-                let printer_id_clone = printer_id.clone();
-                self.poll_states.insert(printer_id, state);
-                if self.selected_printer.as_ref() == Some(&printer_id_clone) {
-                    let needs_profile = self
-                        .printers
-                        .iter()
-                        .find(|record| record.id == printer_id_clone)
-                        .and_then(|record| record.profile_id.as_ref())
-                        .is_none();
-                    if needs_profile {
-                        self.apply_profile_for_printer(&printer_id_clone, sys_descr.as_deref());
-                    }
-                }
+                self.handle_snmp_polled(printer_id, result);
                 Command::none()
             }
             Message::OidsPathChanged(value) => {
@@ -515,7 +451,9 @@ impl PrintCountApp {
     }
 
     pub(crate) fn view(&self) -> Element<'_, Message> {
-        let sidebar = self.printer_list_view();
+        let sidebar = container(self.printer_list_view())
+            .width(Length::Fixed(367.0))
+            .height(Length::Fill);
         let main_content = if self.advanced_mode && self.active_tab == Tab::Debug {
             self.debug_tab_view()
         } else {

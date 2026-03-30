@@ -173,10 +173,7 @@ impl PrintCountApp {
                     let outcome = match result {
                         Ok(Some(record)) => DiscoveryOutcome::Printer(record),
                         Ok(None) => DiscoveryOutcome::NotPrinter,
-                        Err(error) => DiscoveryOutcome::Error(SnmpErrorInfo {
-                            summary: error.user_summary(),
-                            detail: error.technical_detail(),
-                        }),
+                        Err(error) => DiscoveryOutcome::Error(SnmpErrorInfo::from_error(error)),
                     };
                     DiscoveryProbeResult { run_id, outcome }
                 },
@@ -439,6 +436,81 @@ impl PrintCountApp {
         }
     }
 
+    fn handle_snmp_polled(
+        &mut self,
+        printer_id: PrinterId,
+        result: Result<SnmpResponse, SnmpErrorInfo>,
+    ) {
+        self.poll_in_flight.remove(&printer_id);
+        let received_at = now_epoch_seconds();
+        let mut poll_name = None;
+        let mut allow_override = false;
+        let mut sys_descr = None;
+        let mut sys_object_id = None;
+
+        let (state, status, last_seen) = match result {
+            Ok(response) => {
+                let printer_name = varbind_text_value(
+                    &response.varbinds,
+                    &Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID),
+                );
+                let sys_name =
+                    varbind_text_value(&response.varbinds, &Oid::from_slice(&SYS_NAME_OID));
+                sys_descr = varbind_text_value(&response.varbinds, &Oid::from_slice(&SYS_DESCR_OID));
+                sys_object_id = varbind_text_value(
+                    &response.varbinds,
+                    &Oid::from_slice(&SYS_OBJECT_ID_OID),
+                );
+                allow_override = printer_name.is_some() || sys_name.is_some() || sys_descr.is_some();
+                poll_name = printer_name.or(sys_name).or_else(|| sys_descr.clone());
+                (
+                    SnmpPollStatus::Ok {
+                        received_at,
+                        varbinds: response.varbinds,
+                    },
+                    PrinterStatus::Online,
+                    Some(received_at),
+                )
+            }
+            Err(error) => (
+                SnmpPollStatus::Error {
+                    received_at,
+                    summary: error.summary,
+                    detail: error.detail,
+                },
+                error.status,
+                None,
+            ),
+        };
+
+        if let Some(name) = poll_name {
+            self.apply_printer_name_fallback(&printer_id, name, allow_override, sys_descr.as_deref());
+        }
+
+        if let Some(record) = self.printers.iter_mut().find(|record| record.id == printer_id) {
+            record.sys_object_id = sys_object_id;
+            record.sys_descr = sys_descr.clone();
+            record.status = status;
+            if let Some(last_seen) = last_seen {
+                record.last_seen = Some(last_seen);
+            }
+        }
+
+        let printer_id_clone = printer_id.clone();
+        self.poll_states.insert(printer_id, state);
+        if self.selected_printer.as_ref() == Some(&printer_id_clone) {
+            let needs_profile = self
+                .printers
+                .iter()
+                .find(|record| record.id == printer_id_clone)
+                .and_then(|record| record.profile_id.as_ref())
+                .is_none();
+            if needs_profile {
+                self.apply_profile_for_printer(&printer_id_clone, sys_descr.as_deref());
+            }
+        }
+    }
+
     fn poll_selected_printer(&mut self) -> Command<Message> {
         let Some(printer_id) = self.selected_printer.clone() else {
             return Command::none();
@@ -455,13 +527,16 @@ impl PrintCountApp {
         let now = now_epoch_seconds();
         let Some(address) = record.snmp_address.clone() else {
             self.poll_states.insert(
-                printer_id,
+                printer_id.clone(),
                 SnmpPollStatus::Error {
                     received_at: now,
                     summary: "Missing SNMP address".to_string(),
                     detail: "Printer has no SNMP address configured.".to_string(),
                 },
             );
+            if let Some(record) = self.printers.iter_mut().find(|record| record.id == printer_id) {
+                record.status = PrinterStatus::Error;
+            }
             return Command::none();
         };
 
@@ -515,10 +590,7 @@ impl PrintCountApp {
                 let client = SnmpV2cClient::new(config);
                 match client.get(request).await {
                     Ok(response) => Ok(response),
-                    Err(error) => Err(SnmpErrorInfo {
-                        summary: error.user_summary(),
-                        detail: error.technical_detail(),
-                    }),
+                    Err(error) => Err(SnmpErrorInfo::from_error(error)),
                 }
             },
             move |result| Message::SnmpPolled { printer_id, result },
@@ -994,18 +1066,18 @@ impl PrintCountApp {
                     match client.walk(request).await {
                         Ok(response) => varbinds.extend(response.varbinds),
                         Err(error) => {
-                            last_error = Some(SnmpErrorInfo {
-                                summary: error.user_summary(),
-                                detail: error.technical_detail(),
-                            });
+                            last_error = Some(SnmpErrorInfo::from_error(error));
                         }
                     }
                 }
 
                 if varbinds.is_empty() {
-                    Err(last_error.unwrap_or(SnmpErrorInfo {
-                        summary: "Crawl failed.".to_string(),
-                        detail: "No OIDs returned from crawl.".to_string(),
+                    Err(last_error.unwrap_or_else(|| {
+                        SnmpErrorInfo::new(
+                            PrinterStatus::Error,
+                            "Crawl failed.",
+                            "No OIDs returned from crawl.",
+                        )
                     }))
                 } else {
                     Ok(counter_oids_from_walk(&varbinds))
@@ -1019,5 +1091,63 @@ impl PrintCountApp {
         self.counter_oids.bw.is_empty()
             && self.counter_oids.color.is_empty()
             && self.counter_oids.total.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::logging::{LogLevel, LogStore, init_logging};
+
+    fn test_app() -> PrintCountApp {
+        let store = LogStore::new(16);
+        let flags = Flags {
+            log_store: store.clone(),
+            reload_handle: init_logging(store, LogLevel::Info),
+        };
+        let (mut app, _) = PrintCountApp::new(flags);
+        app.replace_printers(Vec::new());
+        app.selected_printer = None;
+        app
+    }
+
+    fn printer_record(status: PrinterStatus, last_seen: Option<u64>) -> PrinterRecord {
+        let mut record = PrinterRecord::new(PrinterId::new("snmp-192.0.2.10"));
+        record.model = Some("Test Printer".to_string());
+        record.ip_or_hostname = Some("192.0.2.10".to_string());
+        record.snmp_address = Some(SnmpAddress::with_default_port("192.0.2.10"));
+        record.status = status;
+        record.last_seen = last_seen;
+        record
+    }
+
+    #[test]
+    fn failed_poll_marks_printer_offline() {
+        let mut app = test_app();
+        let record = printer_record(PrinterStatus::Online, Some(123));
+        let printer_id = record.id.clone();
+
+        app.replace_printers(vec![record]);
+        app.handle_snmp_polled(
+            printer_id.clone(),
+            Err(SnmpErrorInfo::new(
+                PrinterStatus::Offline,
+                "SNMP request timed out for 192.0.2.10:161.",
+                "SNMP timeout after 3000ms for 192.0.2.10:161.",
+            )),
+        );
+
+        let record = app
+            .printers
+            .iter()
+            .find(|record| record.id == printer_id)
+            .expect("printer record");
+        assert_eq!(record.status, PrinterStatus::Offline);
+        assert_eq!(record.last_seen, Some(123));
+        assert!(matches!(
+            app.poll_states.get(&printer_id),
+            Some(SnmpPollStatus::Error { .. })
+        ));
     }
 }

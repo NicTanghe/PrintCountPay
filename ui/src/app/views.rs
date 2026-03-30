@@ -722,7 +722,7 @@ impl PrintCountApp {
                 bottom: 16.0,
                 left: 18.0,
             })
-            .width(Length::FillPortion(1))
+            .width(Length::Fill)
             .height(Length::Fill)
             .style(theme::Container::Custom(sidebar_panel_style()))
             .into()

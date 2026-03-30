@@ -214,13 +214,11 @@ pub(crate) fn printer_list_scrollable_style(
                 is_vertical_scrollbar_dragged: true,
                 ..
             } => brand,
-            _ => Color::from_rgba8(0xc3, 0xcd, 0xd8, 0.95),
+            _ => Color::from_rgb8(0xf5, 0xf3, 0xf7),
         };
 
         style.vertical_rail = scrollable::Rail {
-            background: Some(Background::Color(Color::from_rgba8(
-                0xe7, 0xec, 0xf2, 0.72,
-            ))),
+            background: None,
             border: Border {
                 color: Color::TRANSPARENT,
                 width: 0.0,
