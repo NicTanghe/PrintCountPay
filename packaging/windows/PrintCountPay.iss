@@ -47,6 +47,7 @@ Name: "{userappdata}\{#MyAppDataDir}"
 
 [Files]
 Source: "{#StageRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#StageRoot}\profiles\*"; DestDir: "{userappdata}\{#MyAppDataDir}\profiles"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{userappdata}\{#MyAppDataDir}"

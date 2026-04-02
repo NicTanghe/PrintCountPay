@@ -113,7 +113,7 @@ fn seed_directory(source: &Path, destination: &Path) -> io::Result<()> {
 
         if file_type.is_dir() {
             seed_directory(&source_path, &destination_path)?;
-        } else if file_type.is_file() && !destination_path.exists() {
+        } else if file_type.is_file() && should_seed_file(&source_path, &destination_path)? {
             if let Some(parent) = destination_path.parent() {
                 fs::create_dir_all(parent)?;
             }
@@ -122,4 +122,61 @@ fn seed_directory(source: &Path, destination: &Path) -> io::Result<()> {
     }
 
     Ok(())
+}
+
+fn should_seed_file(source: &Path, destination: &Path) -> io::Result<bool> {
+    if !destination.exists() {
+        return Ok(true);
+    }
+
+    let source_modified = fs::metadata(source)?.modified()?;
+    let destination_modified = fs::metadata(destination)?.modified()?;
+    Ok(source_modified > destination_modified)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::thread;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    fn temp_test_dir(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("current time")
+            .as_nanos();
+        env::temp_dir().join(format!(
+            "printcountpay-{name}-{}-{unique}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn seed_directory_overwrites_older_destination_files() {
+        let root = temp_test_dir("seed-directory");
+        let source = root.join("source");
+        let destination = root.join("destination");
+        let source_file = source.join("machines").join("printer.ron");
+        let destination_file = destination.join("machines").join("printer.ron");
+
+        fs::create_dir_all(destination_file.parent().expect("destination parent"))
+            .expect("create destination directory");
+        fs::write(&destination_file, "old-profile").expect("write destination file");
+
+        thread::sleep(Duration::from_millis(1100));
+
+        fs::create_dir_all(source_file.parent().expect("source parent"))
+            .expect("create source directory");
+        fs::write(&source_file, "new-profile").expect("write source file");
+
+        seed_directory(&source, &destination).expect("seed profiles");
+
+        assert_eq!(
+            fs::read_to_string(&destination_file).expect("read destination file"),
+            "new-profile"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
 }

@@ -109,7 +109,8 @@ impl PrintCountApp {
 
         let mut queue = VecDeque::new();
         for ip in range.iter() {
-            queue.push_back(SnmpAddress::with_default_port(ip.to_string()));
+            let host = ip.to_string();
+            queue.push_back(self.discovery_address_for_host(&host));
         }
 
         if queue.is_empty() {
@@ -216,13 +217,13 @@ impl PrintCountApp {
             .as_ref()
             .map(|addr| addr.host.as_str());
 
-        if let Some(existing) = self.printers.iter_mut().find(|printer| {
-            printer
-                .snmp_address
-                .as_ref()
-                .map(|addr| addr.host.as_str())
-                == host
-        }) {
+        let existing = host.and_then(|host| {
+            self.printers
+                .iter_mut()
+                .find(|printer| Self::printer_matches_host(printer, host))
+        });
+
+        if let Some(existing) = existing {
             existing.ip_or_hostname = record.ip_or_hostname;
             existing.model = record.model;
             existing.sys_object_id = record.sys_object_id;
@@ -265,15 +266,35 @@ impl PrintCountApp {
         self.selected_printer = Some(self.printers[new_index].id.clone());
     }
 
+    fn printer_matches_host(printer: &PrinterRecord, host: &str) -> bool {
+        printer
+            .snmp_address
+            .as_ref()
+            .map(|addr| addr.host.as_str())
+            == Some(host)
+            || printer.ip_or_hostname.as_deref() == Some(host)
+    }
+
+    fn find_printer_by_host(&self, host: &str) -> Option<&PrinterRecord> {
+        self.printers
+            .iter()
+            .find(|printer| Self::printer_matches_host(printer, host))
+    }
+
+    fn discovery_address_for_host(&self, host: &str) -> SnmpAddress {
+        let port = self
+            .find_printer_by_host(host)
+            .and_then(|printer| printer.snmp_address.as_ref())
+            .map(|address| address.port)
+            .unwrap_or(DEFAULT_SNMP_PORT);
+
+        SnmpAddress::new(host.to_string(), port)
+    }
+
     fn find_printer_by_host_mut(&mut self, host: &str) -> Option<&mut PrinterRecord> {
-        self.printers.iter_mut().find(|printer| {
-            printer
-                .snmp_address
-                .as_ref()
-                .map(|addr| addr.host.as_str())
-                == Some(host)
-                || printer.ip_or_hostname.as_deref() == Some(host)
-        })
+        self.printers
+            .iter_mut()
+            .find(|printer| Self::printer_matches_host(printer, host))
     }
 
     fn add_manual_printer(&mut self) {
@@ -1351,5 +1372,46 @@ mod tests {
             app.poll_states.get(&printer_id),
             Some(SnmpPollStatus::Error { .. })
         ));
+    }
+
+    #[test]
+    fn discovery_uses_saved_snmp_port_for_known_host() {
+        let mut app = test_app();
+        let mut record = printer_record(PrinterStatus::Online, Some(123));
+        record.snmp_address = Some(SnmpAddress::new("192.0.2.10", 1161));
+
+        app.replace_printers(vec![record]);
+
+        assert_eq!(
+            app.discovery_address_for_host("192.0.2.10"),
+            SnmpAddress::new("192.0.2.10", 1161)
+        );
+    }
+
+    #[test]
+    fn upsert_printer_matches_known_host_aliases() {
+        let mut app = test_app();
+        let mut existing = printer_record(PrinterStatus::Unknown, None);
+        existing.ip_or_hostname = Some("192.0.2.10".to_string());
+        existing.snmp_address = Some(SnmpAddress::new("printer-a.local", 1161));
+        let existing_id = existing.id.clone();
+        app.replace_printers(vec![existing]);
+
+        let mut discovered = PrinterRecord::new(PrinterId::new("snmp-192.0.2.10"));
+        discovered.ip_or_hostname = Some("192.0.2.10".to_string());
+        discovered.model = Some("Discovered Printer".to_string());
+        discovered.snmp_address = Some(SnmpAddress::new("192.0.2.10", 1161));
+        discovered.status = PrinterStatus::Online;
+
+        app.upsert_printer(discovered);
+
+        assert_eq!(app.printers.len(), 1);
+        let printer = app.printers.first().expect("single printer");
+        assert_eq!(printer.id, existing_id);
+        assert_eq!(printer.model.as_deref(), Some("Discovered Printer"));
+        assert_eq!(
+            printer.snmp_address,
+            Some(SnmpAddress::new("192.0.2.10", 1161))
+        );
     }
 }
