@@ -479,7 +479,7 @@ impl PrintCountApp {
                 Command::none()
             }
             Message::PricingRoundChanged(value) => {
-                self.pricing.round_to_half_euro = value;
+                self.pricing.round_to_five_cents = value;
                 Command::none()
             }
         }

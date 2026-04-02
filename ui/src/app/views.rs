@@ -479,8 +479,8 @@ impl PrintCountApp {
                 None => None,
             };
             let bw_cost_value = bw_cost_raw.map(|value| {
-                if self.pricing.round_to_half_euro {
-                    round_to_nearest_50_cents(value)
+                if self.pricing.round_to_five_cents {
+                    round_to_nearest_5_cents(value)
                 } else {
                     value
                 }
@@ -495,8 +495,8 @@ impl PrintCountApp {
                 _ => None,
             };
             let total_cents = subtotal_cents;
-            let rounding_label = if self.pricing.round_to_half_euro {
-                "B/W rounded to nearest 0.50 EUR"
+            let rounding_label = if self.pricing.round_to_five_cents {
+                "B/W rounded to nearest 0.05 EUR"
             } else {
                 "No rounding applied"
             };
@@ -645,8 +645,8 @@ impl PrintCountApp {
         ]
         .spacing(6);
 
-        let rounding_toggle = checkbox(self.pricing.round_to_half_euro)
-            .label("Round B/W to nearest 0.50 EUR")
+        let rounding_toggle = checkbox(self.pricing.round_to_five_cents)
+            .label("Round B/W to nearest 0.05 EUR")
             .on_toggle(Message::PricingRoundChanged)
             .size(12)
             .style(theme::Checkbox::custom(brand_checkbox_style(

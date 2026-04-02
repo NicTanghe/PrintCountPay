@@ -268,7 +268,8 @@ pub struct PricingSettings {
     pub(crate) bw_next_input: String,
     pub(crate) bw_rest_input: String,
     pub(crate) color_input: String,
-    pub(crate) round_to_half_euro: bool,
+    #[serde(rename = "round_to_half_euro", alias = "round_to_five_cents")]
+    pub(crate) round_to_five_cents: bool,
 }
 
 impl Default for PricingSettings {
@@ -278,7 +279,7 @@ impl Default for PricingSettings {
             bw_next_input: "0.10".to_string(),
             bw_rest_input: "0.06".to_string(),
             color_input: "0.50".to_string(),
-            round_to_half_euro: true,
+            round_to_five_cents: true,
         }
     }
 }

@@ -330,8 +330,8 @@ pub(crate) fn color_cost_cents(count: u64, price_cents: u64) -> u64 {
     count * price_cents
 }
 
-pub(crate) fn round_to_nearest_50_cents(total_cents: u64) -> u64 {
-    (total_cents + 25) / 50 * 50
+pub(crate) fn round_to_nearest_5_cents(total_cents: u64) -> u64 {
+    (total_cents + 2) / 5 * 5
 }
 
 pub(crate) fn format_cents(cents: u64) -> String {
@@ -493,7 +493,7 @@ mod tests {
     use super::{
         default_recording_oid_inputs, default_toner_oids, delta_value,
         format_clock_hms_with_offset, format_elapsed_hms, recording_profile_from_settings_lossy,
-        snmp_oids, sum_optional_included, sum_two,
+        round_to_nearest_5_cents, snmp_oids, sum_optional_included, sum_two,
     };
     use crate::app::constants::PRT_GENERAL_PRINTER_NAME_OID;
     use printcountpay_core::{CounterOidSet, Oid};
@@ -541,6 +541,15 @@ mod tests {
             format_clock_hms_with_offset(3_661, UtcOffset::UTC),
             "01:01:01"
         );
+    }
+
+    #[test]
+    fn rounding_uses_five_cent_steps() {
+        assert_eq!(round_to_nearest_5_cents(0), 0);
+        assert_eq!(round_to_nearest_5_cents(2), 0);
+        assert_eq!(round_to_nearest_5_cents(3), 5);
+        assert_eq!(round_to_nearest_5_cents(27), 25);
+        assert_eq!(round_to_nearest_5_cents(28), 30);
     }
 
     #[test]
