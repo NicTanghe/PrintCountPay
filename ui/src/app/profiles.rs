@@ -296,3 +296,53 @@ fn collect_ron_files(root: &Path) -> Vec<PathBuf> {
     }
     files
 }
+
+#[cfg(test)]
+mod tests {
+    use super::MachineProfile;
+    use printcountpay_core::Oid;
+    use ron::de::from_str;
+
+    fn oid(value: &str) -> Oid {
+        value.parse().expect("valid oid")
+    }
+
+    #[test]
+    fn c4502_profile_uses_panel_matching_recording_counters() {
+        let profile = from_str::<MachineProfile>(include_str!(
+            "../../../profiles/machines/ricoh-aficio-mp-c4502.ron"
+        ))
+        .expect("c4502 profile should parse");
+
+        assert_eq!(profile.id, "ricoh-aficio-mp-c4502");
+        assert_eq!(
+            profile.recording.copies_bw,
+            vec![oid("1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3")]
+        );
+        assert_eq!(
+            profile.recording.copies_color,
+            vec![oid("1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5")]
+        );
+        assert_eq!(
+            profile.recording.prints_bw,
+            vec![oid("1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9")]
+        );
+        assert_eq!(
+            profile.recording.prints_color,
+            vec![oid("1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11")]
+        );
+
+        assert_eq!(
+            profile.counters.bw,
+            vec![oid("1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.22")]
+        );
+        assert_eq!(
+            profile.counters.color,
+            vec![oid("1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.21")]
+        );
+        assert_eq!(
+            profile.counters.total,
+            vec![oid("1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.59")]
+        );
+    }
+}

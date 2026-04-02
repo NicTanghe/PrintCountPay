@@ -516,10 +516,7 @@ fn spawn_client_reader(
     });
 }
 
-fn broadcast(
-    clients: &mut HashMap<u64, UnboundedSender<WireMessage>>,
-    message: &WireMessage,
-) {
+fn broadcast(clients: &mut HashMap<u64, UnboundedSender<WireMessage>>, message: &WireMessage) {
     let dead: Vec<u64> = clients
         .iter()
         .filter_map(|(client_id, sender)| sender.send(message.clone()).err().map(|_| *client_id))
@@ -568,7 +565,8 @@ async fn write_frame<W>(writer: &mut W, message: &WireMessage) -> io::Result<()>
 where
     W: AsyncWrite + Unpin,
 {
-    let text = to_string(message).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let text =
+        to_string(message).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let bytes = text.into_bytes();
     writer.write_u32_le(bytes.len() as u32).await?;
     writer.write_all(&bytes).await?;

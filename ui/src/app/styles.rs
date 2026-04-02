@@ -67,8 +67,12 @@ pub(crate) fn firefox_tab_style(active: bool) -> impl Fn(&Theme, button::Status)
             Color::from_rgb8(0xef, 0xf1, 0xf4)
         };
         let background = match status {
-            button::Status::Pressed => shift_color(base_background, if active { -0.04 } else { -0.02 }),
-            button::Status::Hovered => shift_color(base_background, if active { 0.03 } else { 0.01 }),
+            button::Status::Pressed => {
+                shift_color(base_background, if active { -0.04 } else { -0.02 })
+            }
+            button::Status::Hovered => {
+                shift_color(base_background, if active { 0.03 } else { 0.01 })
+            }
             button::Status::Disabled => Color {
                 a: 0.6,
                 ..base_background
@@ -200,8 +204,8 @@ pub(crate) fn profile_pick_list_menu_style() -> impl Fn(&Theme) -> menu::Style {
     }
 }
 
-pub(crate) fn printer_list_scrollable_style(
-) -> impl Fn(&Theme, scrollable::Status) -> scrollable::Style {
+pub(crate) fn printer_list_scrollable_style()
+-> impl Fn(&Theme, scrollable::Status) -> scrollable::Style {
     move |theme, status| {
         let mut style = scrollable::default(theme, status);
         let brand = sampled_brand_color(CONTENT_BRAND_SAMPLE);
