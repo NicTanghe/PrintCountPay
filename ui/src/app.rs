@@ -227,7 +227,7 @@ impl PrintCountApp {
     }
 
     pub(crate) fn update(&mut self, message: Message) -> Command<Message> {
-        match message {
+        let command = match message {
             Message::LogTick => {
                 self.refresh_logs();
                 Command::none()
@@ -454,11 +454,22 @@ impl PrintCountApp {
                 }
                 Command::none()
             }
+            Message::RecordingEndResetToPolled(category) => {
+                self.reset_recording_end_to_polled(category);
+                Command::none()
+            }
             Message::RecordingToggleInclude(category) => {
                 if let Some(printer_id) = self.selected_printer.clone() {
                     let session = self.recording_sessions.entry(printer_id).or_default();
                     let entry = session.edits.category_mut(category);
                     entry.include_in_price = !entry.include_in_price;
+                }
+                Command::none()
+            }
+            Message::RecordingEndFieldsUnlockedChanged(value) => {
+                if let Some(printer_id) = self.selected_printer.clone() {
+                    let session = self.recording_sessions.entry(printer_id).or_default();
+                    session.end_fields_unlocked = value;
                 }
                 Command::none()
             }
@@ -482,7 +493,10 @@ impl PrintCountApp {
                 self.pricing.round_to_five_cents = value;
                 Command::none()
             }
-        }
+        };
+
+        self.flush_shared_state();
+        command
     }
 
     pub(crate) fn subscription(&self) -> Subscription<Message> {

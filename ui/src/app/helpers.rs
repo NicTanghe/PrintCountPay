@@ -394,7 +394,7 @@ pub(crate) fn snapshot_category_value(
     }
 }
 
-pub(crate) fn category_start_value(
+fn category_start_source_value(
     session: &RecordingSession,
     category: RecordingCategory,
 ) -> Option<u64> {
@@ -409,20 +409,67 @@ pub(crate) fn category_start_value(
     }
 }
 
+fn category_end_polled_value(
+    session: &RecordingSession,
+    category: RecordingCategory,
+    fallback: Option<&RecordingSnapshot>,
+) -> Option<u64> {
+    session
+        .end
+        .as_ref()
+        .and_then(|snapshot| snapshot_category_value(snapshot, category))
+        .or_else(|| fallback.and_then(|snapshot| snapshot_category_value(snapshot, category)))
+}
+
+pub(crate) fn category_start_display(
+    session: &RecordingSession,
+    category: RecordingCategory,
+) -> String {
+    category_start_source_value(session, category)
+        .map(|value| value.to_string())
+        .unwrap_or_default()
+}
+
+pub(crate) fn category_end_display(
+    session: &RecordingSession,
+    category: RecordingCategory,
+    fallback: Option<&RecordingSnapshot>,
+) -> String {
+    let edits = session.edits.category(category);
+    let polled_value = category_end_polled_value(session, category, fallback);
+    if session.end_fields_unlocked {
+        let trimmed = edits.end_input.trim();
+        if !trimmed.is_empty() {
+            return edits.end_input.clone();
+        }
+    }
+    polled_value
+        .map(|value| value.to_string())
+        .unwrap_or_default()
+}
+
+pub(crate) fn category_start_value(
+    session: &RecordingSession,
+    category: RecordingCategory,
+) -> Option<u64> {
+    Some(category_start_source_value(session, category).unwrap_or(0))
+}
+
 pub(crate) fn category_end_value(
     session: &RecordingSession,
     category: RecordingCategory,
     fallback: Option<&RecordingSnapshot>,
 ) -> Option<u64> {
     let edits = session.edits.category(category);
-    match parse_count_input(&edits.end_input) {
-        Ok(Some(value)) => Some(value),
-        Ok(None) => session
-            .end
-            .as_ref()
-            .and_then(|snapshot| snapshot_category_value(snapshot, category))
-            .or_else(|| fallback.and_then(|snapshot| snapshot_category_value(snapshot, category))),
-        Err(()) => None,
+    let polled_value = category_end_polled_value(session, category, fallback);
+    if session.end_fields_unlocked {
+        match parse_count_input(&edits.end_input) {
+            Ok(Some(value)) => Some(value),
+            Ok(None) => Some(polled_value.unwrap_or(0)),
+            Err(()) => None,
+        }
+    } else {
+        Some(polled_value.unwrap_or(0))
     }
 }
 
@@ -491,11 +538,13 @@ pub(crate) fn counter_oids_from_walk(varbinds: &[SnmpVarBind]) -> CounterOidSet 
 #[cfg(test)]
 mod tests {
     use super::{
+        category_end_display, category_end_value, category_start_display, category_start_value,
         default_recording_oid_inputs, default_toner_oids, delta_value,
         format_clock_hms_with_offset, format_elapsed_hms, recording_profile_from_settings_lossy,
         round_to_nearest_5_cents, snmp_oids, sum_optional_included, sum_two,
     };
     use crate::app::constants::PRT_GENERAL_PRINTER_NAME_OID;
+    use crate::app::{RecordingCategory, RecordingSession};
     use printcountpay_core::{CounterOidSet, Oid};
     use time::UtcOffset;
 
@@ -524,6 +573,54 @@ mod tests {
         let end_total = sum_two(None, Some(1_669_900));
 
         assert_eq!(delta_value(start_total, end_total), Some(749));
+    }
+
+    #[test]
+    fn missing_recording_values_display_na_but_calculate_as_zero() {
+        let session = RecordingSession::default();
+
+        assert_eq!(
+            category_start_display(&session, RecordingCategory::CopiesBw),
+            ""
+        );
+        assert_eq!(
+            category_end_display(&session, RecordingCategory::CopiesBw, None),
+            ""
+        );
+        assert_eq!(
+            category_start_value(&session, RecordingCategory::CopiesBw),
+            Some(0)
+        );
+        assert_eq!(
+            category_end_value(&session, RecordingCategory::CopiesBw, None),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn locked_end_value_ignores_manual_override() {
+        let mut session = RecordingSession::default();
+        session.edits.copies_bw.end_input = "1234".to_string();
+
+        assert_eq!(
+            category_end_display(&session, RecordingCategory::CopiesBw, None),
+            ""
+        );
+        assert_eq!(
+            category_end_value(&session, RecordingCategory::CopiesBw, None),
+            Some(0)
+        );
+
+        session.end_fields_unlocked = true;
+
+        assert_eq!(
+            category_end_display(&session, RecordingCategory::CopiesBw, None),
+            "1234"
+        );
+        assert_eq!(
+            category_end_value(&session, RecordingCategory::CopiesBw, None),
+            Some(1234)
+        );
     }
 
     #[test]

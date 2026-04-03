@@ -729,6 +729,7 @@ impl PrintCountApp {
                 session.active = true;
                 session.start = Some(snapshot.clone());
                 session.end = None;
+                session.end_fields_unlocked = false;
                 session.edits.apply_start_snapshot(&snapshot);
                 session.status = None;
             }
@@ -774,6 +775,33 @@ impl PrintCountApp {
                 session.status = Some(format!("Stop failed: {error}"));
             }
         }
+    }
+
+    fn reset_recording_end_to_polled(&mut self, category: RecordingCategory) {
+        let Some(printer_id) = self.selected_printer.clone() else {
+            return;
+        };
+
+        let live_snapshot = self
+            .recording_sessions
+            .get(&printer_id)
+            .filter(|session| session.active)
+            .and_then(|_| self.snapshot_for_printer(&printer_id).ok());
+
+        let session = self.recording_sessions.entry(printer_id).or_default();
+        let polled_value = session
+            .end
+            .as_ref()
+            .and_then(|snapshot| snapshot_category_value(snapshot, category))
+            .or_else(|| {
+                live_snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot_category_value(snapshot, category))
+            });
+
+        session.edits.category_mut(category).end_input = polled_value
+            .map(|value| value.to_string())
+            .unwrap_or_default();
     }
 
     fn export_poll_data(&mut self) {
@@ -1296,7 +1324,16 @@ impl PrintCountApp {
         self.recording_sessions = recording_sessions
             .into_iter()
             .filter(|entry| known_ids.contains(&entry.printer_id))
-            .map(|entry| (entry.printer_id, entry.session))
+            .map(|entry| {
+                let local_unlock_state = self
+                    .recording_sessions
+                    .get(&entry.printer_id)
+                    .map(|session| session.end_fields_unlocked)
+                    .unwrap_or(entry.session.end_fields_unlocked);
+                let mut session = entry.session;
+                session.end_fields_unlocked = local_unlock_state;
+                (entry.printer_id, session)
+            })
             .collect();
         self.poll_in_flight.retain(|printer_id| known_ids.contains(printer_id));
 
@@ -1412,6 +1449,72 @@ mod tests {
         assert_eq!(
             printer.snmp_address,
             Some(SnmpAddress::new("192.0.2.10", 1161))
+        );
+    }
+
+    #[test]
+    fn apply_shared_state_preserves_local_end_unlock_flag() {
+        let mut app = test_app();
+        let record = printer_record(PrinterStatus::Online, Some(123));
+        let printer_id = record.id.clone();
+        app.replace_printers(vec![record.clone()]);
+
+        let mut local_session = RecordingSession::default();
+        local_session.end_fields_unlocked = true;
+        app.recording_sessions
+            .insert(printer_id.clone(), local_session.clone());
+
+        let mut remote_session = RecordingSession::default();
+        remote_session.end_fields_unlocked = false;
+        app.apply_shared_state(sync::SharedState {
+            revision: 2,
+            printers: vec![record],
+            poll_states: vec![sync::PollStateEntry {
+                printer_id: printer_id.clone(),
+                state: SnmpPollStatus::Idle,
+            }],
+            recording_sessions: vec![sync::RecordingSessionEntry {
+                printer_id: printer_id.clone(),
+                session: remote_session,
+            }],
+            pricing: app.pricing.clone(),
+        });
+
+        assert_eq!(
+            app.recording_sessions
+                .get(&printer_id)
+                .map(|session| session.end_fields_unlocked),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn reset_end_to_polled_uses_locked_value() {
+        let mut app = test_app();
+        let record = printer_record(PrinterStatus::Online, Some(123));
+        let printer_id = record.id.clone();
+        app.replace_printers(vec![record]);
+        app.selected_printer = Some(printer_id.clone());
+
+        let mut session = RecordingSession::default();
+        session.end_fields_unlocked = true;
+        session.end = Some(RecordingSnapshot {
+            received_at: 123,
+            bw_printer: Some(456),
+            bw_copier: Some(321),
+            color_printer: None,
+            color_copier: None,
+        });
+        session.edits.copies_bw.end_input = "999".to_string();
+        app.recording_sessions.insert(printer_id.clone(), session);
+
+        app.reset_recording_end_to_polled(RecordingCategory::CopiesBw);
+
+        assert_eq!(
+            app.recording_sessions
+                .get(&printer_id)
+                .map(|session| session.edits.copies_bw.end_input.as_str()),
+            Some("321")
         );
     }
 }

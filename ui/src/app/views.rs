@@ -410,15 +410,6 @@ impl PrintCountApp {
 
         let delta_section: Element<'_, Message> = if session.start.is_some() {
             let live_snapshot_ref = live_snapshot.as_ref();
-            let end_display = |input: &str, category| {
-                if !input.trim().is_empty() {
-                    return input.to_string();
-                }
-                live_snapshot_ref
-                    .and_then(|snapshot| snapshot_category_value(snapshot, category))
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(|| input.to_string())
-            };
 
             let copies_bw_start = category_start_value(&session, RecordingCategory::CopiesBw);
             let copies_bw_end =
@@ -445,14 +436,22 @@ impl PrintCountApp {
             let include_prints_bw = session.edits.prints_bw.include_in_price;
             let include_prints_color = session.edits.prints_color.include_in_price;
 
+            let copies_bw_start_input =
+                category_start_display(&session, RecordingCategory::CopiesBw);
             let copies_bw_end_input =
-                end_display(&session.edits.copies_bw.end_input, RecordingCategory::CopiesBw);
+                category_end_display(&session, RecordingCategory::CopiesBw, live_snapshot_ref);
+            let copies_color_start_input =
+                category_start_display(&session, RecordingCategory::CopiesColor);
             let copies_color_end_input =
-                end_display(&session.edits.copies_color.end_input, RecordingCategory::CopiesColor);
+                category_end_display(&session, RecordingCategory::CopiesColor, live_snapshot_ref);
+            let prints_bw_start_input =
+                category_start_display(&session, RecordingCategory::PrintsBw);
             let prints_bw_end_input =
-                end_display(&session.edits.prints_bw.end_input, RecordingCategory::PrintsBw);
+                category_end_display(&session, RecordingCategory::PrintsBw, live_snapshot_ref);
+            let prints_color_start_input =
+                category_start_display(&session, RecordingCategory::PrintsColor);
             let prints_color_end_input =
-                end_display(&session.edits.prints_color.end_input, RecordingCategory::PrintsColor);
+                category_end_display(&session, RecordingCategory::PrintsColor, live_snapshot_ref);
 
             let start_bw_total = sum_two(copies_bw_start, prints_bw_start);
             let end_bw_total = sum_two(copies_bw_end, prints_bw_end);
@@ -500,40 +499,43 @@ impl PrintCountApp {
             } else {
                 "No rounding applied"
             };
-
             column![
                 self.recording_table_header(),
                 self.recording_table_row_editable(
                     RecordingCategory::CopiesBw,
                     "Copies B/W",
-                    &session.edits.copies_bw.start_input,
+                    &copies_bw_start_input,
                     &copies_bw_end_input,
                     copies_bw_delta,
                     include_copies_bw,
+                    session.end_fields_unlocked,
                 ),
                 self.recording_table_row_editable(
                     RecordingCategory::CopiesColor,
                     "Copies color",
-                    &session.edits.copies_color.start_input,
+                    &copies_color_start_input,
                     &copies_color_end_input,
                     copies_color_delta,
                     include_copies_color,
+                    session.end_fields_unlocked,
                 ),
                 self.recording_table_row_editable(
                     RecordingCategory::PrintsBw,
                     "Prints B/W",
-                    &session.edits.prints_bw.start_input,
+                    &prints_bw_start_input,
                     &prints_bw_end_input,
                     prints_bw_delta,
                     include_prints_bw,
+                    session.end_fields_unlocked,
                 ),
                 self.recording_table_row_editable(
                     RecordingCategory::PrintsColor,
                     "Prints color",
-                    &session.edits.prints_color.start_input,
+                    &prints_color_start_input,
                     &prints_color_end_input,
                     prints_color_delta,
                     include_prints_color,
+                    session.end_fields_unlocked,
                 ),
                 rule::horizontal(1),
                 self.recording_table_row(
@@ -591,11 +593,20 @@ impl PrintCountApp {
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
         );
-        content = content.push(
+        let status_line = row![
             text(format!("Status: {status}"))
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-        );
+            horizontal_space(),
+            if session.start.is_some() {
+                self.recording_end_toggle_button(session.end_fields_unlocked)
+            } else {
+                Space::new().width(Length::Shrink).into()
+            }
+        ]
+        .spacing(8)
+        .align_items(Alignment::Center);
+        content = content.push(status_line);
         content = content.push(delta_section);
 
         container(content)
@@ -1683,6 +1694,7 @@ impl PrintCountApp {
         end_value: &str,
         delta: Option<u64>,
         include_in_price: bool,
+        end_unlocked: bool,
     ) -> Element<'_, Message> {
         let indicator_color = if include_in_price {
             Color::from_rgb8(0x6a, 0x6a, 0x6a)
@@ -1705,16 +1717,28 @@ impl PrintCountApp {
         .align_items(Alignment::Center)
         .width(Length::FillPortion(2));
 
-        let start = text_input("n/a", start_value)
-            .on_input(move |value| Message::RecordingStartChanged { category, value })
-            .padding(4)
-            .size(12)
-            .width(Length::FillPortion(1));
-        let end = text_input("n/a", end_value)
-            .on_input(move |value| Message::RecordingEndChanged { category, value })
-            .padding(4)
-            .size(12)
-            .width(Length::FillPortion(1));
+        let start = self.recording_readonly_value(start_value, Length::FillPortion(1));
+        let end: Element<'_, Message> = if end_unlocked {
+            row![
+                button(text("=").size(13))
+                    .on_press(Message::RecordingEndResetToPolled(category))
+                    .padding(2)
+                    .style(theme::Button::custom(indicator_button_style(
+                        Color::from_rgb8(0x1f, 0x2a, 0x37),
+                    ))),
+                text_input("N/A", end_value)
+                    .on_input(move |value| Message::RecordingEndChanged { category, value })
+                    .padding(4)
+                    .size(12)
+                    .width(Length::Fill),
+            ]
+            .spacing(6)
+            .align_items(Alignment::Center)
+            .width(Length::FillPortion(1))
+            .into()
+        } else {
+            self.recording_readonly_value(end_value, Length::FillPortion(1))
+        };
         let delta = text(format_count(delta))
             .size(13)
             .width(Length::FillPortion(1))
@@ -1724,6 +1748,52 @@ impl PrintCountApp {
         row![label, start, end, delta]
             .spacing(12)
             .align_items(Alignment::Center)
+            .into()
+    }
+
+    fn recording_readonly_value(&self, value: &str, width: Length) -> Element<'_, Message> {
+        let display = if value.trim().is_empty() {
+            "N/A".to_string()
+        } else {
+            value.to_string()
+        };
+        container(
+            text(display)
+                .size(13)
+                .width(Length::Fill)
+                .horizontal_alignment(Horizontal::Right)
+                .style(theme::Text::Color(Color::BLACK)),
+        )
+        .padding(4)
+        .width(width)
+        .style(theme::Container::Box)
+        .into()
+    }
+
+    fn recording_end_toggle_button(&self, end_fields_unlocked: bool) -> Element<'_, Message> {
+        let icon_bytes = if end_fields_unlocked {
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../assets/unlocked-svgrepo-com.svg"
+            ))
+            .as_slice()
+        } else {
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../assets/locked-svgrepo-com.svg"
+            ))
+            .as_slice()
+        };
+        let icon = iced::widget::svg(iced::widget::svg::Handle::from_memory(icon_bytes))
+            .width(16)
+            .height(16)
+            .style(|_theme, _status| iced::widget::svg::Style { color: None });
+
+        mouse_area(icon)
+            .interaction(iced::mouse::Interaction::Pointer)
+            .on_press(Message::RecordingEndFieldsUnlockedChanged(
+                !end_fields_unlocked,
+            ))
             .into()
     }
 

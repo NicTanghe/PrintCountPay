@@ -81,7 +81,9 @@ pub enum Message {
         category: RecordingCategory,
         value: String,
     },
+    RecordingEndResetToPolled(RecordingCategory),
     RecordingToggleInclude(RecordingCategory),
+    RecordingEndFieldsUnlockedChanged(bool),
     PricingBwFirstChanged(String),
     PricingBwNextChanged(String),
     PricingBwRestChanged(String),
@@ -251,6 +253,8 @@ pub struct RecordingSession {
     pub(crate) start: Option<RecordingSnapshot>,
     pub(crate) end: Option<RecordingSnapshot>,
     pub(crate) status: Option<String>,
+    #[serde(default)]
+    pub(crate) end_fields_unlocked: bool,
     pub(crate) edits: RecordingEdits,
 }
 
