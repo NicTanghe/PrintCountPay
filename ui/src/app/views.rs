@@ -726,6 +726,7 @@ impl PrintCountApp {
         row![
             self.manual_pricing_tab_button(ManualPricingTab::Calculator, "Calculator"),
             self.manual_pricing_tab_button(ManualPricingTab::Prices, "Prices"),
+            self.manual_pricing_tab_button(ManualPricingTab::Finishers, "Finishers"),
         ]
         .spacing(4)
         .align_items(Alignment::Center)
@@ -809,18 +810,24 @@ impl PrintCountApp {
             .width(Length::Fill)
             .style(theme::Container::Box);
 
-        let mut line_items = column![
+        let mut calculator_section = column![
             row![
                 text("Order lines")
                     .size(15)
                     .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
                 horizontal_space(),
+                button("Add finisher")
+                    .style(theme::Button::custom(solid_brand_button_style(
+                        CONTENT_BRAND_SAMPLE,
+                    )))
+                    .on_press(Message::ManualPricingFinisherAdded),
                 button("Add line")
                     .style(theme::Button::custom(solid_brand_button_style(
                         CONTENT_BRAND_SAMPLE,
                     )))
                     .on_press(Message::ManualPricingLineAdded),
             ]
+            .spacing(10)
             .align_items(Alignment::Center),
             text("Use sheets for paper count and printed sides for actual printed faces.")
                 .size(12)
@@ -834,14 +841,41 @@ impl PrintCountApp {
                 .get(index)
                 .cloned()
                 .unwrap_or(ManualLineState::Invalid);
-            line_items = line_items.push(self.manual_pricing_line_item_row(
+            calculator_section = calculator_section.push(self.manual_pricing_line_item_row(
                 index,
                 line_item,
                 line_state,
             ));
         }
 
-        line_items = line_items
+        calculator_section = calculator_section.push(
+            text("Finishers")
+                .size(13)
+                .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+        );
+
+        if manual.finisher_items.is_empty() {
+            calculator_section = calculator_section.push(
+                text("No finishers added. Use Add finisher for laminate, folding, or binding.")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            );
+        } else {
+            for (index, finisher_item) in manual.finisher_items.iter().enumerate() {
+                let finisher_state = totals
+                    .finisher_states
+                    .get(index)
+                    .cloned()
+                    .unwrap_or(ManualFinisherState::Invalid);
+                calculator_section = calculator_section.push(self.manual_pricing_finisher_row(
+                    index,
+                    finisher_item,
+                    finisher_state,
+                ));
+            }
+        }
+
+        calculator_section = calculator_section
             .push(
             checkbox(manual.cutting_enabled)
                 .label("Cutting (+3 EUR)")
@@ -912,26 +946,23 @@ impl PrintCountApp {
                 .spacing(6),
             );
 
-        let line_items = container(line_items)
+        let calculator_section = container(calculator_section)
             .padding(12)
             .width(Length::Fill)
             .style(theme::Container::Box);
 
-        let lines_total_cents = totals
-            .line_states
-            .iter()
-            .try_fold(0u64, |total, line_state| match line_state {
-                ManualLineState::Empty => Some(total),
-                ManualLineState::Invalid => None,
-                ManualLineState::Ready(line) => Some(total.saturating_add(line.total_cents)),
-            });
-        let lines_total_label = lines_total_cents
+        let lines_total_label = totals
+            .lines_total_cents
             .map(format_cents)
             .unwrap_or_else(|| "Invalid line input".to_string());
+        let finishers_total_label = totals
+            .finishers_total_cents
+            .map(format_cents)
+            .unwrap_or_else(|| "Invalid finisher input".to_string());
         let subtotal_label = totals
             .subtotal_cents
             .map(format_cents)
-            .unwrap_or_else(|| "Invalid line or discount input".to_string());
+            .unwrap_or_else(|| "Invalid line, finisher, or discount input".to_string());
         let discount_label = totals
             .discount_cents
             .map(|value| format!("-{}", format_cents(value)))
@@ -946,7 +977,7 @@ impl PrintCountApp {
             .unwrap_or_else(|| "N/A".to_string());
         let warning = if totals.total_cents.is_none() {
             Some(
-                text("Fix any invalid line, size price, modifier price, or discount input to calculate the total.")
+                text("Fix any invalid line, finisher, size price, modifier price, finisher price, or discount input to calculate the total.")
                     .size(12)
                     .style(theme::Text::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f))),
             )
@@ -959,6 +990,7 @@ impl PrintCountApp {
                 .size(15)
                 .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
             self.value_line("Lines total", Some(lines_total_label)),
+            self.value_line("Finishers total", Some(finishers_total_label)),
             self.value_line(
                 "Cutting fee",
                 Some(if totals.cutting_cents == 0 {
@@ -988,7 +1020,7 @@ impl PrintCountApp {
             .style(theme::Container::Box);
 
         match self.manual_pricing_tab {
-            ManualPricingTab::Calculator => column![line_items, summary]
+            ManualPricingTab::Calculator => column![calculator_section, summary]
                 .spacing(12)
                 .width(Length::Fill)
                 .into(),
@@ -1001,6 +1033,12 @@ impl PrintCountApp {
                 .spacing(12)
                 .width(Length::Fill)
                 .into(),
+            ManualPricingTab::Finishers => column![
+                self.manual_pricing_finishers_config_view()
+            ]
+            .spacing(12)
+            .width(Length::Fill)
+            .into(),
         }
     }
 
@@ -1049,6 +1087,70 @@ impl PrintCountApp {
             .padding(8)
             .style(theme::Container::Box)
             .into()
+    }
+
+    fn manual_pricing_finishers_config_view(&self) -> Element<'_, Message> {
+        let manual = &self.manual_pricing;
+
+        let mut laminate_prices = column![
+            text("Laminate pricing")
+                .size(15)
+                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+            text("Laminate uses a page size plus an amount. Configure A2 through A5 separately.")
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+        ]
+        .spacing(8);
+
+        for size in ManualLaminateSize::ALL {
+            laminate_prices = laminate_prices.push(self.manual_input(
+                &format!("{size} laminate (EUR)"),
+                "0.00",
+                manual.laminate_price_input(size),
+                move |value| Message::ManualPricingLaminatePriceChanged(size, value),
+            ));
+        }
+
+        let laminate_prices = container(laminate_prices)
+            .padding(12)
+            .width(Length::Fill)
+            .style(theme::Container::Box);
+
+        let finishing_prices = container(
+            column![
+                text("Other finishers")
+                    .size(15)
+                    .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+                text("Folding and binding use one flat unit price. The calculator amount field controls how many times they are applied.")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                self.manual_input(
+                    "Folding (EUR)",
+                    "0.00",
+                    &manual.folding_input,
+                    Message::ManualPricingFoldingPriceChanged,
+                ),
+                self.manual_input(
+                    "Binding (EUR)",
+                    "0.00",
+                    &manual.binding_input,
+                    Message::ManualPricingBindingPriceChanged,
+                ),
+            ]
+            .spacing(8),
+        )
+        .padding(12)
+        .width(Length::Fill)
+        .style(theme::Container::Box);
+
+        column![
+            self.manual_pricing_storage_controls_view(),
+            laminate_prices,
+            finishing_prices,
+        ]
+        .spacing(12)
+        .width(Length::Fill)
+        .into()
     }
 
     fn manual_pricing_line_item_row(
@@ -1174,6 +1276,99 @@ impl PrintCountApp {
                 line.sheets,
                 format_cents(line.paper_price_cents),
                 format_cents(line.total_cents),
+            ))
+            .size(12)
+            .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37))),
+        };
+
+        container(column![controls, summary].spacing(8))
+            .padding(10)
+            .width(Length::Fill)
+            .style(theme::Container::Box)
+            .into()
+    }
+
+    fn manual_pricing_finisher_row(
+        &self,
+        index: usize,
+        finisher_item: &ManualFinisherLineItem,
+        finisher_state: ManualFinisherState,
+    ) -> Element<'_, Message> {
+        let finisher_type_picker = pick_list(
+            &ManualFinisherType::ALL[..],
+            Some(finisher_item.finisher_type),
+            move |finisher_type| Message::ManualPricingFinisherTypeChanged(index, finisher_type),
+        )
+        .placeholder("Finisher")
+        .text_size(11)
+        .style(profile_pick_list_style())
+        .menu_style(profile_pick_list_menu_style());
+        let size_control: Element<'_, Message> =
+            if finisher_item.finisher_type == ManualFinisherType::Laminate {
+                pick_list(
+                    &ManualLaminateSize::ALL[..],
+                    Some(finisher_item.laminate_size),
+                    move |size| Message::ManualPricingFinisherSizeChanged(index, size),
+                )
+                .placeholder("Size")
+                .text_size(11)
+                .style(profile_pick_list_style())
+                .menu_style(profile_pick_list_menu_style())
+                .into()
+            } else {
+                self.recording_readonly_value("n/a", Length::Fixed(84.0))
+            };
+        let amount_input = text_input("0", &finisher_item.amount_input)
+            .on_input(move |value| Message::ManualPricingFinisherAmountChanged(index, value))
+            .padding(6)
+            .size(12)
+            .width(Length::Fixed(84.0));
+        let remove_button = button("Remove")
+            .style(theme::Button::custom(muted_content_button_style()))
+            .on_press(Message::ManualPricingFinisherRemoved(index));
+
+        let controls = row![
+            column![
+                text("Finisher")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                finisher_type_picker,
+            ]
+            .spacing(4)
+            .width(Length::FillPortion(2)),
+            column![
+                text("Size")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                size_control,
+            ]
+            .spacing(4),
+            column![
+                text("Amount")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                amount_input,
+            ]
+            .spacing(4),
+            container(remove_button).align_y(iced::alignment::Vertical::Bottom),
+        ]
+        .spacing(10)
+        .align_items(Alignment::Center);
+
+        let summary = match finisher_state {
+            ManualFinisherState::Empty => text("Set an amount to price this finisher.")
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            ManualFinisherState::Invalid => {
+                text("Enter a valid amount and finisher price.")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f)))
+            }
+            ManualFinisherState::Ready(finisher) => text(format!(
+                "{} x {} = {}",
+                finisher.amount,
+                finisher.label,
+                format_cents(finisher.total_cents),
             ))
             .size(12)
             .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37))),

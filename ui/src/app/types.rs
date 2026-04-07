@@ -26,6 +26,7 @@ pub enum PrinterTab {
 pub enum ManualPricingTab {
     Calculator,
     Prices,
+    Finishers,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +70,52 @@ impl std::fmt::Display for ManualPrintMode {
         match self {
             Self::Bw => write!(f, "B/W"),
             Self::Color => write!(f, "Color"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ManualFinisherType {
+    #[default]
+    Laminate,
+    Folding,
+    Binding,
+}
+
+impl ManualFinisherType {
+    pub const ALL: [Self; 3] = [Self::Laminate, Self::Folding, Self::Binding];
+}
+
+impl std::fmt::Display for ManualFinisherType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Laminate => write!(f, "Laminate"),
+            Self::Folding => write!(f, "Folding"),
+            Self::Binding => write!(f, "Binding"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ManualLaminateSize {
+    A2,
+    A3,
+    #[default]
+    A4,
+    A5,
+}
+
+impl ManualLaminateSize {
+    pub const ALL: [Self; 4] = [Self::A2, Self::A3, Self::A4, Self::A5];
+}
+
+impl std::fmt::Display for ManualLaminateSize {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::A2 => write!(f, "A2"),
+            Self::A3 => write!(f, "A3"),
+            Self::A4 => write!(f, "A4"),
+            Self::A5 => write!(f, "A5"),
         }
     }
 }
@@ -154,6 +201,25 @@ impl ManualPricingLineItem {
             .derived_sheets()
             .map(|value| value.to_string())
             .unwrap_or_default();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManualFinisherLineItem {
+    #[serde(default)]
+    pub(crate) finisher_type: ManualFinisherType,
+    #[serde(default)]
+    pub(crate) laminate_size: ManualLaminateSize,
+    pub(crate) amount_input: String,
+}
+
+impl Default for ManualFinisherLineItem {
+    fn default() -> Self {
+        Self {
+            finisher_type: ManualFinisherType::Laminate,
+            laminate_size: ManualLaminateSize::A4,
+            amount_input: String::new(),
+        }
     }
 }
 
@@ -297,10 +363,24 @@ pub struct ManualPricingSettings {
     pub(crate) a4_color_first_input: String,
     #[serde(default)]
     pub(crate) a4_color_rest_input: String,
+    #[serde(default)]
+    pub(crate) laminate_a2_input: String,
+    #[serde(default)]
+    pub(crate) laminate_a3_input: String,
+    #[serde(default)]
+    pub(crate) laminate_a4_input: String,
+    #[serde(default)]
+    pub(crate) laminate_a5_input: String,
+    #[serde(default)]
+    pub(crate) folding_input: String,
+    #[serde(default)]
+    pub(crate) binding_input: String,
     #[serde(default = "default_manual_paper_modifiers")]
     pub(crate) modifiers: Vec<ManualPaperModifier>,
     #[serde(default)]
     pub(crate) line_items: Vec<ManualPricingLineItem>,
+    #[serde(default)]
+    pub(crate) finisher_items: Vec<ManualFinisherLineItem>,
     #[serde(default)]
     pub(crate) cutting_enabled: bool,
     #[serde(default)]
@@ -388,6 +468,24 @@ impl ManualPricingSettings {
         }
     }
 
+    pub(crate) fn laminate_price_input(&self, size: ManualLaminateSize) -> &str {
+        match size {
+            ManualLaminateSize::A2 => &self.laminate_a2_input,
+            ManualLaminateSize::A3 => &self.laminate_a3_input,
+            ManualLaminateSize::A4 => &self.laminate_a4_input,
+            ManualLaminateSize::A5 => &self.laminate_a5_input,
+        }
+    }
+
+    pub(crate) fn set_laminate_price_input(&mut self, size: ManualLaminateSize, value: String) {
+        match size {
+            ManualLaminateSize::A2 => self.laminate_a2_input = value,
+            ManualLaminateSize::A3 => self.laminate_a3_input = value,
+            ManualLaminateSize::A4 => self.laminate_a4_input = value,
+            ManualLaminateSize::A5 => self.laminate_a5_input = value,
+        }
+    }
+
     pub(crate) fn normalize(&mut self) {
         if self.modifiers.is_empty() {
             self.modifiers = default_manual_paper_modifiers();
@@ -461,8 +559,15 @@ impl Default for ManualPricingSettings {
             a4_bw_rest_input: "0.00".to_string(),
             a4_color_first_input: "0.00".to_string(),
             a4_color_rest_input: "0.00".to_string(),
+            laminate_a2_input: "0.00".to_string(),
+            laminate_a3_input: "0.00".to_string(),
+            laminate_a4_input: "0.00".to_string(),
+            laminate_a5_input: "0.00".to_string(),
+            folding_input: "0.00".to_string(),
+            binding_input: "0.00".to_string(),
             modifiers: default_manual_paper_modifiers(),
             line_items: vec![ManualPricingLineItem::default()],
+            finisher_items: Vec::new(),
             cutting_enabled: false,
             discount_input: String::new(),
             rounding_mode: ManualRoundingMode::None,
@@ -546,9 +651,17 @@ pub enum Message {
     ManualPricingLineModifierChanged(usize, Option<usize>),
     ManualPricingLineSidesChanged(usize, String),
     ManualPricingLineDoubleSidedChanged(usize, bool),
+    ManualPricingFinisherAdded,
+    ManualPricingFinisherRemoved(usize),
+    ManualPricingFinisherTypeChanged(usize, ManualFinisherType),
+    ManualPricingFinisherSizeChanged(usize, ManualLaminateSize),
+    ManualPricingFinisherAmountChanged(usize, String),
     ManualPricingBasePriceChanged(ManualPrintSize, String),
     ManualPricingBwTierChanged(ManualPrintSize, ManualBwTier, String),
     ManualPricingColorTierChanged(ManualPrintSize, ManualColorTier, String),
+    ManualPricingLaminatePriceChanged(ManualLaminateSize, String),
+    ManualPricingFoldingPriceChanged(String),
+    ManualPricingBindingPriceChanged(String),
     ManualPricingModifierAdded,
     ManualPricingModifierRemoved(usize),
     ManualPricingModifierNameChanged(usize, String),

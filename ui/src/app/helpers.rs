@@ -15,9 +15,10 @@ use crate::app::constants::{
 };
 use crate::app::profiles::{RecordingOidProfile, TonerOidProfile};
 use crate::app::types::{
-    BwPricing, ManualBwTier, ManualColorTier, ManualPricingLineItem, ManualPricingSettings,
-    ManualPrintMode, ManualPrintSize, ManualRoundingMode, Message, PricingSettings,
-    RecordingCategory, RecordingOidSettings, RecordingSession, RecordingSnapshot, SnmpPollStatus,
+    BwPricing, ManualBwTier, ManualColorTier, ManualFinisherLineItem, ManualFinisherType,
+    ManualPricingLineItem, ManualPricingSettings, ManualPrintMode, ManualPrintSize,
+    ManualRoundingMode, Message, PricingSettings, RecordingCategory, RecordingOidSettings,
+    RecordingSession, RecordingSnapshot, SnmpPollStatus,
 };
 
 pub(crate) fn level_color(level: tracing::Level) -> Color {
@@ -456,8 +457,26 @@ pub(crate) enum ManualLineState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ManualFinisherBreakdown {
+    pub(crate) amount: u64,
+    pub(crate) label: String,
+    pub(crate) unit_price_cents: u64,
+    pub(crate) total_cents: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ManualFinisherState {
+    Empty,
+    Invalid,
+    Ready(ManualFinisherBreakdown),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ManualPricingTotals {
     pub(crate) line_states: Vec<ManualLineState>,
+    pub(crate) finisher_states: Vec<ManualFinisherState>,
+    pub(crate) lines_total_cents: Option<u64>,
+    pub(crate) finishers_total_cents: Option<u64>,
     pub(crate) subtotal_cents: Option<u64>,
     pub(crate) cutting_cents: u64,
     pub(crate) discount_basis_points: Option<u64>,
@@ -619,11 +638,81 @@ pub(crate) fn manual_line_state(
     })
 }
 
+pub(crate) fn manual_finisher_state(
+    settings: &ManualPricingSettings,
+    finisher_item: &ManualFinisherLineItem,
+) -> ManualFinisherState {
+    let amount_trimmed = finisher_item.amount_input.trim();
+    if amount_trimmed.is_empty() {
+        return ManualFinisherState::Empty;
+    }
+
+    let Some(amount) = parse_count_input(&finisher_item.amount_input).ok().flatten() else {
+        return ManualFinisherState::Invalid;
+    };
+
+    let (unit_price_cents, label) = match finisher_item.finisher_type {
+        ManualFinisherType::Laminate => {
+            let Some(price_cents) = parse_price_input(
+                settings.laminate_price_input(finisher_item.laminate_size),
+            )
+            .ok()
+            .flatten()
+            else {
+                return ManualFinisherState::Invalid;
+            };
+
+            (
+                price_cents,
+                format!(
+                    "Laminate {} @ {}",
+                    finisher_item.laminate_size,
+                    format_cents(price_cents)
+                ),
+            )
+        }
+        ManualFinisherType::Folding => {
+            let Some(price_cents) = parse_price_input(&settings.folding_input).ok().flatten()
+            else {
+                return ManualFinisherState::Invalid;
+            };
+
+            (
+                price_cents,
+                format!("Folding @ {}", format_cents(price_cents)),
+            )
+        }
+        ManualFinisherType::Binding => {
+            let Some(price_cents) = parse_price_input(&settings.binding_input).ok().flatten()
+            else {
+                return ManualFinisherState::Invalid;
+            };
+
+            (
+                price_cents,
+                format!("Binding @ {}", format_cents(price_cents)),
+            )
+        }
+    };
+
+    ManualFinisherState::Ready(ManualFinisherBreakdown {
+        amount,
+        label,
+        unit_price_cents,
+        total_cents: amount.saturating_mul(unit_price_cents),
+    })
+}
+
 pub(crate) fn manual_pricing_totals(settings: &ManualPricingSettings) -> ManualPricingTotals {
     let line_states: Vec<_> = settings
         .line_items
         .iter()
         .map(|line_item| manual_line_state(settings, line_item))
+        .collect();
+    let finisher_states: Vec<_> = settings
+        .finisher_items
+        .iter()
+        .map(|finisher_item| manual_finisher_state(settings, finisher_item))
         .collect();
 
     let mut line_total_cents = 0u64;
@@ -634,6 +723,18 @@ pub(crate) fn manual_pricing_totals(settings: &ManualPricingSettings) -> ManualP
             ManualLineState::Invalid => has_invalid_line = true,
             ManualLineState::Ready(line) => {
                 line_total_cents = line_total_cents.saturating_add(line.total_cents);
+            }
+        }
+    }
+
+    let mut finisher_total_cents = 0u64;
+    let mut has_invalid_finisher = false;
+    for finisher_state in &finisher_states {
+        match finisher_state {
+            ManualFinisherState::Empty => {}
+            ManualFinisherState::Invalid => has_invalid_finisher = true,
+            ManualFinisherState::Ready(finisher) => {
+                finisher_total_cents = finisher_total_cents.saturating_add(finisher.total_cents);
             }
         }
     }
@@ -650,10 +751,25 @@ pub(crate) fn manual_pricing_totals(settings: &ManualPricingSettings) -> ManualP
         Err(()) => None,
     };
 
-    let subtotal_cents = if has_invalid_line {
+    let lines_total_cents = if has_invalid_line {
         None
     } else {
-        Some(line_total_cents.saturating_add(cutting_cents))
+        Some(line_total_cents)
+    };
+
+    let finishers_total_cents = if has_invalid_finisher {
+        None
+    } else {
+        Some(finisher_total_cents)
+    };
+
+    let subtotal_cents = match (lines_total_cents, finishers_total_cents) {
+        (Some(line_total_cents), Some(finisher_total_cents)) => Some(
+            line_total_cents
+                .saturating_add(finisher_total_cents)
+                .saturating_add(cutting_cents),
+        ),
+        _ => None,
     };
 
     let discount_cents = match (subtotal_cents, discount_basis_points) {
@@ -675,6 +791,9 @@ pub(crate) fn manual_pricing_totals(settings: &ManualPricingSettings) -> ManualP
 
     ManualPricingTotals {
         line_states,
+        finisher_states,
+        lines_total_cents,
+        finishers_total_cents,
         subtotal_cents,
         cutting_cents,
         discount_basis_points,
@@ -850,9 +969,9 @@ mod tests {
     use crate::app::constants::PRT_GENERAL_PRINTER_NAME_OID;
     use crate::app::profiles::RecordingOidProfile;
     use crate::app::{
-        ManualPaperModifier, ManualPricingLineItem, ManualPricingSettings, ManualPrintMode,
-        ManualPrintSize, ManualRoundingMode, RecordingCategory, RecordingSession,
-        RecordingSnapshot,
+        ManualFinisherLineItem, ManualFinisherType, ManualLaminateSize, ManualPaperModifier,
+        ManualPricingLineItem, ManualPricingSettings, ManualPrintMode, ManualPrintSize,
+        ManualRoundingMode, RecordingCategory, RecordingSession, RecordingSnapshot,
     };
     use printcountpay_core::{CounterOidSet, Oid};
     use time::UtcOffset;
@@ -1100,6 +1219,42 @@ mod tests {
         let totals = manual_pricing_totals(&settings);
 
         assert_eq!(totals.subtotal_cents, Some(310));
+    }
+
+    #[test]
+    fn manual_pricing_adds_laminate_finishers_by_size() {
+        let settings = ManualPricingSettings {
+            laminate_a2_input: "2.50".to_string(),
+            finisher_items: vec![ManualFinisherLineItem {
+                finisher_type: ManualFinisherType::Laminate,
+                laminate_size: ManualLaminateSize::A2,
+                amount_input: "3".to_string(),
+            }],
+            ..ManualPricingSettings::default()
+        };
+
+        let totals = manual_pricing_totals(&settings);
+
+        assert_eq!(totals.finishers_total_cents, Some(750));
+        assert_eq!(totals.subtotal_cents, Some(750));
+    }
+
+    #[test]
+    fn manual_pricing_counts_binding_amounts() {
+        let settings = ManualPricingSettings {
+            binding_input: "4.00".to_string(),
+            finisher_items: vec![ManualFinisherLineItem {
+                finisher_type: ManualFinisherType::Binding,
+                amount_input: "2".to_string(),
+                ..ManualFinisherLineItem::default()
+            }],
+            ..ManualPricingSettings::default()
+        };
+
+        let totals = manual_pricing_totals(&settings);
+
+        assert_eq!(totals.finishers_total_cents, Some(800));
+        assert_eq!(totals.subtotal_cents, Some(800));
     }
 
     #[test]

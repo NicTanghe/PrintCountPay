@@ -33,9 +33,10 @@ mod types;
 
 pub use types::{
     DiscoveryOutcome, DiscoveryProbeResult, Flags, ManualBwTier, ManualColorTier,
-    ManualModifierChoice, ManualPaperModifier, ManualPricingLineItem, ManualPricingSettings,
-    ManualPricingTab, ManualPrintMode, ManualPrintSize, ManualRoundingMode, Message, PrinterTab,
-    ProfileChoice, RecordingCategory, SnmpErrorInfo, Tab,
+    ManualFinisherLineItem, ManualFinisherType, ManualLaminateSize, ManualModifierChoice,
+    ManualPaperModifier, ManualPricingLineItem, ManualPricingSettings, ManualPricingTab,
+    ManualPrintMode, ManualPrintSize, ManualRoundingMode, Message, PrinterTab, ProfileChoice,
+    RecordingCategory, SnmpErrorInfo, Tab,
 };
 pub(crate) use types::{PricingSettings, RecordingSession, SnmpPollStatus};
 
@@ -578,6 +579,34 @@ impl PrintCountApp {
                 }
                 Command::none()
             }
+            Message::ManualPricingFinisherAdded => {
+                self.manual_pricing.finisher_items.push(Default::default());
+                Command::none()
+            }
+            Message::ManualPricingFinisherRemoved(index) => {
+                if index < self.manual_pricing.finisher_items.len() {
+                    self.manual_pricing.finisher_items.remove(index);
+                }
+                Command::none()
+            }
+            Message::ManualPricingFinisherTypeChanged(index, finisher_type) => {
+                if let Some(finisher_item) = self.manual_pricing.finisher_items.get_mut(index) {
+                    finisher_item.finisher_type = finisher_type;
+                }
+                Command::none()
+            }
+            Message::ManualPricingFinisherSizeChanged(index, laminate_size) => {
+                if let Some(finisher_item) = self.manual_pricing.finisher_items.get_mut(index) {
+                    finisher_item.laminate_size = laminate_size;
+                }
+                Command::none()
+            }
+            Message::ManualPricingFinisherAmountChanged(index, value) => {
+                if let Some(finisher_item) = self.manual_pricing.finisher_items.get_mut(index) {
+                    finisher_item.amount_input = value;
+                }
+                Command::none()
+            }
             Message::ManualPricingBasePriceChanged(size, value) => {
                 self.manual_pricing.set_size_price_input(size, value);
                 Command::none()
@@ -588,6 +617,18 @@ impl PrintCountApp {
             }
             Message::ManualPricingColorTierChanged(size, tier, value) => {
                 self.manual_pricing.set_color_tier_input(size, tier, value);
+                Command::none()
+            }
+            Message::ManualPricingLaminatePriceChanged(size, value) => {
+                self.manual_pricing.set_laminate_price_input(size, value);
+                Command::none()
+            }
+            Message::ManualPricingFoldingPriceChanged(value) => {
+                self.manual_pricing.folding_input = value;
+                Command::none()
+            }
+            Message::ManualPricingBindingPriceChanged(value) => {
+                self.manual_pricing.binding_input = value;
                 Command::none()
             }
             Message::ManualPricingModifierAdded => {
