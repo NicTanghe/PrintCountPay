@@ -836,12 +836,21 @@ impl PrintCountApp {
                 ),
             )
             .push(
-            text("Rounding")
+                text("Rounding")
                 .size(13)
                 .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
             )
             .push(
                 column![
+                checkbox(manual.rounding_mode == ManualRoundingMode::FiveCents)
+                    .label("Round down to 0.05 EUR")
+                    .on_toggle(|value| {
+                        Message::ManualPricingRoundingToggled(ManualRoundingMode::FiveCents, value)
+                    })
+                    .size(12)
+                    .style(theme::Checkbox::custom(brand_checkbox_style(
+                        CONTENT_BRAND_SAMPLE,
+                    ))),
                 checkbox(manual.rounding_mode == ManualRoundingMode::HalfEuro)
                     .label("Round down to 0.50 EUR")
                     .on_toggle(|value| {
@@ -1033,6 +1042,7 @@ impl PrintCountApp {
             move |size| Message::ManualPricingLineSizeChanged(index, size),
         )
         .placeholder("Size")
+        .text_size(11)
         .style(profile_pick_list_style())
         .menu_style(profile_pick_list_menu_style());
         let selected_modifier = modifier_choices
@@ -1049,18 +1059,22 @@ impl PrintCountApp {
             move |choice| Message::ManualPricingLineModifierChanged(index, choice.index),
         )
         .placeholder("Modifier")
+        .text_size(11)
         .style(profile_pick_list_style())
         .menu_style(profile_pick_list_menu_style());
-        let sheets_input = text_input("0", &line_item.sheets_input)
-            .on_input(move |value| Message::ManualPricingLineSheetsChanged(index, value))
-            .padding(6)
-            .size(12)
-            .width(Length::Fixed(84.0));
         let sides_input = text_input("0", &line_item.sides_input)
             .on_input(move |value| Message::ManualPricingLineSidesChanged(index, value))
             .padding(6)
             .size(12)
             .width(Length::Fixed(84.0));
+        let double_sided_toggle = checkbox(line_item.double_sided)
+            .label("RV")
+            .on_toggle(move |value| Message::ManualPricingLineDoubleSidedChanged(index, value))
+            .size(12)
+            .style(theme::Checkbox::custom(brand_checkbox_style(
+                CONTENT_BRAND_SAMPLE,
+            )));
+        let sheets_value = self.recording_readonly_value(&line_item.sheets_input, Length::Fixed(84.0));
         let remove_button = button("Remove")
             .style(theme::Button::custom(muted_content_button_style()))
             .on_press(Message::ManualPricingLineRemoved(index));
@@ -1081,14 +1095,7 @@ impl PrintCountApp {
                 modifier_picker,
             ]
             .spacing(4)
-            .width(Length::FillPortion(2)),
-            column![
-                text("Sheets")
-                    .size(12)
-                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-                sheets_input,
-            ]
-            .spacing(4),
+            .width(Length::FillPortion(3)),
             column![
                 text("Printed sides")
                     .size(12)
@@ -1096,13 +1103,23 @@ impl PrintCountApp {
                 sides_input,
             ]
             .spacing(4),
+            column![
+                text("Sheets (locked)")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                sheets_value,
+            ]
+            .spacing(4),
+            container(double_sided_toggle).align_y(iced::alignment::Vertical::Bottom),
             container(remove_button).align_y(iced::alignment::Vertical::Bottom),
         ]
         .spacing(10)
         .align_items(Alignment::Center);
 
         let summary = match line_state {
-            ManualLineState::Empty => text("Set sheets and printed sides to calculate this line.")
+            ManualLineState::Empty => {
+                text("Set printed sides. Sheets are auto-calculated from the double-sided toggle.")
+            }
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
             ManualLineState::Invalid => text("Enter valid sheets, sides, size pricing, and modifier pricing.")

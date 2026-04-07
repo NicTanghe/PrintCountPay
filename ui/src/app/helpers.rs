@@ -430,6 +430,7 @@ pub(crate) struct ManualPricingTotals {
 pub(crate) fn manual_round_total_cents(total_cents: u64, mode: ManualRoundingMode) -> u64 {
     let step = match mode {
         ManualRoundingMode::None => return total_cents,
+        ManualRoundingMode::FiveCents => 5,
         ManualRoundingMode::HalfEuro => 50,
         ManualRoundingMode::DownToFiveEuro => 500,
         ManualRoundingMode::DownToTenEuro => 1_000,
@@ -448,7 +449,7 @@ pub(crate) fn manual_line_state(
         return ManualLineState::Empty;
     }
 
-    let Some(sheets) = parse_count_input(&line_item.sheets_input).ok().flatten() else {
+    let Some(sheets) = line_item.derived_sheets() else {
         return ManualLineState::Invalid;
     };
     let Some(sides) = parse_count_input(&line_item.sides_input).ok().flatten() else {
@@ -834,6 +835,10 @@ mod tests {
     fn manual_rounding_uses_floor_steps() {
         assert_eq!(manual_round_total_cents(1_249, ManualRoundingMode::None), 1_249);
         assert_eq!(
+            manual_round_total_cents(1_249, ManualRoundingMode::FiveCents),
+            1_245
+        );
+        assert_eq!(
             manual_round_total_cents(1_249, ManualRoundingMode::HalfEuro),
             1_200
         );
@@ -868,8 +873,9 @@ mod tests {
             line_items: vec![ManualPricingLineItem {
                 size: ManualPrintSize::A3,
                 modifier_index: Some(0),
-                sheets_input: "2".to_string(),
                 sides_input: "4".to_string(),
+                double_sided: true,
+                ..ManualPricingLineItem::default()
             }],
             ..ManualPricingSettings::default()
         };
@@ -888,8 +894,8 @@ mod tests {
             line_items: vec![ManualPricingLineItem {
                 size: ManualPrintSize::A3,
                 modifier_index: None,
-                sheets_input: "7".to_string(),
                 sides_input: "7".to_string(),
+                ..ManualPricingLineItem::default()
             }],
             cutting_enabled: true,
             discount_input: "10".to_string(),

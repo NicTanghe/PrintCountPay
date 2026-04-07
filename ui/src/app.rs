@@ -557,15 +557,17 @@ impl PrintCountApp {
                 }
                 Command::none()
             }
-            Message::ManualPricingLineSheetsChanged(index, value) => {
-                if let Some(line_item) = self.manual_pricing.line_items.get_mut(index) {
-                    line_item.sheets_input = value;
-                }
-                Command::none()
-            }
             Message::ManualPricingLineSidesChanged(index, value) => {
                 if let Some(line_item) = self.manual_pricing.line_items.get_mut(index) {
                     line_item.sides_input = value;
+                    line_item.sync_sheets_from_sides();
+                }
+                Command::none()
+            }
+            Message::ManualPricingLineDoubleSidedChanged(index, value) => {
+                if let Some(line_item) = self.manual_pricing.line_items.get_mut(index) {
+                    line_item.double_sided = value;
+                    line_item.sync_sheets_from_sides();
                 }
                 Command::none()
             }
@@ -576,7 +578,12 @@ impl PrintCountApp {
             Message::ManualPricingModifierAdded => {
                 self.manual_pricing
                     .modifiers
-                    .push(ManualPaperModifier::default());
+                    .insert(0, ManualPaperModifier::default());
+                for line_item in &mut self.manual_pricing.line_items {
+                    if let Some(selected) = line_item.modifier_index {
+                        line_item.modifier_index = Some(selected + 1);
+                    }
+                }
                 Command::none()
             }
             Message::ManualPricingModifierRemoved(index) => {

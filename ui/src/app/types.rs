@@ -57,6 +57,7 @@ impl std::fmt::Display for ManualPrintSize {
 pub enum ManualRoundingMode {
     #[default]
     None,
+    FiveCents,
     HalfEuro,
     DownToFiveEuro,
     DownToTenEuro,
@@ -66,6 +67,7 @@ impl std::fmt::Display for ManualRoundingMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::None => write!(f, "No rounding"),
+            Self::FiveCents => write!(f, "Round down to 0.05 EUR"),
             Self::HalfEuro => write!(f, "Round down to 0.50 EUR"),
             Self::DownToFiveEuro => write!(f, "Round down to 5 EUR"),
             Self::DownToTenEuro => write!(f, "Round down to 10 EUR"),
@@ -78,6 +80,8 @@ pub struct ManualPricingLineItem {
     pub(crate) size: ManualPrintSize,
     #[serde(default)]
     pub(crate) modifier_index: Option<usize>,
+    #[serde(default)]
+    pub(crate) double_sided: bool,
     pub(crate) sheets_input: String,
     pub(crate) sides_input: String,
 }
@@ -87,9 +91,33 @@ impl Default for ManualPricingLineItem {
         Self {
             size: ManualPrintSize::A3,
             modifier_index: None,
+            double_sided: false,
             sheets_input: String::new(),
             sides_input: String::new(),
         }
+    }
+}
+
+impl ManualPricingLineItem {
+    pub(crate) fn derived_sheets(&self) -> Option<u64> {
+        let trimmed = self.sides_input.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        let sides = trimmed.parse::<u64>().ok()?;
+        Some(if self.double_sided {
+            (sides + 1) / 2
+        } else {
+            sides
+        })
+    }
+
+    pub(crate) fn sync_sheets_from_sides(&mut self) {
+        self.sheets_input = self
+            .derived_sheets()
+            .map(|value| value.to_string())
+            .unwrap_or_default();
     }
 }
 
@@ -272,6 +300,7 @@ impl ManualPricingSettings {
             {
                 line_item.modifier_index = None;
             }
+            line_item.sync_sheets_from_sides();
         }
     }
 }
@@ -366,8 +395,8 @@ pub enum Message {
     ManualPricingLineRemoved(usize),
     ManualPricingLineSizeChanged(usize, ManualPrintSize),
     ManualPricingLineModifierChanged(usize, Option<usize>),
-    ManualPricingLineSheetsChanged(usize, String),
     ManualPricingLineSidesChanged(usize, String),
+    ManualPricingLineDoubleSidedChanged(usize, bool),
     ManualPricingBasePriceChanged(ManualPrintSize, String),
     ManualPricingModifierAdded,
     ManualPricingModifierRemoved(usize),
