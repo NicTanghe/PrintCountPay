@@ -32,9 +32,9 @@ mod styles;
 mod types;
 
 pub use types::{
-    DiscoveryOutcome, DiscoveryProbeResult, Flags, ManualPaperKind, ManualPricingLineItem,
-    ManualPricingSettings, ManualPrintSize, ManualRoundingMode, Message, PrinterTab,
-    ProfileChoice, RecordingCategory, SnmpErrorInfo, Tab,
+    DiscoveryOutcome, DiscoveryProbeResult, Flags, ManualModifierChoice, ManualPaperModifier,
+    ManualPricingLineItem, ManualPricingSettings, ManualPricingTab, ManualPrintSize,
+    ManualRoundingMode, Message, PrinterTab, ProfileChoice, RecordingCategory, SnmpErrorInfo, Tab,
 };
 pub(crate) use types::{PricingSettings, RecordingSession, SnmpPollStatus};
 
@@ -86,11 +86,15 @@ pub struct PrintCountApp {
     manual_port: String,
     manual_community: String,
     manual_status: Option<String>,
+    manual_pricing_path: String,
+    manual_pricing_status: Option<String>,
     printers_path: String,
     printers_status: Option<String>,
     printers: Vec<PrinterRecord>,
     selected_printer: Option<PrinterId>,
     manual_pricing_selected: bool,
+    manual_pricing_tab: ManualPricingTab,
+    manual_pricing: ManualPricingSettings,
     poll_states: HashMap<PrinterId, SnmpPollStatus>,
     poll_in_flight: HashSet<PrinterId>,
     poll_export_path: String,
@@ -184,11 +188,15 @@ impl PrintCountApp {
             manual_port: DEFAULT_SNMP_PORT.to_string(),
             manual_community: "public".to_string(),
             manual_status: None,
+            manual_pricing_path: String::new(),
+            manual_pricing_status: None,
             printers_path: display_path(&printers_file),
             printers_status: None,
             printers,
             selected_printer: None,
             manual_pricing_selected: false,
+            manual_pricing_tab: ManualPricingTab::Calculator,
+            manual_pricing: ManualPricingSettings::default(),
             poll_states,
             poll_in_flight: HashSet::new(),
             poll_export_path: display_path(&poll_export_file),
@@ -220,6 +228,8 @@ impl PrintCountApp {
             app.printers_path = app.default_printers_path();
             app.load_printers_if_present();
         }
+        app.manual_pricing_path = app.default_manual_pricing_path();
+        app.load_manual_pricing_if_present();
         app.last_shared_state = app.build_shared_state(app.last_shared_state.revision);
 
         (app, Command::none())
@@ -331,6 +341,10 @@ impl PrintCountApp {
             Message::SelectManualPricing => {
                 self.active_tab = Tab::Printers;
                 self.manual_pricing_selected = true;
+                Command::none()
+            }
+            Message::SelectManualPricingTab(tab) => {
+                self.manual_pricing_tab = tab;
                 Command::none()
             }
             Message::SelectPrinterTab(tab) => {
@@ -503,78 +517,146 @@ impl PrintCountApp {
                 Command::none()
             }
             Message::ManualPricingLineAdded => {
-                self.pricing
-                    .manual_pricing
+                self.manual_pricing
                     .line_items
                     .push(ManualPricingLineItem::default());
                 Command::none()
             }
             Message::ManualPricingLineRemoved(index) => {
-                if self.pricing.manual_pricing.line_items.len() > 1 {
-                    if index < self.pricing.manual_pricing.line_items.len() {
-                        self.pricing.manual_pricing.line_items.remove(index);
+                if self.manual_pricing.line_items.len() > 1 {
+                    if index < self.manual_pricing.line_items.len() {
+                        self.manual_pricing.line_items.remove(index);
                     }
-                } else if let Some(line_item) = self.pricing.manual_pricing.line_items.first_mut() {
+                } else if let Some(line_item) = self.manual_pricing.line_items.first_mut() {
                     *line_item = ManualPricingLineItem::default();
                 } else {
-                    self.pricing
-                        .manual_pricing
+                    self.manual_pricing
                         .line_items
                         .push(ManualPricingLineItem::default());
                 }
                 Command::none()
             }
             Message::ManualPricingLineSizeChanged(index, size) => {
-                if let Some(line_item) = self.pricing.manual_pricing.line_items.get_mut(index) {
+                if let Some(line_item) = self.manual_pricing.line_items.get_mut(index) {
                     line_item.size = size;
+                    if line_item.modifier_index.is_some_and(|modifier_index| {
+                        self.manual_pricing
+                            .modifiers
+                            .get(modifier_index)
+                            .map(|modifier| !modifier.applies_to_size(size))
+                            .unwrap_or(true)
+                    }) {
+                        line_item.modifier_index = None;
+                    }
                 }
                 Command::none()
             }
-            Message::ManualPricingLinePaperChanged(index, paper) => {
-                if let Some(line_item) = self.pricing.manual_pricing.line_items.get_mut(index) {
-                    line_item.paper = paper;
+            Message::ManualPricingLineModifierChanged(index, modifier_index) => {
+                if let Some(line_item) = self.manual_pricing.line_items.get_mut(index) {
+                    line_item.modifier_index = modifier_index;
                 }
                 Command::none()
             }
             Message::ManualPricingLineSheetsChanged(index, value) => {
-                if let Some(line_item) = self.pricing.manual_pricing.line_items.get_mut(index) {
+                if let Some(line_item) = self.manual_pricing.line_items.get_mut(index) {
                     line_item.sheets_input = value;
                 }
                 Command::none()
             }
             Message::ManualPricingLineSidesChanged(index, value) => {
-                if let Some(line_item) = self.pricing.manual_pricing.line_items.get_mut(index) {
+                if let Some(line_item) = self.manual_pricing.line_items.get_mut(index) {
                     line_item.sides_input = value;
                 }
                 Command::none()
             }
             Message::ManualPricingBasePriceChanged(size, value) => {
-                self.pricing
-                    .manual_pricing
-                    .set_size_price_input(size, value);
+                self.manual_pricing.set_size_price_input(size, value);
                 Command::none()
             }
-            Message::ManualPricingPaperPriceChanged(paper, value) => {
-                self.pricing
-                    .manual_pricing
-                    .set_paper_price_input(paper, value);
+            Message::ManualPricingModifierAdded => {
+                self.manual_pricing
+                    .modifiers
+                    .push(ManualPaperModifier::default());
+                Command::none()
+            }
+            Message::ManualPricingModifierRemoved(index) => {
+                if self.manual_pricing.modifiers.len() > 1 {
+                    if index < self.manual_pricing.modifiers.len() {
+                        self.manual_pricing.modifiers.remove(index);
+                        for line_item in &mut self.manual_pricing.line_items {
+                            match line_item.modifier_index {
+                                Some(selected) if selected == index => line_item.modifier_index = None,
+                                Some(selected) if selected > index => {
+                                    line_item.modifier_index = Some(selected - 1);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                } else if let Some(modifier) = self.manual_pricing.modifiers.first_mut() {
+                    *modifier = ManualPaperModifier::default();
+                    for line_item in &mut self.manual_pricing.line_items {
+                        line_item.modifier_index = None;
+                    }
+                } else {
+                    self.manual_pricing
+                        .modifiers
+                        .push(ManualPaperModifier::default());
+                }
+                Command::none()
+            }
+            Message::ManualPricingModifierNameChanged(index, value) => {
+                if let Some(modifier) = self.manual_pricing.modifiers.get_mut(index) {
+                    modifier.name_input = value;
+                }
+                Command::none()
+            }
+            Message::ManualPricingModifierPriceChanged(index, size, value) => {
+                if let Some(modifier) = self.manual_pricing.modifiers.get_mut(index) {
+                    modifier.set_price_input(size, value);
+                }
+                Command::none()
+            }
+            Message::ManualPricingModifierAppliesChanged(index, size, value) => {
+                if let Some(modifier) = self.manual_pricing.modifiers.get_mut(index) {
+                    modifier.set_applies_to_size(size, value);
+                    if !value {
+                        for line_item in &mut self.manual_pricing.line_items {
+                            if line_item.size == size && line_item.modifier_index == Some(index) {
+                                line_item.modifier_index = None;
+                            }
+                        }
+                    }
+                }
+                Command::none()
+            }
+            Message::ManualPricingPathChanged(value) => {
+                self.manual_pricing_path = value;
+                Command::none()
+            }
+            Message::LoadManualPricing => {
+                self.load_manual_pricing_from_path();
+                Command::none()
+            }
+            Message::SaveManualPricing => {
+                self.save_manual_pricing_to_path();
                 Command::none()
             }
             Message::ManualPricingCuttingChanged(value) => {
-                self.pricing.manual_pricing.cutting_enabled = value;
+                self.manual_pricing.cutting_enabled = value;
                 Command::none()
             }
             Message::ManualPricingDiscountChanged(value) => {
-                self.pricing.manual_pricing.discount_input = value;
+                self.manual_pricing.discount_input = value;
                 Command::none()
             }
             Message::ManualPricingRoundingToggled(mode, enabled) => {
-                self.pricing.manual_pricing.rounding_mode = if enabled {
+                self.manual_pricing.rounding_mode = if enabled {
                     mode
-                } else if self.pricing.manual_pricing.rounding_mode == mode {
+                } else if self.manual_pricing.rounding_mode == mode {
                     ManualRoundingMode::None
                 } else {
-                    self.pricing.manual_pricing.rounding_mode
+                    self.manual_pricing.rounding_mode
                 };
                 Command::none()
             }

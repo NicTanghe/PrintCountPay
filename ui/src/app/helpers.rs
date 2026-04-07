@@ -460,11 +460,24 @@ pub(crate) fn manual_line_state(
     else {
         return ManualLineState::Invalid;
     };
-    let Some(paper_price_cents) = parse_price_input(settings.paper_price_input(line_item.paper))
-        .ok()
-        .flatten()
-    else {
-        return ManualLineState::Invalid;
+
+    let paper_price_cents = match line_item.modifier_index {
+        Some(modifier_index) => {
+            let Some(modifier) = settings.modifiers.get(modifier_index) else {
+                return ManualLineState::Invalid;
+            };
+            if !modifier.applies_to_size(line_item.size) {
+                return ManualLineState::Invalid;
+            }
+            let Some(price_cents) = parse_price_input(modifier.price_input(line_item.size))
+                .ok()
+                .flatten()
+            else {
+                return ManualLineState::Invalid;
+            };
+            price_cents
+        }
+        None => 0,
     };
 
     let print_total_cents = sides.saturating_mul(print_price_cents);
@@ -710,7 +723,7 @@ mod tests {
     };
     use crate::app::constants::PRT_GENERAL_PRINTER_NAME_OID;
     use crate::app::{
-        ManualPaperKind, ManualPricingLineItem, ManualPricingSettings, ManualPrintSize,
+        ManualPaperModifier, ManualPricingLineItem, ManualPricingSettings, ManualPrintSize,
         ManualRoundingMode, RecordingCategory, RecordingSession,
     };
     use printcountpay_core::{CounterOidSet, Oid};
@@ -836,18 +849,30 @@ mod tests {
 
     #[test]
     fn manual_pricing_counts_print_sides_and_paper_sheets_separately() {
-        let mut settings = ManualPricingSettings {
+        let settings = ManualPricingSettings {
             a3_input: "1.00".to_string(),
-            paper_300g_input: "1.00".to_string(),
+            modifiers: vec![ManualPaperModifier {
+                name_input: "300G".to_string(),
+                legacy_price_input: String::new(),
+                applies_a0: true,
+                a0_price_input: "2.00".to_string(),
+                applies_a1: true,
+                a1_price_input: "1.50".to_string(),
+                applies_a2: true,
+                a2_price_input: "1.25".to_string(),
+                applies_a3: true,
+                a3_price_input: "1.00".to_string(),
+                applies_a4: true,
+                a4_price_input: "0.75".to_string(),
+            }],
             line_items: vec![ManualPricingLineItem {
                 size: ManualPrintSize::A3,
-                paper: ManualPaperKind::Paper300g,
+                modifier_index: Some(0),
                 sheets_input: "2".to_string(),
                 sides_input: "4".to_string(),
             }],
             ..ManualPricingSettings::default()
         };
-        settings.normal_paper_input = "0.00".to_string();
 
         let totals = manual_pricing_totals(&settings);
 
@@ -862,7 +887,7 @@ mod tests {
             a3_input: "1.00".to_string(),
             line_items: vec![ManualPricingLineItem {
                 size: ManualPrintSize::A3,
-                paper: ManualPaperKind::Normal,
+                modifier_index: None,
                 sheets_input: "7".to_string(),
                 sides_input: "7".to_string(),
             }],

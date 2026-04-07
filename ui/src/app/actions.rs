@@ -1,4 +1,11 @@
 impl PrintCountApp {
+    fn default_manual_pricing_path(&self) -> String {
+        Path::new(&self.data_root)
+            .join("manual_pricing.ron")
+            .to_string_lossy()
+            .to_string()
+    }
+
     fn default_printers_path(&self) -> String {
         Path::new(&self.data_root)
             .join("printers.ron")
@@ -21,6 +28,67 @@ impl PrintCountApp {
         }
 
         self.load_printers_from_path();
+    }
+
+    fn load_manual_pricing_if_present(&mut self) {
+        let path = self.manual_pricing_path.trim();
+        if path.is_empty() || !Path::new(path).is_file() {
+            self.manual_pricing_status = None;
+            return;
+        }
+
+        self.load_manual_pricing_from_path();
+    }
+
+    fn load_manual_pricing_from_path(&mut self) {
+        let path = self.manual_pricing_path.trim().to_string();
+        if path.is_empty() {
+            self.manual_pricing_status = Some("Load failed: path is empty.".to_string());
+            return;
+        }
+
+        match fs::read_to_string(&path) {
+            Ok(contents) => match from_str::<ManualPricingSettings>(&contents) {
+                Ok(mut settings) => {
+                    settings.normalize();
+                    self.manual_pricing = settings;
+                    self.manual_pricing_status =
+                        Some(format!("Loaded manual pricing from {path}."));
+                }
+                Err(error) => {
+                    self.manual_pricing_status = Some(format!("Load failed: {error}"));
+                }
+            },
+            Err(error) => {
+                self.manual_pricing_status = Some(format!("Load failed: {error}"));
+            }
+        }
+    }
+
+    fn save_manual_pricing_to_path(&mut self) {
+        let path = self.manual_pricing_path.trim().to_string();
+        if path.is_empty() {
+            self.manual_pricing_status = Some("Save failed: path is empty.".to_string());
+            return;
+        }
+
+        self.manual_pricing.normalize();
+
+        let config = PrettyConfig::new();
+        match to_string_pretty(&self.manual_pricing, config) {
+            Ok(contents) => match fs::write(&path, contents) {
+                Ok(()) => {
+                    self.manual_pricing_status =
+                        Some(format!("Saved manual pricing to {path}."));
+                }
+                Err(error) => {
+                    self.manual_pricing_status = Some(format!("Save failed: {error}"));
+                }
+            },
+            Err(error) => {
+                self.manual_pricing_status = Some(format!("Save failed: {error}"));
+            }
+        }
     }
 
     fn refresh_logs(&mut self) {

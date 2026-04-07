@@ -22,6 +22,12 @@ pub enum PrinterTab {
     AddPrinters,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManualPricingTab {
+    Calculator,
+    Prices,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ManualPrintSize {
     A0,
@@ -43,25 +49,6 @@ impl std::fmt::Display for ManualPrintSize {
             Self::A2 => write!(f, "A2"),
             Self::A3 => write!(f, "A3"),
             Self::A4 => write!(f, "A4"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ManualPaperKind {
-    Normal,
-    Paper300g,
-}
-
-impl ManualPaperKind {
-    pub const ALL: [Self; 2] = [Self::Normal, Self::Paper300g];
-}
-
-impl std::fmt::Display for ManualPaperKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Normal => write!(f, "Normal"),
-            Self::Paper300g => write!(f, "300G"),
         }
     }
 }
@@ -89,7 +76,8 @@ impl std::fmt::Display for ManualRoundingMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManualPricingLineItem {
     pub(crate) size: ManualPrintSize,
-    pub(crate) paper: ManualPaperKind,
+    #[serde(default)]
+    pub(crate) modifier_index: Option<usize>,
     pub(crate) sheets_input: String,
     pub(crate) sides_input: String,
 }
@@ -98,10 +86,123 @@ impl Default for ManualPricingLineItem {
     fn default() -> Self {
         Self {
             size: ManualPrintSize::A3,
-            paper: ManualPaperKind::Normal,
+            modifier_index: None,
             sheets_input: String::new(),
             sides_input: String::new(),
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManualPaperModifier {
+    pub(crate) name_input: String,
+    #[serde(default, rename = "price_input", skip_serializing)]
+    pub(crate) legacy_price_input: String,
+    #[serde(default)]
+    pub(crate) applies_a0: bool,
+    #[serde(default)]
+    pub(crate) a0_price_input: String,
+    #[serde(default)]
+    pub(crate) applies_a1: bool,
+    #[serde(default)]
+    pub(crate) a1_price_input: String,
+    #[serde(default)]
+    pub(crate) applies_a2: bool,
+    #[serde(default)]
+    pub(crate) a2_price_input: String,
+    #[serde(default)]
+    pub(crate) applies_a3: bool,
+    #[serde(default)]
+    pub(crate) a3_price_input: String,
+    #[serde(default)]
+    pub(crate) applies_a4: bool,
+    #[serde(default)]
+    pub(crate) a4_price_input: String,
+}
+
+impl ManualPaperModifier {
+    pub(crate) fn applies_to_size(&self, size: ManualPrintSize) -> bool {
+        match size {
+            ManualPrintSize::A0 => self.applies_a0,
+            ManualPrintSize::A1 => self.applies_a1,
+            ManualPrintSize::A2 => self.applies_a2,
+            ManualPrintSize::A3 => self.applies_a3,
+            ManualPrintSize::A4 => self.applies_a4,
+        }
+    }
+
+    pub(crate) fn set_applies_to_size(&mut self, size: ManualPrintSize, value: bool) {
+        match size {
+            ManualPrintSize::A0 => self.applies_a0 = value,
+            ManualPrintSize::A1 => self.applies_a1 = value,
+            ManualPrintSize::A2 => self.applies_a2 = value,
+            ManualPrintSize::A3 => self.applies_a3 = value,
+            ManualPrintSize::A4 => self.applies_a4 = value,
+        }
+    }
+
+    pub(crate) fn price_input(&self, size: ManualPrintSize) -> &str {
+        match size {
+            ManualPrintSize::A0 => &self.a0_price_input,
+            ManualPrintSize::A1 => &self.a1_price_input,
+            ManualPrintSize::A2 => &self.a2_price_input,
+            ManualPrintSize::A3 => &self.a3_price_input,
+            ManualPrintSize::A4 => &self.a4_price_input,
+        }
+    }
+
+    pub(crate) fn set_price_input(&mut self, size: ManualPrintSize, value: String) {
+        match size {
+            ManualPrintSize::A0 => self.a0_price_input = value,
+            ManualPrintSize::A1 => self.a1_price_input = value,
+            ManualPrintSize::A2 => self.a2_price_input = value,
+            ManualPrintSize::A3 => self.a3_price_input = value,
+            ManualPrintSize::A4 => self.a4_price_input = value,
+        }
+    }
+
+    pub(crate) fn display_name(&self) -> String {
+        let trimmed = self.name_input.trim();
+        if trimmed.is_empty() {
+            "Unnamed modifier".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+}
+
+impl Default for ManualPaperModifier {
+    fn default() -> Self {
+        Self {
+            name_input: "300G".to_string(),
+            legacy_price_input: String::new(),
+            applies_a0: true,
+            a0_price_input: "1.00".to_string(),
+            applies_a1: true,
+            a1_price_input: "1.00".to_string(),
+            applies_a2: true,
+            a2_price_input: "1.00".to_string(),
+            applies_a3: true,
+            a3_price_input: "1.00".to_string(),
+            applies_a4: true,
+            a4_price_input: "1.00".to_string(),
+        }
+    }
+}
+
+fn default_manual_paper_modifiers() -> Vec<ManualPaperModifier> {
+    vec![ManualPaperModifier::default()]
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManualModifierChoice {
+    pub(crate) index: Option<usize>,
+    pub(crate) label: String,
+}
+
+impl std::fmt::Display for ManualModifierChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.label)
     }
 }
 
@@ -112,8 +213,8 @@ pub struct ManualPricingSettings {
     pub(crate) a2_input: String,
     pub(crate) a3_input: String,
     pub(crate) a4_input: String,
-    pub(crate) normal_paper_input: String,
-    pub(crate) paper_300g_input: String,
+    #[serde(default = "default_manual_paper_modifiers")]
+    pub(crate) modifiers: Vec<ManualPaperModifier>,
     #[serde(default)]
     pub(crate) line_items: Vec<ManualPricingLineItem>,
     #[serde(default)]
@@ -145,17 +246,32 @@ impl ManualPricingSettings {
         }
     }
 
-    pub(crate) fn paper_price_input(&self, paper: ManualPaperKind) -> &str {
-        match paper {
-            ManualPaperKind::Normal => &self.normal_paper_input,
-            ManualPaperKind::Paper300g => &self.paper_300g_input,
+    pub(crate) fn normalize(&mut self) {
+        if self.modifiers.is_empty() {
+            self.modifiers = default_manual_paper_modifiers();
         }
-    }
+        if self.line_items.is_empty() {
+            self.line_items = vec![ManualPricingLineItem::default()];
+        }
 
-    pub(crate) fn set_paper_price_input(&mut self, paper: ManualPaperKind, value: String) {
-        match paper {
-            ManualPaperKind::Normal => self.normal_paper_input = value,
-            ManualPaperKind::Paper300g => self.paper_300g_input = value,
+        for modifier in &mut self.modifiers {
+            if !modifier.legacy_price_input.trim().is_empty() {
+                for size in ManualPrintSize::ALL {
+                    if modifier.applies_to_size(size) && modifier.price_input(size).trim().is_empty()
+                    {
+                        modifier.set_price_input(size, modifier.legacy_price_input.clone());
+                    }
+                }
+            }
+        }
+
+        for line_item in &mut self.line_items {
+            if line_item
+                .modifier_index
+                .is_some_and(|index| index >= self.modifiers.len())
+            {
+                line_item.modifier_index = None;
+            }
         }
     }
 }
@@ -168,8 +284,7 @@ impl Default for ManualPricingSettings {
             a2_input: "0.00".to_string(),
             a3_input: "1.00".to_string(),
             a4_input: "0.00".to_string(),
-            normal_paper_input: "0.00".to_string(),
-            paper_300g_input: "1.00".to_string(),
+            modifiers: default_manual_paper_modifiers(),
             line_items: vec![ManualPricingLineItem::default()],
             cutting_enabled: false,
             discount_input: String::new(),
@@ -205,6 +320,7 @@ pub enum Message {
     DiscoveryProbeFinished(DiscoveryProbeResult),
     SelectTab(Tab),
     SelectManualPricing,
+    SelectManualPricingTab(ManualPricingTab),
     SelectPrinterTab(PrinterTab),
     SelectPrinter(PrinterId),
     ProfileChoiceChanged(ProfileChoice),
@@ -249,14 +365,21 @@ pub enum Message {
     ManualPricingLineAdded,
     ManualPricingLineRemoved(usize),
     ManualPricingLineSizeChanged(usize, ManualPrintSize),
-    ManualPricingLinePaperChanged(usize, ManualPaperKind),
+    ManualPricingLineModifierChanged(usize, Option<usize>),
     ManualPricingLineSheetsChanged(usize, String),
     ManualPricingLineSidesChanged(usize, String),
     ManualPricingBasePriceChanged(ManualPrintSize, String),
-    ManualPricingPaperPriceChanged(ManualPaperKind, String),
+    ManualPricingModifierAdded,
+    ManualPricingModifierRemoved(usize),
+    ManualPricingModifierNameChanged(usize, String),
+    ManualPricingModifierPriceChanged(usize, ManualPrintSize, String),
+    ManualPricingModifierAppliesChanged(usize, ManualPrintSize, bool),
     ManualPricingCuttingChanged(bool),
     ManualPricingDiscountChanged(String),
     ManualPricingRoundingToggled(ManualRoundingMode, bool),
+    ManualPricingPathChanged(String),
+    LoadManualPricing,
+    SaveManualPricing,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

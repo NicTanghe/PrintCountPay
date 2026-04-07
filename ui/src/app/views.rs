@@ -688,6 +688,7 @@ impl PrintCountApp {
                     .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
             ]
             .spacing(4),
+            self.manual_pricing_tab_bar(),
             scrollable(self.manual_pricing_body_view())
                 .height(Length::Fill)
                 .width(Length::Fill),
@@ -703,8 +704,32 @@ impl PrintCountApp {
             .into()
     }
 
+    fn manual_pricing_tab_bar(&self) -> Element<'_, Message> {
+        row![
+            self.manual_pricing_tab_button(ManualPricingTab::Calculator, "Calculator"),
+            self.manual_pricing_tab_button(ManualPricingTab::Prices, "Prices"),
+        ]
+        .spacing(4)
+        .align_items(Alignment::Center)
+        .into()
+    }
+
+    fn manual_pricing_tab_button(
+        &self,
+        tab: ManualPricingTab,
+        label: &str,
+    ) -> Element<'_, Message> {
+        button(text(label.to_string()).size(12))
+            .padding([4, 10])
+            .style(theme::Button::custom(firefox_tab_style(
+                self.manual_pricing_tab == tab,
+            )))
+            .on_press(Message::SelectManualPricingTab(tab))
+            .into()
+    }
+
     fn manual_pricing_body_view(&self) -> Element<'_, Message> {
-        let manual = &self.pricing.manual_pricing;
+        let manual = &self.manual_pricing;
         let totals = manual_pricing_totals(manual);
 
         let mut size_prices = column![
@@ -731,27 +756,69 @@ impl PrintCountApp {
             .width(Length::Fill)
             .style(theme::Container::Box);
 
-        let mut paper_prices = column![
-            text("Paper modifiers")
-                .size(15)
-                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-            text("Paper modifiers are charged per sheet, not per printed side.")
+        let mut modifier_setup = column![
+            row![
+                text("Paper modifiers")
+                    .size(15)
+                    .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+                horizontal_space(),
+                button("Add modifier")
+                    .style(theme::Button::custom(solid_brand_button_style(
+                        CONTENT_BRAND_SAMPLE,
+                    )))
+                    .on_press(Message::ManualPricingModifierAdded),
+            ]
+            .align_items(Alignment::Center),
+            text("Paper modifiers are charged per sheet. Configure A0, A1, A2, A3, and A4 separately for each modifier.")
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
         ]
         .spacing(8);
 
-        for paper in ManualPaperKind::ALL {
-            paper_prices = paper_prices.push(self.manual_input(
-                &format!("{paper} extra per sheet (EUR)"),
-                "0.00",
-                manual.paper_price_input(paper),
-                move |value| Message::ManualPricingPaperPriceChanged(paper, value),
+        for (index, modifier) in manual.modifiers.iter().enumerate() {
+            modifier_setup =
+                modifier_setup.push(self.manual_pricing_modifier_row(index, modifier));
+        }
+
+        let modifier_setup = container(modifier_setup)
+            .padding(12)
+            .width(Length::Fill)
+            .style(theme::Container::Box);
+
+        let mut line_items = column![
+            row![
+                text("Order lines")
+                    .size(15)
+                    .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+                horizontal_space(),
+                button("Add line")
+                    .style(theme::Button::custom(solid_brand_button_style(
+                        CONTENT_BRAND_SAMPLE,
+                    )))
+                    .on_press(Message::ManualPricingLineAdded),
+            ]
+            .align_items(Alignment::Center),
+            text("Use sheets for paper count and printed sides for actual printed faces.")
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+        ]
+        .spacing(8);
+
+        for (index, line_item) in manual.line_items.iter().enumerate() {
+            let line_state = totals
+                .line_states
+                .get(index)
+                .copied()
+                .unwrap_or(ManualLineState::Invalid);
+            line_items = line_items.push(self.manual_pricing_line_item_row(
+                index,
+                line_item,
+                line_state,
             ));
         }
 
-        let options = column![
-            paper_prices,
+        line_items = line_items
+            .push(
             checkbox(manual.cutting_enabled)
                 .label("Cutting (+3 EUR)")
                 .on_toggle(Message::ManualPricingCuttingChanged)
@@ -759,16 +826,22 @@ impl PrintCountApp {
                 .style(theme::Checkbox::custom(brand_checkbox_style(
                     CONTENT_BRAND_SAMPLE,
                 ))),
-            self.manual_input(
-                "Discount (%)",
-                "0",
-                &manual.discount_input,
-                Message::ManualPricingDiscountChanged,
-            ),
+            )
+            .push(
+                self.manual_input(
+                    "Discount (%)",
+                    "0",
+                    &manual.discount_input,
+                    Message::ManualPricingDiscountChanged,
+                ),
+            )
+            .push(
             text("Rounding")
                 .size(13)
                 .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-            column![
+            )
+            .push(
+                column![
                 checkbox(manual.rounding_mode == ManualRoundingMode::HalfEuro)
                     .label("Round down to 0.50 EUR")
                     .on_toggle(|value| {
@@ -803,46 +876,8 @@ impl PrintCountApp {
                         CONTENT_BRAND_SAMPLE,
                     ))),
             ]
-            .spacing(6),
-        ]
-        .spacing(10);
-
-        let options = container(options)
-            .padding(12)
-            .width(Length::Fill)
-            .style(theme::Container::Box);
-
-        let mut line_items = column![
-            row![
-                text("Order lines")
-                    .size(15)
-                    .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-                horizontal_space(),
-                button("Add line")
-                    .style(theme::Button::custom(solid_brand_button_style(
-                        CONTENT_BRAND_SAMPLE,
-                    )))
-                    .on_press(Message::ManualPricingLineAdded),
-            ]
-            .align_items(Alignment::Center),
-            text("Use sheets for paper count and sides for actual printed faces.")
-                .size(12)
-                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-        ]
-        .spacing(8);
-
-        for (index, line_item) in manual.line_items.iter().enumerate() {
-            let line_state = totals
-                .line_states
-                .get(index)
-                .copied()
-                .unwrap_or(ManualLineState::Invalid);
-            line_items = line_items.push(self.manual_pricing_line_item_row(
-                index,
-                line_item,
-                line_state,
-            ));
-        }
+                .spacing(6),
+            );
 
         let line_items = container(line_items)
             .padding(12)
@@ -878,7 +913,7 @@ impl PrintCountApp {
             .unwrap_or_else(|| "N/A".to_string());
         let warning = if totals.total_cents.is_none() {
             Some(
-                text("Fix any invalid line, size price, or discount input to calculate the total.")
+                text("Fix any invalid line, size price, modifier price, or discount input to calculate the total.")
                     .size(12)
                     .style(theme::Text::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f))),
             )
@@ -919,9 +954,66 @@ impl PrintCountApp {
             .width(Length::Fill)
             .style(theme::Container::Box);
 
-        column![size_prices, options, line_items, summary]
-            .spacing(12)
-            .width(Length::Fill)
+        match self.manual_pricing_tab {
+            ManualPricingTab::Calculator => column![line_items, summary]
+                .spacing(12)
+                .width(Length::Fill)
+                .into(),
+            ManualPricingTab::Prices => column![
+                self.manual_pricing_storage_controls_view(),
+                size_prices,
+                modifier_setup
+            ]
+                .spacing(12)
+                .width(Length::Fill)
+                .into(),
+        }
+    }
+
+    fn manual_pricing_storage_controls_view(&self) -> Element<'_, Message> {
+        let status = self.manual_pricing_status.as_deref().unwrap_or("Ready.");
+        let path_input = text_input("manual_pricing.ron", &self.manual_pricing_path)
+            .on_input(Message::ManualPricingPathChanged)
+            .padding(6)
+            .size(12)
+            .width(Length::Fill);
+
+        let path_controls = row![
+            path_input,
+            button("Load")
+                .style(theme::Button::custom(solid_brand_button_style(
+                    SIDEBAR_BRAND_SAMPLE,
+                )))
+                .on_press(Message::LoadManualPricing),
+            button("Save")
+                .style(theme::Button::custom(solid_brand_button_style(
+                    SIDEBAR_BRAND_SAMPLE,
+                )))
+                .on_press(Message::SaveManualPricing),
+        ]
+        .spacing(8)
+        .align_items(Alignment::Center);
+
+        let content = column![
+            text("Pricing config")
+                .size(16)
+                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+            column![
+                text("RON path")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                path_controls,
+            ]
+            .spacing(4),
+            text(format!("Status: {status}"))
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+        ]
+        .spacing(6);
+
+        container(content)
+            .padding(8)
+            .style(theme::Container::Box)
             .into()
     }
 
@@ -931,6 +1023,10 @@ impl PrintCountApp {
         line_item: &ManualPricingLineItem,
         line_state: ManualLineState,
     ) -> Element<'_, Message> {
+        let modifier_choices = self.manual_modifier_choices(
+            line_item.size,
+            line_item.modifier_index,
+        );
         let size_picker = pick_list(
             &ManualPrintSize::ALL[..],
             Some(line_item.size),
@@ -939,12 +1035,20 @@ impl PrintCountApp {
         .placeholder("Size")
         .style(profile_pick_list_style())
         .menu_style(profile_pick_list_menu_style());
-        let paper_picker = pick_list(
-            &ManualPaperKind::ALL[..],
-            Some(line_item.paper),
-            move |paper| Message::ManualPricingLinePaperChanged(index, paper),
+        let selected_modifier = modifier_choices
+            .iter()
+            .find(|choice| choice.index == line_item.modifier_index)
+            .cloned()
+            .unwrap_or_else(|| ManualModifierChoice {
+                index: None,
+                label: "No modifier".to_string(),
+            });
+        let modifier_picker = pick_list(
+            modifier_choices,
+            Some(selected_modifier),
+            move |choice| Message::ManualPricingLineModifierChanged(index, choice.index),
         )
-        .placeholder("Paper")
+        .placeholder("Modifier")
         .style(profile_pick_list_style())
         .menu_style(profile_pick_list_menu_style());
         let sheets_input = text_input("0", &line_item.sheets_input)
@@ -971,10 +1075,10 @@ impl PrintCountApp {
             .spacing(4)
             .width(Length::FillPortion(2)),
             column![
-                text("Paper")
+                text("Modifier")
                     .size(12)
                     .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-                paper_picker,
+                modifier_picker,
             ]
             .spacing(4)
             .width(Length::FillPortion(2)),
@@ -1001,7 +1105,7 @@ impl PrintCountApp {
             ManualLineState::Empty => text("Set sheets and printed sides to calculate this line.")
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-            ManualLineState::Invalid => text("Enter valid sheets, sides, and pricing values.")
+            ManualLineState::Invalid => text("Enter valid sheets, sides, size pricing, and modifier pricing.")
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f))),
             ManualLineState::Ready(line) => text(format!(
@@ -1021,6 +1125,122 @@ impl PrintCountApp {
             .width(Length::Fill)
             .style(theme::Container::Box)
             .into()
+    }
+
+    fn manual_pricing_modifier_row(
+        &self,
+        index: usize,
+        modifier: &ManualPaperModifier,
+    ) -> Element<'_, Message> {
+        let name_input = text_input("300G", &modifier.name_input)
+            .on_input(move |value| Message::ManualPricingModifierNameChanged(index, value))
+            .padding(6)
+            .size(12)
+            .width(Length::Fill);
+        let remove_button = button("Remove")
+            .style(theme::Button::custom(muted_content_button_style()))
+            .on_press(Message::ManualPricingModifierRemoved(index));
+
+        let controls = row![
+            column![
+                text("Name")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                name_input,
+            ]
+            .spacing(4)
+            .width(Length::FillPortion(2)),
+            container(remove_button).align_y(iced::alignment::Vertical::Bottom),
+        ]
+        .spacing(10)
+        .align_items(Alignment::Center);
+
+        let size_row = |size: ManualPrintSize| {
+            let enabled = modifier.applies_to_size(size);
+            let price_value = modifier.price_input(size);
+            row![
+                text(size.to_string())
+                    .size(12)
+                    .width(Length::Fixed(28.0))
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                checkbox(enabled)
+                    .label("Applies")
+                    .on_toggle(move |value| {
+                        Message::ManualPricingModifierAppliesChanged(index, size, value)
+                    })
+                    .size(12)
+                    .style(theme::Checkbox::custom(brand_checkbox_style(
+                        CONTENT_BRAND_SAMPLE,
+                    ))),
+                text_input("0.00", price_value)
+                    .on_input(move |value| {
+                        Message::ManualPricingModifierPriceChanged(index, size, value)
+                    })
+                    .padding(6)
+                    .size(12)
+                    .width(Length::Fixed(110.0)),
+                text("EUR per sheet")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            ]
+            .spacing(10)
+            .align_items(Alignment::Center)
+        };
+
+        let applies = column![
+            text("Per-size setup")
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+            size_row(ManualPrintSize::A0),
+            size_row(ManualPrintSize::A1),
+            size_row(ManualPrintSize::A2),
+            size_row(ManualPrintSize::A3),
+            size_row(ManualPrintSize::A4),
+        ]
+        .spacing(8);
+
+        container(column![controls, applies].spacing(8))
+            .padding(10)
+            .width(Length::Fill)
+            .style(theme::Container::Box)
+            .into()
+    }
+
+    fn manual_modifier_choices(
+        &self,
+        size: ManualPrintSize,
+        selected_index: Option<usize>,
+    ) -> Vec<ManualModifierChoice> {
+        let mut choices = vec![ManualModifierChoice {
+            index: None,
+            label: "No modifier".to_string(),
+        }];
+
+        for (index, modifier) in self.manual_pricing.modifiers.iter().enumerate() {
+            if modifier.applies_to_size(size) {
+                choices.push(ManualModifierChoice {
+                    index: Some(index),
+                    label: modifier.display_name(),
+                });
+            }
+        }
+
+        if let Some(selected_index) = selected_index
+            && !choices.iter().any(|choice| choice.index == Some(selected_index))
+        {
+            let label = self
+                .manual_pricing
+                .modifiers
+                .get(selected_index)
+                .map(|modifier| format!("{} (not for {size})", modifier.display_name()))
+                .unwrap_or_else(|| "Missing modifier".to_string());
+            choices.push(ManualModifierChoice {
+                index: Some(selected_index),
+                label,
+            });
+        }
+
+        choices
     }
 
     fn manual_pricing_row(&self) -> Element<'_, Message> {
