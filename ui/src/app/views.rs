@@ -1240,14 +1240,14 @@ impl PrintCountApp {
             .spacing(4)
             .width(Length::FillPortion(3)),
             column![
-                text("Printed sides")
+                text("Blijdzijdes")
                     .size(12)
                     .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                 sides_input,
             ]
             .spacing(4),
             column![
-                text("Sheets (locked)")
+                text("vellen")
                     .size(12)
                     .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                 sheets_value,
