@@ -341,6 +341,19 @@ impl PrintCountApp {
             .and_then(|id| self.recording_sessions.get(id))
             .cloned()
             .unwrap_or_default();
+        let start_recording_result = if session.active {
+            None
+        } else {
+            selected_id.map(|id| self.ready_recording_snapshot(id))
+        };
+        let start_recording_enabled = start_recording_result
+            .as_ref()
+            .map(Result::is_ok)
+            .unwrap_or(false);
+        let start_recording_blocked_reason = start_recording_result
+            .as_ref()
+            .and_then(|result| result.as_ref().err())
+            .cloned();
         let last_poll_received_at = selected_id
             .and_then(|id| self.poll_states.get(id))
             .and_then(poll_received_at);
@@ -358,6 +371,8 @@ impl PrintCountApp {
                     })
                     .unwrap_or_else(|| "n/a".to_string());
                 format!("Time since last poll: {elapsed}")
+            } else if let Some(reason) = start_recording_blocked_reason.clone() {
+                format!("Start unavailable: {reason}")
             } else {
                 last_poll_received_at
                     .or_else(|| session.end.as_ref().map(|snapshot| snapshot.received_at))
@@ -385,6 +400,9 @@ impl PrintCountApp {
             button(recording_button_label)
                 .style(theme::Button::custom(solid_recording_button_style()))
                 .on_press(Message::StopRecording)
+        } else if !start_recording_enabled {
+            button(recording_button_label)
+                .style(theme::Button::custom(muted_content_button_style()))
         } else {
             button(recording_button_label)
                 .style(theme::Button::custom(solid_brand_button_style(

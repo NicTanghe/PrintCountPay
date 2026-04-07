@@ -771,6 +771,24 @@ impl PrintCountApp {
         let _ = sender.send(SyncCommand::RequestPoll(printer_id.clone()));
     }
 
+    fn ready_recording_snapshot(
+        &self,
+        printer_id: &PrinterId,
+    ) -> Result<RecordingSnapshot, String> {
+        let snapshot = self.snapshot_for_printer(printer_id)?;
+        let recording_oids = recording_profile_from_settings_lossy(&self.recording_oids);
+        let missing = missing_recording_snapshot_categories(&snapshot, &recording_oids);
+
+        if missing.is_empty() {
+            Ok(snapshot)
+        } else {
+            Err(format!(
+                "Waiting for poll data for {}.",
+                format_recording_category_list(&missing)
+            ))
+        }
+    }
+
     fn start_recording(&mut self) {
         let Some(printer_id) = self.selected_printer.clone() else {
             return;
@@ -790,7 +808,7 @@ impl PrintCountApp {
             return;
         }
 
-        let snapshot_result = self.snapshot_for_printer(&printer_id);
+        let snapshot_result = self.ready_recording_snapshot(&printer_id);
         let session = self
             .recording_sessions
             .entry(printer_id.clone())
@@ -1588,5 +1606,85 @@ mod tests {
                 .map(|session| session.edits.copies_bw.end_input.as_str()),
             Some("321")
         );
+    }
+
+    #[test]
+    fn start_recording_requires_values_for_configured_categories() {
+        let mut app = test_app();
+        let record = printer_record(PrinterStatus::Online, Some(123));
+        let printer_id = record.id.clone();
+        let copies_bw_oid = Oid::from_slice(&[1, 3, 6, 1, 4, 1, 999, 1]);
+        let prints_bw_oid = Oid::from_slice(&[1, 3, 6, 1, 4, 1, 999, 2]);
+
+        app.replace_printers(vec![record]);
+        app.selected_printer = Some(printer_id.clone());
+        app.recording_oids = RecordingOidSettings {
+            copies_bw_input: format_oid_list(&[copies_bw_oid.clone()]),
+            copies_color_input: String::new(),
+            prints_bw_input: format_oid_list(&[prints_bw_oid.clone()]),
+            prints_color_input: String::new(),
+        };
+        app.poll_states.insert(
+            printer_id.clone(),
+            SnmpPollStatus::Ok {
+                received_at: 123,
+                varbinds: vec![SnmpVarBind {
+                    oid: prints_bw_oid,
+                    value: printcountpay_core::SnmpValue::Counter32(456),
+                }],
+            },
+        );
+
+        app.start_recording();
+
+        let session = app
+            .recording_sessions
+            .get(&printer_id)
+            .expect("recording session should be created for status reporting");
+        assert!(!session.active);
+        assert!(session.start.is_none());
+        assert!(
+            session
+                .status
+                .as_deref()
+                .is_some_and(|status| status.contains("Copies B/W"))
+        );
+    }
+
+    #[test]
+    fn start_recording_allows_unconfigured_categories_to_remain_empty() {
+        let mut app = test_app();
+        let record = printer_record(PrinterStatus::Online, Some(123));
+        let printer_id = record.id.clone();
+        let prints_bw_oid = Oid::from_slice(&[1, 3, 6, 1, 4, 1, 999, 2]);
+
+        app.replace_printers(vec![record]);
+        app.selected_printer = Some(printer_id.clone());
+        app.recording_oids = RecordingOidSettings {
+            copies_bw_input: String::new(),
+            copies_color_input: String::new(),
+            prints_bw_input: format_oid_list(&[prints_bw_oid.clone()]),
+            prints_color_input: String::new(),
+        };
+        app.poll_states.insert(
+            printer_id.clone(),
+            SnmpPollStatus::Ok {
+                received_at: 123,
+                varbinds: vec![SnmpVarBind {
+                    oid: prints_bw_oid,
+                    value: printcountpay_core::SnmpValue::Counter32(456),
+                }],
+            },
+        );
+
+        app.start_recording();
+
+        let session = app
+            .recording_sessions
+            .get(&printer_id)
+            .expect("recording session should exist");
+        assert!(session.active);
+        assert_eq!(session.start.as_ref().and_then(|snapshot| snapshot.bw_printer), Some(456));
+        assert_eq!(session.edits.prints_bw.start_input, "456");
     }
 }

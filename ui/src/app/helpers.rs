@@ -49,6 +49,45 @@ pub(crate) fn status_label(status: PrinterStatus) -> &'static str {
     }
 }
 
+pub(crate) fn recording_category_label(category: RecordingCategory) -> &'static str {
+    match category {
+        RecordingCategory::CopiesBw => "Copies B/W",
+        RecordingCategory::CopiesColor => "Copies color",
+        RecordingCategory::PrintsBw => "Prints B/W",
+        RecordingCategory::PrintsColor => "Prints color",
+    }
+}
+
+pub(crate) fn missing_recording_snapshot_categories(
+    snapshot: &RecordingSnapshot,
+    recording_oids: &RecordingOidProfile,
+) -> Vec<RecordingCategory> {
+    let mut missing = Vec::new();
+
+    if !recording_oids.copies_bw.is_empty() && snapshot.bw_copier.is_none() {
+        missing.push(RecordingCategory::CopiesBw);
+    }
+    if !recording_oids.copies_color.is_empty() && snapshot.color_copier.is_none() {
+        missing.push(RecordingCategory::CopiesColor);
+    }
+    if !recording_oids.prints_bw.is_empty() && snapshot.bw_printer.is_none() {
+        missing.push(RecordingCategory::PrintsBw);
+    }
+    if !recording_oids.prints_color.is_empty() && snapshot.color_printer.is_none() {
+        missing.push(RecordingCategory::PrintsColor);
+    }
+
+    missing
+}
+
+pub(crate) fn format_recording_category_list(categories: &[RecordingCategory]) -> String {
+    categories
+        .iter()
+        .map(|category| recording_category_label(*category).to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 pub(crate) fn printer_card_tint(index: usize, total: usize) -> Color {
     let start = (231.0, 0.13, 0.89);
     let end = (232.0, 0.12, 0.87);
@@ -472,11 +511,10 @@ fn manual_print_total_cents(
                 )
                 .ok()
                 .flatten()?;
-                let rest = parse_price_input(
-                    settings.bw_tier_input(line_item.size, ManualBwTier::Rest)?,
-                )
-                .ok()
-                .flatten()?;
+                let rest =
+                    parse_price_input(settings.bw_tier_input(line_item.size, ManualBwTier::Rest)?)
+                        .ok()
+                        .flatten()?;
 
                 Some((
                     tiered_total_cents(sides, first, Some(next), rest),
@@ -517,7 +555,11 @@ fn manual_print_total_cents(
                 .flatten()?;
             Some((
                 sides.saturating_mul(price_cents),
-                format!("Flat {} {}", line_item.print_mode, format_cents(price_cents)),
+                format!(
+                    "Flat {} {}",
+                    line_item.print_mode,
+                    format_cents(price_cents)
+                ),
             ))
         }
     }
@@ -799,15 +841,18 @@ pub(crate) fn counter_oids_from_walk(varbinds: &[SnmpVarBind]) -> CounterOidSet 
 mod tests {
     use super::{
         category_end_display, category_end_value, category_start_display, category_start_value,
-        default_recording_oid_inputs, default_toner_oids, delta_value, format_clock_hms_with_offset,
-        format_elapsed_hms, manual_pricing_totals, manual_round_total_cents,
+        default_recording_oid_inputs, default_toner_oids, delta_value,
+        format_clock_hms_with_offset, format_elapsed_hms, manual_pricing_totals,
+        manual_round_total_cents, missing_recording_snapshot_categories,
         recording_profile_from_settings_lossy, round_to_nearest_5_cents, snmp_oids,
         sum_optional_included, sum_two,
     };
     use crate::app::constants::PRT_GENERAL_PRINTER_NAME_OID;
+    use crate::app::profiles::RecordingOidProfile;
     use crate::app::{
         ManualPaperModifier, ManualPricingLineItem, ManualPricingSettings, ManualPrintMode,
         ManualPrintSize, ManualRoundingMode, RecordingCategory, RecordingSession,
+        RecordingSnapshot,
     };
     use printcountpay_core::{CounterOidSet, Oid};
     use time::UtcOffset;
@@ -837,6 +882,28 @@ mod tests {
         let end_total = sum_two(None, Some(1_669_900));
 
         assert_eq!(delta_value(start_total, end_total), Some(749));
+    }
+
+    #[test]
+    fn missing_recording_snapshot_categories_skip_unconfigured_groups() {
+        let snapshot = RecordingSnapshot {
+            received_at: 123,
+            bw_printer: Some(456),
+            bw_copier: None,
+            color_printer: None,
+            color_copier: None,
+        };
+        let recording_oids = RecordingOidProfile {
+            copies_bw: vec![Oid::from_slice(&[1, 3, 6, 1, 4, 1, 999, 1])],
+            copies_color: Vec::new(),
+            prints_bw: vec![Oid::from_slice(&[1, 3, 6, 1, 4, 1, 999, 2])],
+            prints_color: Vec::new(),
+        };
+
+        assert_eq!(
+            missing_recording_snapshot_categories(&snapshot, &recording_oids),
+            vec![RecordingCategory::CopiesBw]
+        );
     }
 
     #[test]
@@ -915,7 +982,10 @@ mod tests {
 
     #[test]
     fn manual_rounding_uses_floor_steps() {
-        assert_eq!(manual_round_total_cents(1_249, ManualRoundingMode::None), 1_249);
+        assert_eq!(
+            manual_round_total_cents(1_249, ManualRoundingMode::None),
+            1_249
+        );
         assert_eq!(
             manual_round_total_cents(1_249, ManualRoundingMode::FiveCents),
             1_245
