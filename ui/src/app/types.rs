@@ -54,6 +54,39 @@ impl std::fmt::Display for ManualPrintSize {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ManualPrintMode {
+    #[default]
+    Bw,
+    Color,
+}
+
+impl ManualPrintMode {
+    pub const ALL: [Self; 2] = [Self::Bw, Self::Color];
+}
+
+impl std::fmt::Display for ManualPrintMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Bw => write!(f, "B/W"),
+            Self::Color => write!(f, "Color"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManualBwTier {
+    FirstFive,
+    NextFive,
+    Rest,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManualColorTier {
+    FirstFive,
+    Rest,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ManualRoundingMode {
     #[default]
     None,
@@ -79,6 +112,8 @@ impl std::fmt::Display for ManualRoundingMode {
 pub struct ManualPricingLineItem {
     pub(crate) size: ManualPrintSize,
     #[serde(default)]
+    pub(crate) print_mode: ManualPrintMode,
+    #[serde(default)]
     pub(crate) modifier_index: Option<usize>,
     #[serde(default)]
     pub(crate) double_sided: bool,
@@ -90,6 +125,7 @@ impl Default for ManualPricingLineItem {
     fn default() -> Self {
         Self {
             size: ManualPrintSize::A3,
+            print_mode: ManualPrintMode::Bw,
             modifier_index: None,
             double_sided: false,
             sheets_input: String::new(),
@@ -241,6 +277,26 @@ pub struct ManualPricingSettings {
     pub(crate) a2_input: String,
     pub(crate) a3_input: String,
     pub(crate) a4_input: String,
+    #[serde(default)]
+    pub(crate) a3_bw_first_input: String,
+    #[serde(default)]
+    pub(crate) a3_bw_next_input: String,
+    #[serde(default)]
+    pub(crate) a3_bw_rest_input: String,
+    #[serde(default)]
+    pub(crate) a3_color_first_input: String,
+    #[serde(default)]
+    pub(crate) a3_color_rest_input: String,
+    #[serde(default)]
+    pub(crate) a4_bw_first_input: String,
+    #[serde(default)]
+    pub(crate) a4_bw_next_input: String,
+    #[serde(default)]
+    pub(crate) a4_bw_rest_input: String,
+    #[serde(default)]
+    pub(crate) a4_color_first_input: String,
+    #[serde(default)]
+    pub(crate) a4_color_rest_input: String,
     #[serde(default = "default_manual_paper_modifiers")]
     pub(crate) modifiers: Vec<ManualPaperModifier>,
     #[serde(default)]
@@ -274,6 +330,64 @@ impl ManualPricingSettings {
         }
     }
 
+    pub(crate) fn bw_tier_input(&self, size: ManualPrintSize, tier: ManualBwTier) -> Option<&str> {
+        match (size, tier) {
+            (ManualPrintSize::A3, ManualBwTier::FirstFive) => Some(&self.a3_bw_first_input),
+            (ManualPrintSize::A3, ManualBwTier::NextFive) => Some(&self.a3_bw_next_input),
+            (ManualPrintSize::A3, ManualBwTier::Rest) => Some(&self.a3_bw_rest_input),
+            (ManualPrintSize::A4, ManualBwTier::FirstFive) => Some(&self.a4_bw_first_input),
+            (ManualPrintSize::A4, ManualBwTier::NextFive) => Some(&self.a4_bw_next_input),
+            (ManualPrintSize::A4, ManualBwTier::Rest) => Some(&self.a4_bw_rest_input),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn set_bw_tier_input(
+        &mut self,
+        size: ManualPrintSize,
+        tier: ManualBwTier,
+        value: String,
+    ) {
+        match (size, tier) {
+            (ManualPrintSize::A3, ManualBwTier::FirstFive) => self.a3_bw_first_input = value,
+            (ManualPrintSize::A3, ManualBwTier::NextFive) => self.a3_bw_next_input = value,
+            (ManualPrintSize::A3, ManualBwTier::Rest) => self.a3_bw_rest_input = value,
+            (ManualPrintSize::A4, ManualBwTier::FirstFive) => self.a4_bw_first_input = value,
+            (ManualPrintSize::A4, ManualBwTier::NextFive) => self.a4_bw_next_input = value,
+            (ManualPrintSize::A4, ManualBwTier::Rest) => self.a4_bw_rest_input = value,
+            _ => {}
+        }
+    }
+
+    pub(crate) fn color_tier_input(
+        &self,
+        size: ManualPrintSize,
+        tier: ManualColorTier,
+    ) -> Option<&str> {
+        match (size, tier) {
+            (ManualPrintSize::A3, ManualColorTier::FirstFive) => Some(&self.a3_color_first_input),
+            (ManualPrintSize::A3, ManualColorTier::Rest) => Some(&self.a3_color_rest_input),
+            (ManualPrintSize::A4, ManualColorTier::FirstFive) => Some(&self.a4_color_first_input),
+            (ManualPrintSize::A4, ManualColorTier::Rest) => Some(&self.a4_color_rest_input),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn set_color_tier_input(
+        &mut self,
+        size: ManualPrintSize,
+        tier: ManualColorTier,
+        value: String,
+    ) {
+        match (size, tier) {
+            (ManualPrintSize::A3, ManualColorTier::FirstFive) => self.a3_color_first_input = value,
+            (ManualPrintSize::A3, ManualColorTier::Rest) => self.a3_color_rest_input = value,
+            (ManualPrintSize::A4, ManualColorTier::FirstFive) => self.a4_color_first_input = value,
+            (ManualPrintSize::A4, ManualColorTier::Rest) => self.a4_color_rest_input = value,
+            _ => {}
+        }
+    }
+
     pub(crate) fn normalize(&mut self) {
         if self.modifiers.is_empty() {
             self.modifiers = default_manual_paper_modifiers();
@@ -289,6 +403,30 @@ impl ManualPricingSettings {
                     {
                         modifier.set_price_input(size, modifier.legacy_price_input.clone());
                     }
+                }
+            }
+        }
+
+        for size in [ManualPrintSize::A3, ManualPrintSize::A4] {
+            let fallback = self.size_price_input(size).to_string();
+            for tier in [
+                ManualBwTier::FirstFive,
+                ManualBwTier::NextFive,
+                ManualBwTier::Rest,
+            ] {
+                if self
+                    .bw_tier_input(size, tier)
+                    .is_some_and(|value| value.trim().is_empty())
+                {
+                    self.set_bw_tier_input(size, tier, fallback.clone());
+                }
+            }
+            for tier in [ManualColorTier::FirstFive, ManualColorTier::Rest] {
+                if self
+                    .color_tier_input(size, tier)
+                    .is_some_and(|value| value.trim().is_empty())
+                {
+                    self.set_color_tier_input(size, tier, fallback.clone());
                 }
             }
         }
@@ -313,6 +451,16 @@ impl Default for ManualPricingSettings {
             a2_input: "0.00".to_string(),
             a3_input: "1.00".to_string(),
             a4_input: "0.00".to_string(),
+            a3_bw_first_input: "1.00".to_string(),
+            a3_bw_next_input: "1.00".to_string(),
+            a3_bw_rest_input: "1.00".to_string(),
+            a3_color_first_input: "1.00".to_string(),
+            a3_color_rest_input: "1.00".to_string(),
+            a4_bw_first_input: "0.00".to_string(),
+            a4_bw_next_input: "0.00".to_string(),
+            a4_bw_rest_input: "0.00".to_string(),
+            a4_color_first_input: "0.00".to_string(),
+            a4_color_rest_input: "0.00".to_string(),
             modifiers: default_manual_paper_modifiers(),
             line_items: vec![ManualPricingLineItem::default()],
             cutting_enabled: false,
@@ -394,10 +542,13 @@ pub enum Message {
     ManualPricingLineAdded,
     ManualPricingLineRemoved(usize),
     ManualPricingLineSizeChanged(usize, ManualPrintSize),
+    ManualPricingLinePrintModeChanged(usize, ManualPrintMode),
     ManualPricingLineModifierChanged(usize, Option<usize>),
     ManualPricingLineSidesChanged(usize, String),
     ManualPricingLineDoubleSidedChanged(usize, bool),
     ManualPricingBasePriceChanged(ManualPrintSize, String),
+    ManualPricingBwTierChanged(ManualPrintSize, ManualBwTier, String),
+    ManualPricingColorTierChanged(ManualPrintSize, ManualColorTier, String),
     ManualPricingModifierAdded,
     ManualPricingModifierRemoved(usize),
     ManualPricingModifierNameChanged(usize, String),

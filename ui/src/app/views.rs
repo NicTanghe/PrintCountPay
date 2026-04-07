@@ -733,16 +733,16 @@ impl PrintCountApp {
         let totals = manual_pricing_totals(manual);
 
         let mut size_prices = column![
-            text("Print price per side")
+            text("Flat print price per side")
                 .size(15)
                 .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-            text("Sizes A0 to A4. These prices are applied per printed side.")
+            text("Use flat per-side pricing for A0, A1, and A2.")
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
         ]
         .spacing(8);
 
-        for size in ManualPrintSize::ALL {
+        for size in [ManualPrintSize::A0, ManualPrintSize::A1, ManualPrintSize::A2] {
             size_prices = size_prices.push(self.manual_input(
                 &format!("{size} per side (EUR)"),
                 "0.00",
@@ -755,6 +755,12 @@ impl PrintCountApp {
             .padding(12)
             .width(Length::Fill)
             .style(theme::Container::Box);
+
+        let tiered_prices = column![
+            self.manual_tiered_price_box(ManualPrintSize::A3),
+            self.manual_tiered_price_box(ManualPrintSize::A4),
+        ]
+        .spacing(12);
 
         let mut modifier_setup = column![
             row![
@@ -808,7 +814,7 @@ impl PrintCountApp {
             let line_state = totals
                 .line_states
                 .get(index)
-                .copied()
+                .cloned()
                 .unwrap_or(ManualLineState::Invalid);
             line_items = line_items.push(self.manual_pricing_line_item_row(
                 index,
@@ -971,6 +977,7 @@ impl PrintCountApp {
             ManualPricingTab::Prices => column![
                 self.manual_pricing_storage_controls_view(),
                 size_prices,
+                tiered_prices,
                 modifier_setup
             ]
                 .spacing(12)
@@ -1062,6 +1069,15 @@ impl PrintCountApp {
         .text_size(11)
         .style(profile_pick_list_style())
         .menu_style(profile_pick_list_menu_style());
+        let print_mode_picker = pick_list(
+            &ManualPrintMode::ALL[..],
+            Some(line_item.print_mode),
+            move |print_mode| Message::ManualPricingLinePrintModeChanged(index, print_mode),
+        )
+        .placeholder("Type")
+        .text_size(11)
+        .style(profile_pick_list_style())
+        .menu_style(profile_pick_list_menu_style());
         let sides_input = text_input("0", &line_item.sides_input)
             .on_input(move |value| Message::ManualPricingLineSidesChanged(index, value))
             .padding(6)
@@ -1088,6 +1104,13 @@ impl PrintCountApp {
             ]
             .spacing(4)
             .width(Length::FillPortion(2)),
+            column![
+                text("Type")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                print_mode_picker,
+            ]
+            .spacing(4),
             column![
                 text("Modifier")
                     .size(12)
@@ -1126,12 +1149,13 @@ impl PrintCountApp {
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f))),
             ManualLineState::Ready(line) => text(format!(
-                "{} sides x {} + {} sheets x {} = {}",
+                "{} | print {} sides = {} + {} sheets x {} = {}",
+                line.print_pricing_label,
                 line.sides,
-                format_cents(line.print_price_cents),
+                format_cents(line.print_total_cents),
                 line.sheets,
                 format_cents(line.paper_price_cents),
-                format_cents(line.total_cents)
+                format_cents(line.total_cents),
             ))
             .size(12)
             .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37))),
@@ -1142,6 +1166,75 @@ impl PrintCountApp {
             .width(Length::Fill)
             .style(theme::Container::Box)
             .into()
+    }
+
+    fn manual_tiered_price_box(&self, size: ManualPrintSize) -> Element<'_, Message> {
+        let manual = &self.manual_pricing;
+        let bw = column![
+            text("B/W")
+                .size(14)
+                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+            self.manual_input(
+                "1-5 sides (EUR)",
+                "0.00",
+                manual.bw_tier_input(size, ManualBwTier::FirstFive).unwrap_or(""),
+                move |value| Message::ManualPricingBwTierChanged(size, ManualBwTier::FirstFive, value),
+            ),
+            self.manual_input(
+                "6-10 sides (EUR)",
+                "0.00",
+                manual.bw_tier_input(size, ManualBwTier::NextFive).unwrap_or(""),
+                move |value| Message::ManualPricingBwTierChanged(size, ManualBwTier::NextFive, value),
+            ),
+            self.manual_input(
+                "11+ sides (EUR)",
+                "0.00",
+                manual.bw_tier_input(size, ManualBwTier::Rest).unwrap_or(""),
+                move |value| Message::ManualPricingBwTierChanged(size, ManualBwTier::Rest, value),
+            ),
+        ]
+        .spacing(6);
+
+        let color = column![
+            text("Color")
+                .size(14)
+                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+            self.manual_input(
+                "1-5 sides (EUR)",
+                "0.00",
+                manual.color_tier_input(size, ManualColorTier::FirstFive).unwrap_or(""),
+                move |value| {
+                    Message::ManualPricingColorTierChanged(size, ManualColorTier::FirstFive, value)
+                },
+            ),
+            self.manual_input(
+                "6+ sides (EUR)",
+                "0.00",
+                manual.color_tier_input(size, ManualColorTier::Rest).unwrap_or(""),
+                move |value| {
+                    Message::ManualPricingColorTierChanged(size, ManualColorTier::Rest, value)
+                },
+            ),
+        ]
+        .spacing(6);
+
+        container(
+            column![
+                text(format!("{size} tiered print pricing"))
+                    .size(15)
+                    .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+                text("A3 and A4 can price B/W and Color separately.")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                row![bw.width(Length::FillPortion(1)), color.width(Length::FillPortion(1))]
+                    .spacing(12),
+            ]
+            .spacing(8),
+        )
+        .padding(12)
+        .width(Length::Fill)
+        .style(theme::Container::Box)
+        .into()
     }
 
     fn manual_pricing_modifier_row(

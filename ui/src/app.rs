@@ -32,9 +32,10 @@ mod styles;
 mod types;
 
 pub use types::{
-    DiscoveryOutcome, DiscoveryProbeResult, Flags, ManualModifierChoice, ManualPaperModifier,
-    ManualPricingLineItem, ManualPricingSettings, ManualPricingTab, ManualPrintSize,
-    ManualRoundingMode, Message, PrinterTab, ProfileChoice, RecordingCategory, SnmpErrorInfo, Tab,
+    DiscoveryOutcome, DiscoveryProbeResult, Flags, ManualBwTier, ManualColorTier,
+    ManualModifierChoice, ManualPaperModifier, ManualPricingLineItem, ManualPricingSettings,
+    ManualPricingTab, ManualPrintMode, ManualPrintSize, ManualRoundingMode, Message, PrinterTab,
+    ProfileChoice, RecordingCategory, SnmpErrorInfo, Tab,
 };
 pub(crate) use types::{PricingSettings, RecordingSession, SnmpPollStatus};
 
@@ -551,6 +552,12 @@ impl PrintCountApp {
                 }
                 Command::none()
             }
+            Message::ManualPricingLinePrintModeChanged(index, print_mode) => {
+                if let Some(line_item) = self.manual_pricing.line_items.get_mut(index) {
+                    line_item.print_mode = print_mode;
+                }
+                Command::none()
+            }
             Message::ManualPricingLineModifierChanged(index, modifier_index) => {
                 if let Some(line_item) = self.manual_pricing.line_items.get_mut(index) {
                     line_item.modifier_index = modifier_index;
@@ -573,6 +580,14 @@ impl PrintCountApp {
             }
             Message::ManualPricingBasePriceChanged(size, value) => {
                 self.manual_pricing.set_size_price_input(size, value);
+                Command::none()
+            }
+            Message::ManualPricingBwTierChanged(size, tier, value) => {
+                self.manual_pricing.set_bw_tier_input(size, tier, value);
+                Command::none()
+            }
+            Message::ManualPricingColorTierChanged(size, tier, value) => {
+                self.manual_pricing.set_color_tier_input(size, tier, value);
                 Command::none()
             }
             Message::ManualPricingModifierAdded => {

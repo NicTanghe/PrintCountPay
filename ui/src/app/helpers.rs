@@ -15,9 +15,9 @@ use crate::app::constants::{
 };
 use crate::app::profiles::{RecordingOidProfile, TonerOidProfile};
 use crate::app::types::{
-    BwPricing, ManualPricingLineItem, ManualPricingSettings, ManualRoundingMode, Message,
-    PricingSettings, RecordingCategory, RecordingOidSettings, RecordingSession,
-    RecordingSnapshot, SnmpPollStatus,
+    BwPricing, ManualBwTier, ManualColorTier, ManualPricingLineItem, ManualPricingSettings,
+    ManualPrintMode, ManualPrintSize, ManualRoundingMode, Message, PricingSettings,
+    RecordingCategory, RecordingOidSettings, RecordingSession, RecordingSnapshot, SnmpPollStatus,
 };
 
 pub(crate) fn level_color(level: tracing::Level) -> Color {
@@ -398,18 +398,18 @@ pub(crate) fn color_price_from_settings(settings: &PricingSettings) -> Option<u6
 
 pub(crate) const MANUAL_CUTTING_CENTS: u64 = 300;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ManualLineBreakdown {
     pub(crate) sheets: u64,
     pub(crate) sides: u64,
-    pub(crate) print_price_cents: u64,
+    pub(crate) print_pricing_label: String,
     pub(crate) paper_price_cents: u64,
     pub(crate) print_total_cents: u64,
     pub(crate) paper_total_cents: u64,
     pub(crate) total_cents: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ManualLineState {
     Empty,
     Invalid,
@@ -439,6 +439,90 @@ pub(crate) fn manual_round_total_cents(total_cents: u64, mode: ManualRoundingMod
     total_cents / step * step
 }
 
+fn tiered_total_cents(
+    count: u64,
+    first_cents: u64,
+    next_cents: Option<u64>,
+    rest_cents: u64,
+) -> u64 {
+    let first_count = count.min(5);
+    let next_count = count.saturating_sub(5).min(5);
+    let rest_count = count.saturating_sub(10);
+
+    first_count.saturating_mul(first_cents)
+        + next_count.saturating_mul(next_cents.unwrap_or(rest_cents))
+        + rest_count.saturating_mul(rest_cents)
+}
+
+fn manual_print_total_cents(
+    settings: &ManualPricingSettings,
+    line_item: &ManualPricingLineItem,
+    sides: u64,
+) -> Option<(u64, String)> {
+    match line_item.size {
+        ManualPrintSize::A3 | ManualPrintSize::A4 => match line_item.print_mode {
+            ManualPrintMode::Bw => {
+                let first = parse_price_input(
+                    settings.bw_tier_input(line_item.size, ManualBwTier::FirstFive)?,
+                )
+                .ok()
+                .flatten()?;
+                let next = parse_price_input(
+                    settings.bw_tier_input(line_item.size, ManualBwTier::NextFive)?,
+                )
+                .ok()
+                .flatten()?;
+                let rest = parse_price_input(
+                    settings.bw_tier_input(line_item.size, ManualBwTier::Rest)?,
+                )
+                .ok()
+                .flatten()?;
+
+                Some((
+                    tiered_total_cents(sides, first, Some(next), rest),
+                    format!(
+                        "B/W tiers: 1-5 {}, 6-10 {}, 11+ {}",
+                        format_cents(first),
+                        format_cents(next),
+                        format_cents(rest)
+                    ),
+                ))
+            }
+            ManualPrintMode::Color => {
+                let first = parse_price_input(
+                    settings.color_tier_input(line_item.size, ManualColorTier::FirstFive)?,
+                )
+                .ok()
+                .flatten()?;
+                let rest = parse_price_input(
+                    settings.color_tier_input(line_item.size, ManualColorTier::Rest)?,
+                )
+                .ok()
+                .flatten()?;
+
+                Some((
+                    sides.min(5).saturating_mul(first)
+                        + sides.saturating_sub(5).saturating_mul(rest),
+                    format!(
+                        "Color tiers: 1-5 {}, 6+ {}",
+                        format_cents(first),
+                        format_cents(rest)
+                    ),
+                ))
+            }
+        },
+        _ => {
+            let price_cents = parse_price_input(settings.size_price_input(line_item.size))
+                .ok()
+                .flatten()?;
+            Some((
+                sides.saturating_mul(price_cents),
+                format!("Flat {} {}", line_item.print_mode, format_cents(price_cents)),
+            ))
+        }
+    }
+}
+
 pub(crate) fn manual_line_state(
     settings: &ManualPricingSettings,
     line_item: &ManualPricingLineItem,
@@ -455,9 +539,8 @@ pub(crate) fn manual_line_state(
     let Some(sides) = parse_count_input(&line_item.sides_input).ok().flatten() else {
         return ManualLineState::Invalid;
     };
-    let Some(print_price_cents) = parse_price_input(settings.size_price_input(line_item.size))
-        .ok()
-        .flatten()
+    let Some((print_total_cents, print_pricing_label)) =
+        manual_print_total_cents(settings, line_item, sides)
     else {
         return ManualLineState::Invalid;
     };
@@ -481,13 +564,12 @@ pub(crate) fn manual_line_state(
         None => 0,
     };
 
-    let print_total_cents = sides.saturating_mul(print_price_cents);
     let paper_total_cents = sheets.saturating_mul(paper_price_cents);
 
     ManualLineState::Ready(ManualLineBreakdown {
         sheets,
         sides,
-        print_price_cents,
+        print_pricing_label,
         paper_price_cents,
         print_total_cents,
         paper_total_cents,
@@ -724,8 +806,8 @@ mod tests {
     };
     use crate::app::constants::PRT_GENERAL_PRINTER_NAME_OID;
     use crate::app::{
-        ManualPaperModifier, ManualPricingLineItem, ManualPricingSettings, ManualPrintSize,
-        ManualRoundingMode, RecordingCategory, RecordingSession,
+        ManualPaperModifier, ManualPricingLineItem, ManualPricingSettings, ManualPrintMode,
+        ManualPrintSize, ManualRoundingMode, RecordingCategory, RecordingSession,
     };
     use printcountpay_core::{CounterOidSet, Oid};
     use time::UtcOffset;
@@ -909,6 +991,45 @@ mod tests {
         assert_eq!(totals.discount_cents, Some(100));
         assert_eq!(totals.total_before_rounding_cents, Some(900));
         assert_eq!(totals.total_cents, Some(500));
+    }
+
+    #[test]
+    fn manual_pricing_uses_bw_tiers_for_a3() {
+        let settings = ManualPricingSettings {
+            a3_bw_first_input: "1.00".to_string(),
+            a3_bw_next_input: "0.80".to_string(),
+            a3_bw_rest_input: "0.60".to_string(),
+            line_items: vec![ManualPricingLineItem {
+                size: ManualPrintSize::A3,
+                print_mode: ManualPrintMode::Bw,
+                sides_input: "12".to_string(),
+                ..ManualPricingLineItem::default()
+            }],
+            ..ManualPricingSettings::default()
+        };
+
+        let totals = manual_pricing_totals(&settings);
+
+        assert_eq!(totals.subtotal_cents, Some(1_020));
+    }
+
+    #[test]
+    fn manual_pricing_uses_color_tiers_for_a4() {
+        let settings = ManualPricingSettings {
+            a4_color_first_input: "0.50".to_string(),
+            a4_color_rest_input: "0.30".to_string(),
+            line_items: vec![ManualPricingLineItem {
+                size: ManualPrintSize::A4,
+                print_mode: ManualPrintMode::Color,
+                sides_input: "7".to_string(),
+                ..ManualPricingLineItem::default()
+            }],
+            ..ManualPricingSettings::default()
+        };
+
+        let totals = manual_pricing_totals(&settings);
+
+        assert_eq!(totals.subtotal_cents, Some(310));
     }
 
     #[test]
