@@ -677,8 +677,390 @@ impl PrintCountApp {
             .into()
     }
 
+    fn manual_pricing_panel_view(&self) -> Element<'_, Message> {
+        let content = column![
+            column![
+                text("Manual pricing")
+                    .size(20)
+                    .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+                text("Use sheets for paper cost and printed sides for print cost, including recto verso.")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            ]
+            .spacing(4),
+            scrollable(self.manual_pricing_body_view())
+                .height(Length::Fill)
+                .width(Length::Fill),
+        ]
+        .spacing(12)
+        .height(Length::Fill);
+
+        container(content)
+            .padding(12)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(theme::Container::Custom(right_content_panel_style()))
+            .into()
+    }
+
+    fn manual_pricing_body_view(&self) -> Element<'_, Message> {
+        let manual = &self.pricing.manual_pricing;
+        let totals = manual_pricing_totals(manual);
+
+        let mut size_prices = column![
+            text("Print price per side")
+                .size(15)
+                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+            text("Sizes A0 to A4. These prices are applied per printed side.")
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+        ]
+        .spacing(8);
+
+        for size in ManualPrintSize::ALL {
+            size_prices = size_prices.push(self.manual_input(
+                &format!("{size} per side (EUR)"),
+                "0.00",
+                manual.size_price_input(size),
+                move |value| Message::ManualPricingBasePriceChanged(size, value),
+            ));
+        }
+
+        let size_prices = container(size_prices)
+            .padding(12)
+            .width(Length::Fill)
+            .style(theme::Container::Box);
+
+        let mut paper_prices = column![
+            text("Paper modifiers")
+                .size(15)
+                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+            text("Paper modifiers are charged per sheet, not per printed side.")
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+        ]
+        .spacing(8);
+
+        for paper in ManualPaperKind::ALL {
+            paper_prices = paper_prices.push(self.manual_input(
+                &format!("{paper} extra per sheet (EUR)"),
+                "0.00",
+                manual.paper_price_input(paper),
+                move |value| Message::ManualPricingPaperPriceChanged(paper, value),
+            ));
+        }
+
+        let options = column![
+            paper_prices,
+            checkbox(manual.cutting_enabled)
+                .label("Cutting (+3 EUR)")
+                .on_toggle(Message::ManualPricingCuttingChanged)
+                .size(12)
+                .style(theme::Checkbox::custom(brand_checkbox_style(
+                    CONTENT_BRAND_SAMPLE,
+                ))),
+            self.manual_input(
+                "Discount (%)",
+                "0",
+                &manual.discount_input,
+                Message::ManualPricingDiscountChanged,
+            ),
+            text("Rounding")
+                .size(13)
+                .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+            column![
+                checkbox(manual.rounding_mode == ManualRoundingMode::HalfEuro)
+                    .label("Round down to 0.50 EUR")
+                    .on_toggle(|value| {
+                        Message::ManualPricingRoundingToggled(ManualRoundingMode::HalfEuro, value)
+                    })
+                    .size(12)
+                    .style(theme::Checkbox::custom(brand_checkbox_style(
+                        CONTENT_BRAND_SAMPLE,
+                    ))),
+                checkbox(manual.rounding_mode == ManualRoundingMode::DownToFiveEuro)
+                    .label("Round down to 5 EUR")
+                    .on_toggle(|value| {
+                        Message::ManualPricingRoundingToggled(
+                            ManualRoundingMode::DownToFiveEuro,
+                            value,
+                        )
+                    })
+                    .size(12)
+                    .style(theme::Checkbox::custom(brand_checkbox_style(
+                        CONTENT_BRAND_SAMPLE,
+                    ))),
+                checkbox(manual.rounding_mode == ManualRoundingMode::DownToTenEuro)
+                    .label("Round down to 10 EUR")
+                    .on_toggle(|value| {
+                        Message::ManualPricingRoundingToggled(
+                            ManualRoundingMode::DownToTenEuro,
+                            value,
+                        )
+                    })
+                    .size(12)
+                    .style(theme::Checkbox::custom(brand_checkbox_style(
+                        CONTENT_BRAND_SAMPLE,
+                    ))),
+            ]
+            .spacing(6),
+        ]
+        .spacing(10);
+
+        let options = container(options)
+            .padding(12)
+            .width(Length::Fill)
+            .style(theme::Container::Box);
+
+        let mut line_items = column![
+            row![
+                text("Order lines")
+                    .size(15)
+                    .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+                horizontal_space(),
+                button("Add line")
+                    .style(theme::Button::custom(solid_brand_button_style(
+                        CONTENT_BRAND_SAMPLE,
+                    )))
+                    .on_press(Message::ManualPricingLineAdded),
+            ]
+            .align_items(Alignment::Center),
+            text("Use sheets for paper count and sides for actual printed faces.")
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+        ]
+        .spacing(8);
+
+        for (index, line_item) in manual.line_items.iter().enumerate() {
+            let line_state = totals
+                .line_states
+                .get(index)
+                .copied()
+                .unwrap_or(ManualLineState::Invalid);
+            line_items = line_items.push(self.manual_pricing_line_item_row(
+                index,
+                line_item,
+                line_state,
+            ));
+        }
+
+        let line_items = container(line_items)
+            .padding(12)
+            .width(Length::Fill)
+            .style(theme::Container::Box);
+
+        let lines_total_cents = totals
+            .line_states
+            .iter()
+            .try_fold(0u64, |total, line_state| match line_state {
+                ManualLineState::Empty => Some(total),
+                ManualLineState::Invalid => None,
+                ManualLineState::Ready(line) => Some(total.saturating_add(line.total_cents)),
+            });
+        let lines_total_label = lines_total_cents
+            .map(format_cents)
+            .unwrap_or_else(|| "Invalid line input".to_string());
+        let subtotal_label = totals
+            .subtotal_cents
+            .map(format_cents)
+            .unwrap_or_else(|| "Invalid line or discount input".to_string());
+        let discount_label = totals
+            .discount_cents
+            .map(|value| format!("-{}", format_cents(value)))
+            .unwrap_or_else(|| "Invalid discount input".to_string());
+        let before_rounding_label = totals
+            .total_before_rounding_cents
+            .map(format_cents)
+            .unwrap_or_else(|| "N/A".to_string());
+        let total_label = totals
+            .total_cents
+            .map(format_cents)
+            .unwrap_or_else(|| "N/A".to_string());
+        let warning = if totals.total_cents.is_none() {
+            Some(
+                text("Fix any invalid line, size price, or discount input to calculate the total.")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f))),
+            )
+        } else {
+            None
+        };
+
+        let mut summary = column![
+            text("Summary")
+                .size(15)
+                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+            self.value_line("Lines total", Some(lines_total_label)),
+            self.value_line(
+                "Cutting fee",
+                Some(if totals.cutting_cents == 0 {
+                    "0.00 EUR".to_string()
+                } else {
+                    format_cents(totals.cutting_cents)
+                }),
+            ),
+            self.value_line("Subtotal before discount", Some(subtotal_label)),
+            self.value_line("Discount", Some(discount_label)),
+            self.value_line("Before rounding", Some(before_rounding_label)),
+            self.value_line(
+                "Rounding",
+                Some(manual.rounding_mode.to_string()),
+            ),
+            self.value_line("Final total", Some(total_label)),
+        ]
+        .spacing(6);
+
+        if let Some(warning) = warning {
+            summary = summary.push(warning);
+        }
+
+        let summary = container(summary)
+            .padding(12)
+            .width(Length::Fill)
+            .style(theme::Container::Box);
+
+        column![size_prices, options, line_items, summary]
+            .spacing(12)
+            .width(Length::Fill)
+            .into()
+    }
+
+    fn manual_pricing_line_item_row(
+        &self,
+        index: usize,
+        line_item: &ManualPricingLineItem,
+        line_state: ManualLineState,
+    ) -> Element<'_, Message> {
+        let size_picker = pick_list(
+            &ManualPrintSize::ALL[..],
+            Some(line_item.size),
+            move |size| Message::ManualPricingLineSizeChanged(index, size),
+        )
+        .placeholder("Size")
+        .style(profile_pick_list_style())
+        .menu_style(profile_pick_list_menu_style());
+        let paper_picker = pick_list(
+            &ManualPaperKind::ALL[..],
+            Some(line_item.paper),
+            move |paper| Message::ManualPricingLinePaperChanged(index, paper),
+        )
+        .placeholder("Paper")
+        .style(profile_pick_list_style())
+        .menu_style(profile_pick_list_menu_style());
+        let sheets_input = text_input("0", &line_item.sheets_input)
+            .on_input(move |value| Message::ManualPricingLineSheetsChanged(index, value))
+            .padding(6)
+            .size(12)
+            .width(Length::Fixed(84.0));
+        let sides_input = text_input("0", &line_item.sides_input)
+            .on_input(move |value| Message::ManualPricingLineSidesChanged(index, value))
+            .padding(6)
+            .size(12)
+            .width(Length::Fixed(84.0));
+        let remove_button = button("Remove")
+            .style(theme::Button::custom(muted_content_button_style()))
+            .on_press(Message::ManualPricingLineRemoved(index));
+
+        let controls = row![
+            column![
+                text("Size")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                size_picker,
+            ]
+            .spacing(4)
+            .width(Length::FillPortion(2)),
+            column![
+                text("Paper")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                paper_picker,
+            ]
+            .spacing(4)
+            .width(Length::FillPortion(2)),
+            column![
+                text("Sheets")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                sheets_input,
+            ]
+            .spacing(4),
+            column![
+                text("Printed sides")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                sides_input,
+            ]
+            .spacing(4),
+            container(remove_button).align_y(iced::alignment::Vertical::Bottom),
+        ]
+        .spacing(10)
+        .align_items(Alignment::Center);
+
+        let summary = match line_state {
+            ManualLineState::Empty => text("Set sheets and printed sides to calculate this line.")
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            ManualLineState::Invalid => text("Enter valid sheets, sides, and pricing values.")
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f))),
+            ManualLineState::Ready(line) => text(format!(
+                "{} sides x {} + {} sheets x {} = {}",
+                line.sides,
+                format_cents(line.print_price_cents),
+                line.sheets,
+                format_cents(line.paper_price_cents),
+                format_cents(line.total_cents)
+            ))
+            .size(12)
+            .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37))),
+        };
+
+        container(column![controls, summary].spacing(8))
+            .padding(10)
+            .width(Length::Fill)
+            .style(theme::Container::Box)
+            .into()
+    }
+
+    fn manual_pricing_row(&self) -> Element<'_, Message> {
+        let is_selected = self.manual_pricing_selected;
+        let base_color = Color::from_rgb8(0xeb, 0xf2, 0xe8);
+        let name_color = if is_selected {
+            Color::WHITE
+        } else {
+            Color::from_rgb8(0x1f, 0x2a, 0x37)
+        };
+        let secondary_color = if is_selected {
+            Color::from_rgba8(0xff, 0xff, 0xff, 0.82)
+        } else {
+            Color::from_rgb8(0x5a, 0x66, 0x78)
+        };
+
+        let content = column![
+            text("Manual pricing")
+                .size(16)
+                .style(theme::Text::Color(name_color)),
+            text("A0-A4, paper types, discount, rounding")
+                .size(13)
+                .style(theme::Text::Color(secondary_color)),
+        ]
+        .spacing(6);
+
+        button(content)
+            .style(theme::Button::custom(printer_card_style(
+                is_selected,
+                base_color,
+            )))
+            .width(Length::Fill)
+            .padding([14, 16])
+            .clip(true)
+            .on_press(Message::SelectManualPricing)
+            .into()
+    }
+
     fn printer_list_view(&self) -> Element<'_, Message> {
-        let mut list_items = column![].spacing(10);
+        let mut list_items = column![self.manual_pricing_row()].spacing(10);
 
         if self.printers.is_empty() {
             list_items = list_items.push(
@@ -740,7 +1122,8 @@ impl PrintCountApp {
     }
 
     fn printer_row(&self, record: &PrinterRecord, index: usize, total: usize) -> Element<'_, Message> {
-        let is_selected = self.selected_printer.as_ref() == Some(&record.id);
+        let is_selected =
+            !self.manual_pricing_selected && self.selected_printer.as_ref() == Some(&record.id);
         let is_recording = self
             .recording_sessions
             .get(&record.id)
@@ -1107,13 +1490,16 @@ impl PrintCountApp {
         content.into()
     }
 
-    fn pricing_input(
+    fn manual_input<'a, F>(
         &self,
         label: &str,
         placeholder: &str,
-        value: &str,
-        on_change: fn(String) -> Message,
-    ) -> Element<'_, Message> {
+        value: &'a str,
+        on_change: F,
+    ) -> Element<'a, Message>
+    where
+        F: Fn(String) -> Message + 'static,
+    {
         let input = text_input(placeholder, value)
             .on_input(on_change)
             .padding(6)
@@ -1130,27 +1516,24 @@ impl PrintCountApp {
         .into()
     }
 
-    fn oids_input(
+    fn pricing_input<'a>(
         &self,
         label: &str,
         placeholder: &str,
-        value: &str,
+        value: &'a str,
         on_change: fn(String) -> Message,
-    ) -> Element<'_, Message> {
-        let input = text_input(placeholder, value)
-            .on_input(on_change)
-            .padding(6)
-            .size(12)
-            .width(Length::Fill);
+    ) -> Element<'a, Message> {
+        self.manual_input(label, placeholder, value, on_change)
+    }
 
-        column![
-            text(label.to_string())
-                .size(12)
-                .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-            input
-        ]
-        .spacing(4)
-        .into()
+    fn oids_input<'a>(
+        &self,
+        label: &str,
+        placeholder: &str,
+        value: &'a str,
+        on_change: fn(String) -> Message,
+    ) -> Element<'a, Message> {
+        self.manual_input(label, placeholder, value, on_change)
     }
 
     fn poll_state_view(&self, state: &SnmpPollStatus, in_flight: bool) -> Element<'_, Message> {

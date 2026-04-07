@@ -239,7 +239,7 @@ impl PrintCountApp {
     }
 
     fn delete_selected_printer(&mut self) {
-        if self.active_tab != Tab::Printers {
+        if self.active_tab != Tab::Printers || self.manual_pricing_selected {
             return;
         }
 
@@ -559,6 +559,10 @@ impl PrintCountApp {
     }
 
     fn poll_selected_printer(&mut self) -> Command<Message> {
+        if self.manual_pricing_selected {
+            return Command::none();
+        }
+
         let Some(printer_id) = self.selected_printer.clone() else {
             return Command::none();
         };

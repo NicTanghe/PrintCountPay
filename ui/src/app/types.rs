@@ -22,6 +22,162 @@ pub enum PrinterTab {
     AddPrinters,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ManualPrintSize {
+    A0,
+    A1,
+    A2,
+    A3,
+    A4,
+}
+
+impl ManualPrintSize {
+    pub const ALL: [Self; 5] = [Self::A0, Self::A1, Self::A2, Self::A3, Self::A4];
+}
+
+impl std::fmt::Display for ManualPrintSize {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::A0 => write!(f, "A0"),
+            Self::A1 => write!(f, "A1"),
+            Self::A2 => write!(f, "A2"),
+            Self::A3 => write!(f, "A3"),
+            Self::A4 => write!(f, "A4"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ManualPaperKind {
+    Normal,
+    Paper300g,
+}
+
+impl ManualPaperKind {
+    pub const ALL: [Self; 2] = [Self::Normal, Self::Paper300g];
+}
+
+impl std::fmt::Display for ManualPaperKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Normal => write!(f, "Normal"),
+            Self::Paper300g => write!(f, "300G"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ManualRoundingMode {
+    #[default]
+    None,
+    HalfEuro,
+    DownToFiveEuro,
+    DownToTenEuro,
+}
+
+impl std::fmt::Display for ManualRoundingMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => write!(f, "No rounding"),
+            Self::HalfEuro => write!(f, "Round down to 0.50 EUR"),
+            Self::DownToFiveEuro => write!(f, "Round down to 5 EUR"),
+            Self::DownToTenEuro => write!(f, "Round down to 10 EUR"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManualPricingLineItem {
+    pub(crate) size: ManualPrintSize,
+    pub(crate) paper: ManualPaperKind,
+    pub(crate) sheets_input: String,
+    pub(crate) sides_input: String,
+}
+
+impl Default for ManualPricingLineItem {
+    fn default() -> Self {
+        Self {
+            size: ManualPrintSize::A3,
+            paper: ManualPaperKind::Normal,
+            sheets_input: String::new(),
+            sides_input: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManualPricingSettings {
+    pub(crate) a0_input: String,
+    pub(crate) a1_input: String,
+    pub(crate) a2_input: String,
+    pub(crate) a3_input: String,
+    pub(crate) a4_input: String,
+    pub(crate) normal_paper_input: String,
+    pub(crate) paper_300g_input: String,
+    #[serde(default)]
+    pub(crate) line_items: Vec<ManualPricingLineItem>,
+    #[serde(default)]
+    pub(crate) cutting_enabled: bool,
+    #[serde(default)]
+    pub(crate) discount_input: String,
+    #[serde(default)]
+    pub(crate) rounding_mode: ManualRoundingMode,
+}
+
+impl ManualPricingSettings {
+    pub(crate) fn size_price_input(&self, size: ManualPrintSize) -> &str {
+        match size {
+            ManualPrintSize::A0 => &self.a0_input,
+            ManualPrintSize::A1 => &self.a1_input,
+            ManualPrintSize::A2 => &self.a2_input,
+            ManualPrintSize::A3 => &self.a3_input,
+            ManualPrintSize::A4 => &self.a4_input,
+        }
+    }
+
+    pub(crate) fn set_size_price_input(&mut self, size: ManualPrintSize, value: String) {
+        match size {
+            ManualPrintSize::A0 => self.a0_input = value,
+            ManualPrintSize::A1 => self.a1_input = value,
+            ManualPrintSize::A2 => self.a2_input = value,
+            ManualPrintSize::A3 => self.a3_input = value,
+            ManualPrintSize::A4 => self.a4_input = value,
+        }
+    }
+
+    pub(crate) fn paper_price_input(&self, paper: ManualPaperKind) -> &str {
+        match paper {
+            ManualPaperKind::Normal => &self.normal_paper_input,
+            ManualPaperKind::Paper300g => &self.paper_300g_input,
+        }
+    }
+
+    pub(crate) fn set_paper_price_input(&mut self, paper: ManualPaperKind, value: String) {
+        match paper {
+            ManualPaperKind::Normal => self.normal_paper_input = value,
+            ManualPaperKind::Paper300g => self.paper_300g_input = value,
+        }
+    }
+}
+
+impl Default for ManualPricingSettings {
+    fn default() -> Self {
+        Self {
+            a0_input: "0.00".to_string(),
+            a1_input: "0.00".to_string(),
+            a2_input: "0.00".to_string(),
+            a3_input: "1.00".to_string(),
+            a4_input: "0.00".to_string(),
+            normal_paper_input: "0.00".to_string(),
+            paper_300g_input: "1.00".to_string(),
+            line_items: vec![ManualPricingLineItem::default()],
+            cutting_enabled: false,
+            discount_input: String::new(),
+            rounding_mode: ManualRoundingMode::None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     LogTick,
@@ -48,6 +204,7 @@ pub enum Message {
     StopDiscovery,
     DiscoveryProbeFinished(DiscoveryProbeResult),
     SelectTab(Tab),
+    SelectManualPricing,
     SelectPrinterTab(PrinterTab),
     SelectPrinter(PrinterId),
     ProfileChoiceChanged(ProfileChoice),
@@ -89,6 +246,17 @@ pub enum Message {
     PricingBwRestChanged(String),
     PricingColorChanged(String),
     PricingRoundChanged(bool),
+    ManualPricingLineAdded,
+    ManualPricingLineRemoved(usize),
+    ManualPricingLineSizeChanged(usize, ManualPrintSize),
+    ManualPricingLinePaperChanged(usize, ManualPaperKind),
+    ManualPricingLineSheetsChanged(usize, String),
+    ManualPricingLineSidesChanged(usize, String),
+    ManualPricingBasePriceChanged(ManualPrintSize, String),
+    ManualPricingPaperPriceChanged(ManualPaperKind, String),
+    ManualPricingCuttingChanged(bool),
+    ManualPricingDiscountChanged(String),
+    ManualPricingRoundingToggled(ManualRoundingMode, bool),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -274,6 +442,8 @@ pub struct PricingSettings {
     pub(crate) color_input: String,
     #[serde(rename = "round_to_half_euro", alias = "round_to_five_cents")]
     pub(crate) round_to_five_cents: bool,
+    #[serde(default)]
+    pub(crate) manual_pricing: ManualPricingSettings,
 }
 
 impl Default for PricingSettings {
@@ -284,6 +454,7 @@ impl Default for PricingSettings {
             bw_rest_input: "0.06".to_string(),
             color_input: "0.50".to_string(),
             round_to_five_cents: true,
+            manual_pricing: ManualPricingSettings::default(),
         }
     }
 }
