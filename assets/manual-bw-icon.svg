@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <defs>
+    <clipPath id="manual-bw-clip">
+      <circle cx="12" cy="12" r="9"/>
+    </clipPath>
+  </defs>
+  <circle cx="12" cy="12" r="9" fill="#ffffff"/>
+  <g clip-path="url(#manual-bw-clip)">
+    <rect x="3" y="3" width="9" height="18" fill="#101418"/>
+  </g>
+  <circle cx="12" cy="12" r="9" fill="none" stroke="#3a4a5a" stroke-width="1.25"/>
+</svg>

@@ -707,7 +707,19 @@ impl PrintCountApp {
             ]
             .spacing(4),
             self.manual_pricing_tab_bar(),
-            scrollable(self.manual_pricing_body_view())
+            scrollable(container(self.manual_pricing_body_view()).padding(iced::Padding {
+                top: 0.0,
+                right: 16.0,
+                bottom: 0.0,
+                left: 0.0,
+            }))
+                .direction(scrollable::Direction::Vertical(
+                    scrollable::Scrollbar::new()
+                        .width(8)
+                        .margin(2)
+                        .scroller_width(8),
+                ))
+                .style(manual_pricing_scrollable_style())
                 .height(Length::Fill)
                 .width(Length::Fill),
         ]
@@ -1153,6 +1165,70 @@ impl PrintCountApp {
         .into()
     }
 
+    fn manual_print_mode_button(
+        &self,
+        index: usize,
+        current_mode: ManualPrintMode,
+    ) -> Element<'_, Message> {
+        let icon_bytes = match current_mode {
+            ManualPrintMode::Bw => include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../assets/manual-bw-icon.svg"
+            ))
+            .as_slice(),
+            ManualPrintMode::Color => include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../assets/manual-color-icon.svg"
+            ))
+            .as_slice(),
+        };
+        let icon = iced::widget::svg(iced::widget::svg::Handle::from_memory(icon_bytes))
+            .width(18)
+            .height(18)
+            .style(|_theme, _status| iced::widget::svg::Style { color: None });
+        let next_mode = match current_mode {
+            ManualPrintMode::Bw => ManualPrintMode::Color,
+            ManualPrintMode::Color => ManualPrintMode::Bw,
+        };
+
+        button(
+            container(icon)
+                .width(Length::Fill)
+                .align_x(Horizontal::Center)
+                .align_y(iced::alignment::Vertical::Center),
+        )
+        .padding(2)
+        .width(Length::Fixed(22.0))
+        .style(theme::Button::custom(manual_icon_button_style()))
+        .on_press(Message::ManualPricingLinePrintModeChanged(index, next_mode))
+        .into()
+    }
+
+    fn manual_remove_icon_button(&self, message: Message) -> Element<'_, Message> {
+        let icon = iced::widget::svg(iced::widget::svg::Handle::from_memory(
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../assets/manual-trash-icon.svg"
+            ))
+            .as_slice(),
+        ))
+        .width(20)
+        .height(20)
+        .style(|_theme, _status| iced::widget::svg::Style { color: None });
+
+        button(
+            container(icon)
+                .width(Length::Fill)
+                .align_x(Horizontal::Center)
+                .align_y(iced::alignment::Vertical::Center),
+        )
+        .padding(1)
+        .width(Length::Fixed(30.0))
+        .style(theme::Button::custom(manual_icon_button_style()))
+        .on_press(message)
+        .into()
+    }
+
     fn manual_pricing_line_item_row(
         &self,
         index: usize,
@@ -1170,6 +1246,7 @@ impl PrintCountApp {
         )
         .placeholder("Size")
         .text_size(11)
+        .width(Length::Fill)
         .style(profile_pick_list_style())
         .menu_style(profile_pick_list_menu_style());
         let selected_modifier = modifier_choices
@@ -1187,15 +1264,7 @@ impl PrintCountApp {
         )
         .placeholder("Modifier")
         .text_size(11)
-        .style(profile_pick_list_style())
-        .menu_style(profile_pick_list_menu_style());
-        let print_mode_picker = pick_list(
-            &ManualPrintMode::ALL[..],
-            Some(line_item.print_mode),
-            move |print_mode| Message::ManualPricingLinePrintModeChanged(index, print_mode),
-        )
-        .placeholder("Type")
-        .text_size(11)
+        .width(Length::Fill)
         .style(profile_pick_list_style())
         .menu_style(profile_pick_list_menu_style());
         let sides_input = text_input("0", &line_item.sides_input)
@@ -1210,10 +1279,14 @@ impl PrintCountApp {
             .style(theme::Checkbox::custom(brand_checkbox_style(
                 CONTENT_BRAND_SAMPLE,
             )));
-        let sheets_value = self.recording_readonly_value(&line_item.sheets_input, Length::Fixed(42.0));
-        let remove_button = button("Remove")
-            .style(theme::Button::custom(muted_content_button_style()))
-            .on_press(Message::ManualPricingLineRemoved(index));
+        let sheets_value =
+            self.recording_readonly_value(&line_item.sheets_input, Length::Fixed(54.0));
+        let remove_button = self.manual_remove_icon_button(Message::ManualPricingLineRemoved(index));
+        let placeholder_label = || {
+            text(" ")
+                .size(12)
+                .style(theme::Text::Color(Color::TRANSPARENT))
+        };
 
         let controls = row![
             column![
@@ -1223,14 +1296,15 @@ impl PrintCountApp {
                 size_picker,
             ]
             .spacing(4)
-            .width(Length::FillPortion(2)),
+            .width(Length::Fixed(50.0)),
             column![
                 text("Type")
                     .size(12)
                     .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-                print_mode_picker,
+                self.manual_print_mode_button(index, line_item.print_mode),
             ]
-            .spacing(4),
+            .spacing(4)
+            .width(Length::Fixed(28.0)),
             column![
                 text("Modifier")
                     .size(12)
@@ -1238,25 +1312,43 @@ impl PrintCountApp {
                 modifier_picker,
             ]
             .spacing(4)
-            .width(Length::FillPortion(3)),
+            .width(Length::Fill),
             column![
-                text("Blijdzijdes")
+                text("Zijden")
                     .size(12)
                     .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                 sides_input,
             ]
-            .spacing(4),
+            .spacing(4)
+            .width(Length::Fixed(42.0)),
             column![
-                text("vellen")
+                text("Vellen")
                     .size(12)
                     .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                 sheets_value,
             ]
-            .spacing(4),
-            container(double_sided_toggle).align_y(iced::alignment::Vertical::Bottom),
-            container(remove_button).align_y(iced::alignment::Vertical::Bottom),
+            .spacing(4)
+            .width(Length::Fixed(54.0)),
+            column![
+                placeholder_label(),
+                container(double_sided_toggle)
+                    .width(Length::Fill)
+                    .align_x(Horizontal::Center)
+                    .align_y(iced::alignment::Vertical::Center),
+            ]
+            .spacing(4)
+            .width(Length::Fixed(42.0)),
+            column![
+                placeholder_label(),
+                container(remove_button)
+                    .width(Length::Fill)
+                    .align_x(Horizontal::Center)
+                    .align_y(iced::alignment::Vertical::Center),
+            ]
+            .spacing(4)
+            .width(Length::Fixed(30.0)),
         ]
-        .spacing(10)
+        .spacing(8)
         .align_items(Alignment::Center);
 
         let summary = match line_state {
@@ -1281,8 +1373,8 @@ impl PrintCountApp {
             .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37))),
         };
 
-        container(column![controls, summary].spacing(8))
-            .padding(10)
+        container(column![controls, summary].spacing(10))
+            .padding(12)
             .width(Length::Fill)
             .style(theme::Container::Box)
             .into()

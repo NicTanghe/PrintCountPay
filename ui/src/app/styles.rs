@@ -158,6 +158,20 @@ pub(crate) fn muted_content_button_style() -> impl Fn(&Theme, button::Status) ->
     )
 }
 
+pub(crate) fn manual_icon_button_style() -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_theme, _status| button::Style {
+        background: None,
+        text_color: Color::from_rgb8(0x2f, 0x36, 0x42),
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 0.0.into(),
+        },
+        shadow: Shadow::default(),
+        ..button::Style::default()
+    }
+}
+
 pub(crate) fn profile_pick_list_style() -> impl Fn(&Theme, pick_list::Status) -> pick_list::Style {
     move |_theme, status| {
         let accent = sampled_brand_color(CONTENT_BRAND_SAMPLE);
@@ -204,8 +218,9 @@ pub(crate) fn profile_pick_list_menu_style() -> impl Fn(&Theme) -> menu::Style {
     }
 }
 
-pub(crate) fn printer_list_scrollable_style()
--> impl Fn(&Theme, scrollable::Status) -> scrollable::Style {
+fn inset_scrollable_style(
+    inactive_scroller_color: Color,
+) -> impl Fn(&Theme, scrollable::Status) -> scrollable::Style {
     move |theme, status| {
         let mut style = scrollable::default(theme, status);
         let brand = sampled_brand_color(CONTENT_BRAND_SAMPLE);
@@ -216,9 +231,9 @@ pub(crate) fn printer_list_scrollable_style()
             }
             | scrollable::Status::Dragged {
                 is_vertical_scrollbar_dragged: true,
-                ..
+                ..                
             } => brand,
-            _ => Color::from_rgb8(0xf5, 0xf3, 0xf7),
+            _ => inactive_scroller_color,
         };
 
         style.vertical_rail = scrollable::Rail {
@@ -240,6 +255,16 @@ pub(crate) fn printer_list_scrollable_style()
 
         style
     }
+}
+
+pub(crate) fn printer_list_scrollable_style()
+-> impl Fn(&Theme, scrollable::Status) -> scrollable::Style {
+    inset_scrollable_style(Color::from_rgb8(0xf5, 0xf3, 0xf7))
+}
+
+pub(crate) fn manual_pricing_scrollable_style()
+-> impl Fn(&Theme, scrollable::Status) -> scrollable::Style {
+    inset_scrollable_style(Color::from_rgb8(0xe2, 0xe2, 0xe9))
 }
 
 fn solid_color_button_style(
