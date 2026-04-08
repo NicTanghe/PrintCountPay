@@ -341,7 +341,7 @@ impl PrintCountApp {
             .and_then(|id| self.recording_sessions.get(id))
             .cloned()
             .unwrap_or_default();
-        let start_recording_result = if session.active {
+        let start_recording_result: Option<Result<RecordingSnapshot, String>> = if session.active {
             None
         } else {
             selected_id.map(|id| self.ready_recording_snapshot(id))
@@ -1202,7 +1202,7 @@ impl PrintCountApp {
             .on_input(move |value| Message::ManualPricingLineSidesChanged(index, value))
             .padding(6)
             .size(12)
-            .width(Length::Fixed(84.0));
+            .width(Length::Fixed(42.0));
         let double_sided_toggle = checkbox(line_item.double_sided)
             .label("RV")
             .on_toggle(move |value| Message::ManualPricingLineDoubleSidedChanged(index, value))
@@ -1210,7 +1210,7 @@ impl PrintCountApp {
             .style(theme::Checkbox::custom(brand_checkbox_style(
                 CONTENT_BRAND_SAMPLE,
             )));
-        let sheets_value = self.recording_readonly_value(&line_item.sheets_input, Length::Fixed(84.0));
+        let sheets_value = self.recording_readonly_value(&line_item.sheets_input, Length::Fixed(42.0));
         let remove_button = button("Remove")
             .style(theme::Button::custom(muted_content_button_style()))
             .on_press(Message::ManualPricingLineRemoved(index));
@@ -1407,6 +1407,7 @@ impl PrintCountApp {
             ),
         ]
         .spacing(6);
+        
 
         let color = column![
             text("Color")
