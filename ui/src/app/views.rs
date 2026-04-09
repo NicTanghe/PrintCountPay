@@ -114,6 +114,36 @@ impl PrintCountApp {
             .into()
     }
 
+    fn printer_tab_scroll_view<'a>(
+        &self,
+        content: impl Into<Element<'a, Message>>,
+        right_padding: f32,
+    ) -> Element<'a, Message> {
+        scrollable(container(content).padding(iced::Padding {
+            top: 0.0,
+            right: right_padding,
+            bottom: 0.0,
+            left: 0.0,
+        }))
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::new()
+                .width(8)
+                .margin(2)
+                .scroller_width(8),
+        ))
+        .style(manual_pricing_scrollable_style())
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+    }
+
+    fn boxed_printer_tab_scroll_view<'a>(
+        &self,
+        content: impl Into<Element<'a, Message>>,
+    ) -> Element<'a, Message> {
+        self.printer_tab_scroll_view(content, 16.0)
+    }
+
     fn discovery_controls_view(&self) -> Element<'_, Message> {
         let cidr_input = text_input("192.168.129.1/24", &self.discovery_cidr)
             .on_input(Message::DiscoveryCidrChanged)
@@ -627,12 +657,12 @@ impl PrintCountApp {
         content = content.push(status_line);
         content = content.push(delta_section);
 
-        container(content)
-            .padding(12)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(theme::Container::Box)
-            .into()
+        self.boxed_printer_tab_scroll_view(
+            container(content)
+                .padding(12)
+                .width(Length::Fill)
+                .style(theme::Container::Box),
+        )
     }
 
     fn pricing_tab_view(&self) -> Element<'_, Message> {
@@ -688,11 +718,12 @@ impl PrintCountApp {
 
         let content = column![bw_section, color_section, rounding_toggle, hint].spacing(12);
 
-        container(content)
-            .padding(12)
-            .width(Length::Fill)
-            .style(theme::Container::Box)
-            .into()
+        self.boxed_printer_tab_scroll_view(
+            container(content)
+                .padding(12)
+                .width(Length::Fill)
+                .style(theme::Container::Box),
+        )
     }
 
     fn manual_pricing_panel_view(&self) -> Element<'_, Message> {
@@ -1133,6 +1164,11 @@ impl PrintCountApp {
                     SIDEBAR_BRAND_SAMPLE,
                 )))
                 .on_press(Message::SaveManualPricing),
+            button("Sync prices")
+                .style(theme::Button::custom(solid_brand_button_style(
+                    SIDEBAR_BRAND_SAMPLE,
+                )))
+                .on_press(Message::SyncPrices),
         ]
         .spacing(8)
         .align_items(Alignment::Center);
@@ -1831,6 +1867,10 @@ impl PrintCountApp {
             }
         }
 
+        if self.advanced_mode {
+            list_items = list_items.push(self.printer_storage_controls_view());
+        }
+
         let scroll = scrollable(
             container(list_items)
                 .width(Length::Fill)
@@ -1859,10 +1899,6 @@ impl PrintCountApp {
         .spacing(18);
 
         content = content.push(scroll);
-
-        if self.advanced_mode {
-            content = content.push(self.printer_storage_controls_view());
-        }
 
         container(content)
             .padding(iced::Padding {
@@ -2060,17 +2096,19 @@ impl PrintCountApp {
                 }
             }
             PrinterTab::Oids => {
-                if let Some(record) = record {
+                self.boxed_printer_tab_scroll_view(if let Some(record) = record {
                     self.printer_oids_view(record)
                 } else if selection_missing {
                     self.empty_printer_tab_view("Selected printer not found.")
                 } else {
                     self.empty_printer_tab_view("Select a printer to edit OIDs.")
-                }
+                })
             }
             PrinterTab::Recording => self.recording_tab_view(),
             PrinterTab::Pricing => self.pricing_tab_view(),
-            PrinterTab::AddPrinters => self.printer_add_printers_view(),
+            PrinterTab::AddPrinters => {
+                self.boxed_printer_tab_scroll_view(self.printer_add_printers_view())
+            }
         };
 
         let content = column![self.printer_tab_bar(), header, body].spacing(12);
@@ -2111,15 +2149,7 @@ impl PrintCountApp {
         .spacing(8)
         .width(Length::Fill);
 
-        scrollable(container(content).padding(iced::Padding {
-            top: 0.0,
-            right: 24.0,
-            bottom: 0.0,
-            left: 0.0,
-        }))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        self.printer_tab_scroll_view(content, 24.0)
     }
 
     fn printer_oids_view(&self, record: &PrinterRecord) -> Element<'_, Message> {

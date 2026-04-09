@@ -16,7 +16,9 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::{MissedTickBehavior, sleep, timeout};
 
-use crate::app::{ManualPricingBill, PricingSettings, RecordingSession, SnmpPollStatus};
+use crate::app::{
+    ManualPricingBill, ManualPricingWorkspace, PricingSettings, RecordingSession, SnmpPollStatus,
+};
 
 pub const SYNC_PORT: u16 = 32_161;
 pub const SYNC_DISCOVERY_PORT: u16 = 32_162;
@@ -32,28 +34,28 @@ const MASTER_STALE_TIMEOUT: Duration = Duration::from_secs(15);
 const SYNC_TARGET: &str = "sync";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PollStateEntry {
-    pub printer_id: PrinterId,
-    pub state: SnmpPollStatus,
+pub(crate) struct PollStateEntry {
+    pub(crate) printer_id: PrinterId,
+    pub(crate) state: SnmpPollStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RecordingSessionEntry {
-    pub printer_id: PrinterId,
-    pub session: RecordingSession,
+pub(crate) struct RecordingSessionEntry {
+    pub(crate) printer_id: PrinterId,
+    pub(crate) session: RecordingSession,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SharedState {
-    pub revision: u64,
-    pub printers: Vec<PrinterRecord>,
-    pub poll_states: Vec<PollStateEntry>,
-    pub recording_sessions: Vec<RecordingSessionEntry>,
-    pub pricing: PricingSettings,
+pub(crate) struct SharedState {
+    pub(crate) revision: u64,
+    pub(crate) printers: Vec<PrinterRecord>,
+    pub(crate) poll_states: Vec<PollStateEntry>,
+    pub(crate) recording_sessions: Vec<RecordingSessionEntry>,
+    pub(crate) pricing: PricingSettings,
     #[serde(default)]
-    pub bill_sync_supported: bool,
+    pub(crate) bill_sync_supported: bool,
     #[serde(default)]
-    pub manual_bills: Vec<ManualPricingBill>,
+    pub(crate) manual_bills: Vec<ManualPricingBill>,
 }
 
 impl Default for SharedState {
@@ -70,37 +72,47 @@ impl Default for SharedState {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct PricingSyncPayload {
+    pub(crate) id: String,
+    pub(crate) pricing: PricingSettings,
+    pub(crate) workspace: ManualPricingWorkspace,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SyncRole {
+pub(crate) enum SyncRole {
     Searching,
     Master,
     Client,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SyncStatus {
-    pub role: SyncRole,
-    pub detail: String,
+pub(crate) struct SyncStatus {
+    pub(crate) role: SyncRole,
+    pub(crate) detail: String,
 }
 
 #[derive(Debug, Clone)]
-pub enum SyncCommand {
+pub(crate) enum SyncCommand {
     SetSnapshot(SharedState),
     RequestPoll(PrinterId),
+    SyncPrices(PricingSyncPayload),
 }
 
 #[derive(Debug, Clone)]
-pub enum SyncEvent {
+pub(crate) enum SyncEvent {
     Ready(UnboundedSender<SyncCommand>),
     StatusChanged(SyncStatus),
     SnapshotReceived(SharedState),
     PollRequested(PrinterId),
+    PricingSyncReceived(PricingSyncPayload),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum WireMessage {
     Snapshot(SharedState),
     PollRequest(PrinterId),
+    PricingSync(PricingSyncPayload),
     Heartbeat,
 }
 
@@ -117,7 +129,7 @@ enum ClientEvent {
     Disconnected(String),
 }
 
-pub fn subscription() -> Subscription<SyncEvent> {
+pub(crate) fn subscription() -> Subscription<SyncEvent> {
     Subscription::run(sync_worker)
 }
 
@@ -125,6 +137,7 @@ fn sync_worker() -> impl iced::futures::Stream<Item = SyncEvent> {
     stream::channel(100, async |mut output| {
         let (command_tx, mut command_rx) = mpsc::unbounded_channel::<SyncCommand>();
         let mut latest_snapshot = None::<SharedState>;
+        let mut latest_pricing_sync = None::<PricingSyncPayload>;
         let mut last_status = None::<SyncStatus>;
 
         let _ = output.send(SyncEvent::Ready(command_tx)).await;
@@ -155,6 +168,7 @@ fn sync_worker() -> impl iced::futures::Stream<Item = SyncEvent> {
                         &mut output,
                         &mut command_rx,
                         &mut latest_snapshot,
+                        &mut latest_pricing_sync,
                         &mut last_status,
                     )
                     .await
@@ -176,6 +190,7 @@ fn sync_worker() -> impl iced::futures::Stream<Item = SyncEvent> {
                             &mut output,
                             &mut command_rx,
                             &mut latest_snapshot,
+                            &mut latest_pricing_sync,
                             &mut last_status,
                         )
                         .await
@@ -211,6 +226,7 @@ async fn run_as_master(
     output: &mut (impl iced::futures::Sink<SyncEvent> + Unpin),
     command_rx: &mut mpsc::UnboundedReceiver<SyncCommand>,
     latest_snapshot: &mut Option<SharedState>,
+    latest_pricing_sync: &mut Option<PricingSyncPayload>,
     last_status: &mut Option<SyncStatus>,
 ) -> Result<(), ()> {
     emit_status(
@@ -252,6 +268,10 @@ async fn run_as_master(
                             return Err(());
                         }
                     }
+                    SyncCommand::SyncPrices(payload) => {
+                        *latest_pricing_sync = Some(payload.clone());
+                        broadcast(&mut clients, &WireMessage::PricingSync(payload));
+                    }
                 }
             }
             event = event_rx.recv() => {
@@ -267,6 +287,9 @@ async fn run_as_master(
                         tracing::info!(target: SYNC_TARGET, "Client {peer} connected to sync host");
                         if let Some(snapshot) = latest_snapshot.clone() {
                             let _ = sender.send(WireMessage::Snapshot(snapshot));
+                        }
+                        if let Some(payload) = latest_pricing_sync.clone() {
+                            let _ = sender.send(WireMessage::PricingSync(payload));
                         }
                     }
                     MasterEvent::ClientMessage(client_id, message) => {
@@ -284,6 +307,13 @@ async fn run_as_master(
                                 if output.send(SyncEvent::PollRequested(printer_id)).await.is_err() {
                                     return Err(());
                                 }
+                            }
+                            WireMessage::PricingSync(payload) => {
+                                *latest_pricing_sync = Some(payload.clone());
+                                if output.send(SyncEvent::PricingSyncReceived(payload.clone())).await.is_err() {
+                                    return Err(());
+                                }
+                                broadcast(&mut clients, &WireMessage::PricingSync(payload));
                             }
                             WireMessage::Heartbeat => {}
                         }
@@ -306,6 +336,7 @@ async fn run_as_client(
     output: &mut (impl iced::futures::Sink<SyncEvent> + Unpin),
     command_rx: &mut mpsc::UnboundedReceiver<SyncCommand>,
     latest_snapshot: &mut Option<SharedState>,
+    latest_pricing_sync: &mut Option<PricingSyncPayload>,
     last_status: &mut Option<SyncStatus>,
 ) -> Result<(), ()> {
     emit_status(
@@ -355,6 +386,12 @@ async fn run_as_client(
                             return Err(());
                         }
                     }
+                    SyncCommand::SyncPrices(payload) => {
+                        *latest_pricing_sync = Some(payload.clone());
+                        if write_frame(&mut writer, &WireMessage::PricingSync(payload)).await.is_err() {
+                            return Err(());
+                        }
+                    }
                 }
             }
             event = event_rx.recv() => {
@@ -367,6 +404,12 @@ async fn run_as_client(
                             synced_with_master = true;
                             *latest_snapshot = Some(snapshot.clone());
                             if output.send(SyncEvent::SnapshotReceived(snapshot)).await.is_err() {
+                                return Err(());
+                            }
+                        }
+                        WireMessage::PricingSync(payload) => {
+                            *latest_pricing_sync = Some(payload.clone());
+                            if output.send(SyncEvent::PricingSyncReceived(payload)).await.is_err() {
                                 return Err(());
                             }
                         }

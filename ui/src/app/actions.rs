@@ -18,6 +18,8 @@ const MANUAL_BILL_SUBJECTS: &[&str] = &[
     "valley", "vista", "willow", "wind", "wonder",
 ];
 
+const MANUAL_PRICING_MAX_BACKUPS: usize = 3;
+
 fn title_case_word(value: &str) -> String {
     let mut chars = value.chars();
     let Some(first) = chars.next() else {
@@ -46,6 +48,98 @@ fn parse_manual_pricing_contents(contents: &str) -> Result<ManualPricingWorkspac
             )),
         },
     }
+}
+
+fn manual_pricing_backup_path(path: &Path, index: usize) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("{}.bak{index}", path.to_string_lossy()))
+}
+
+fn manual_pricing_temp_path(path: &Path) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("{}.tmp", path.to_string_lossy()))
+}
+
+fn rotate_manual_pricing_backups(path: &Path) -> Result<(), String> {
+    for index in (1..=MANUAL_PRICING_MAX_BACKUPS).rev() {
+        if index == MANUAL_PRICING_MAX_BACKUPS {
+            let target = manual_pricing_backup_path(path, index);
+            if target.is_file() {
+                fs::remove_file(&target)
+                    .map_err(|error| format!("Failed to remove {}: {error}", target.display()))?;
+            }
+            continue;
+        }
+
+        let source = manual_pricing_backup_path(path, index);
+        let target = manual_pricing_backup_path(path, index + 1);
+        if source.is_file() {
+            fs::rename(&source, &target).map_err(|error| {
+                format!(
+                    "Failed to rotate {} to {}: {error}",
+                    source.display(),
+                    target.display()
+                )
+            })?;
+        }
+    }
+
+    if path.is_file() {
+        let backup = manual_pricing_backup_path(path, 1);
+        fs::rename(path, &backup).map_err(|error| {
+            format!(
+                "Failed to move {} to {}: {error}",
+                path.display(),
+                backup.display()
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
+fn write_manual_pricing_workspace(
+    path: &Path,
+    workspace: &ManualPricingWorkspace,
+) -> Result<(), String> {
+    let contents =
+        to_string_pretty(workspace, PrettyConfig::new()).map_err(|error| error.to_string())?;
+    let temp_path = manual_pricing_temp_path(path);
+
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Failed to prepare {}: {error}", parent.display()))?;
+    }
+
+    if path.exists() && !path.is_file() {
+        return Err(format!("{} is not a file.", path.display()));
+    }
+
+    fs::write(&temp_path, contents)
+        .map_err(|error| format!("Failed to write {}: {error}", temp_path.display()))?;
+
+    if let Err(error) = rotate_manual_pricing_backups(path) {
+        let backup = manual_pricing_backup_path(path, 1);
+        if !path.exists() && backup.is_file() {
+            let _ = fs::rename(&backup, path);
+        }
+        let _ = fs::remove_file(&temp_path);
+        return Err(error);
+    }
+
+    if let Err(error) = fs::rename(&temp_path, path) {
+        let backup = manual_pricing_backup_path(path, 1);
+        if !path.exists() && backup.is_file() {
+            let _ = fs::rename(&backup, path);
+        }
+        let _ = fs::remove_file(&temp_path);
+        return Err(format!(
+            "Failed to finalize save to {}: {error}",
+            path.display()
+        ));
+    }
+
+    Ok(())
 }
 
 impl PrintCountApp {
@@ -117,36 +211,103 @@ impl PrintCountApp {
         }
     }
 
-    fn save_manual_pricing_to_path(&mut self) {
-        let path = self.manual_pricing_path.trim().to_string();
-        if path.is_empty() {
-            self.manual_pricing_status = Some("Save failed: path is empty.".to_string());
-            return;
-        }
+    fn synced_pricing_settings(&self) -> PricingSettings {
+        let mut pricing = self.pricing.clone();
+        pricing.manual_pricing = self.manual_pricing.clone();
+        pricing
+    }
 
+    fn current_manual_pricing_workspace(&mut self) -> ManualPricingWorkspace {
         self.manual_pricing.normalize();
         self.normalize_manual_bills();
-
-        let config = PrettyConfig::new();
-        let workspace = ManualPricingWorkspace {
+        ManualPricingWorkspace {
             settings: self.manual_pricing.clone(),
             bills: self.manual_bills.clone(),
-        };
+        }
+    }
 
-        match to_string_pretty(&workspace, config) {
-            Ok(contents) => match fs::write(&path, contents) {
-                Ok(()) => {
-                    self.manual_pricing_status =
-                        Some(format!("Saved manual pricing to {path}."));
-                }
-                Err(error) => {
-                    self.manual_pricing_status = Some(format!("Save failed: {error}"));
-                }
-            },
+    fn persist_manual_pricing_workspace(
+        &self,
+        workspace: &ManualPricingWorkspace,
+    ) -> Result<String, String> {
+        let path = self.manual_pricing_path.trim().to_string();
+        if path.is_empty() {
+            return Err("path is empty.".to_string());
+        }
+
+        write_manual_pricing_workspace(Path::new(&path), workspace)?;
+        Ok(path)
+    }
+
+    fn save_manual_pricing_to_path(&mut self) {
+        let workspace = self.current_manual_pricing_workspace();
+
+        match self.persist_manual_pricing_workspace(&workspace) {
+            Ok(path) => {
+                self.manual_pricing_status = Some(format!("Saved manual pricing to {path}."));
+            }
             Err(error) => {
                 self.manual_pricing_status = Some(format!("Save failed: {error}"));
             }
         }
+    }
+
+    fn sync_prices_to_network(&mut self) {
+        let workspace = self.current_manual_pricing_workspace();
+        let path = match self.persist_manual_pricing_workspace(&workspace) {
+            Ok(path) => path,
+            Err(error) => {
+                self.manual_pricing_status = Some(format!("Sync failed: {error}"));
+                return;
+            }
+        };
+
+        let sync_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos().to_string())
+            .unwrap_or_else(|_| "0".to_string());
+        let payload = sync::PricingSyncPayload {
+            id: sync_id.clone(),
+            pricing: self.synced_pricing_settings(),
+            workspace,
+        };
+        self.last_manual_pricing_sync_id = Some(sync_id);
+
+        let synced = self
+            .sync_sender
+            .as_ref()
+            .is_some_and(|sender| sender.send(SyncCommand::SyncPrices(payload)).is_ok());
+
+        self.manual_pricing_status = Some(if synced {
+            format!("Saved manual pricing to {path} and synced prices across the network.")
+        } else {
+            format!("Saved manual pricing to {path}. Sync unavailable.")
+        });
+    }
+
+    fn apply_pricing_sync(&mut self, payload: sync::PricingSyncPayload) {
+        if self.last_manual_pricing_sync_id.as_deref() == Some(payload.id.as_str()) {
+            return;
+        }
+
+        let sync::PricingSyncPayload {
+            id,
+            pricing,
+            workspace,
+        } = payload;
+        self.last_manual_pricing_sync_id = Some(id);
+        self.pricing = pricing;
+        self.manual_pricing = workspace.settings.clone();
+        self.manual_bills = workspace.bills.clone();
+        self.normalize_manual_bills();
+        self.sync_selected_manual_bill();
+
+        self.manual_pricing_status = Some(match self.persist_manual_pricing_workspace(&workspace) {
+            Ok(path) => format!("Applied synced prices and saved manual pricing to {path}."),
+            Err(error) => format!("Applied synced prices, but save failed: {error}"),
+        });
+
+        self.last_shared_state = self.build_shared_state(self.last_shared_state.revision);
     }
 
     fn active_manual_pricing(&self) -> &ManualPricingSettings {
@@ -1524,6 +1685,10 @@ impl PrintCountApp {
                     Command::none()
                 }
             }
+            SyncEvent::PricingSyncReceived(payload) => {
+                self.apply_pricing_sync(payload);
+                Command::none()
+            }
         }
     }
 
@@ -1672,6 +1837,22 @@ mod tests {
         record.status = status;
         record.last_seen = last_seen;
         record
+    }
+
+    fn temp_test_dir(name: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("current time")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "printcountpay-actions-{name}-{}-{unique}",
+            std::process::id()
+        ))
+    }
+
+    fn read_manual_pricing_workspace(path: &Path) -> ManualPricingWorkspace {
+        let contents = fs::read_to_string(path).expect("read manual pricing file");
+        parse_manual_pricing_contents(&contents).expect("parse manual pricing file")
     }
 
     #[test]
@@ -1882,6 +2063,92 @@ mod tests {
         assert!(app.manual_pricing_selected);
         assert_eq!(app.selected_manual_bill_id, None);
         assert_eq!(app.manual_pricing_status, Some(format!("Deleted bill {deleted_id}.")));
+    }
+
+    #[test]
+    fn manual_pricing_save_keeps_three_backups() {
+        let root = temp_test_dir("manual-pricing-backups");
+        fs::create_dir_all(&root).expect("create temp root");
+        let path = root.join("manual_pricing.ron");
+        let mut workspace = ManualPricingWorkspace::default();
+
+        for value in 0..5 {
+            workspace.settings.a0_input = value.to_string();
+            write_manual_pricing_workspace(&path, &workspace).expect("write workspace");
+        }
+
+        assert_eq!(read_manual_pricing_workspace(&path).settings.a0_input, "4");
+        assert_eq!(
+            read_manual_pricing_workspace(&manual_pricing_backup_path(&path, 1))
+                .settings
+                .a0_input,
+            "3"
+        );
+        assert_eq!(
+            read_manual_pricing_workspace(&manual_pricing_backup_path(&path, 2))
+                .settings
+                .a0_input,
+            "2"
+        );
+        assert_eq!(
+            read_manual_pricing_workspace(&manual_pricing_backup_path(&path, 3))
+                .settings
+                .a0_input,
+            "1"
+        );
+        assert!(!manual_pricing_backup_path(&path, 4).exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn apply_pricing_sync_updates_state_and_persists_workspace() {
+        let mut app = test_app();
+        let root = temp_test_dir("apply-pricing-sync");
+        fs::create_dir_all(&root).expect("create temp root");
+        let path = root.join("manual_pricing.ron");
+
+        let mut existing_workspace = ManualPricingWorkspace::default();
+        existing_workspace.settings.a0_input = "10".to_string();
+        write_manual_pricing_workspace(&path, &existing_workspace).expect("seed workspace");
+        app.manual_pricing_path = path.to_string_lossy().to_string();
+
+        let mut pricing = PricingSettings::default();
+        pricing.color_input = "0.75".to_string();
+        let workspace = ManualPricingWorkspace {
+            settings: ManualPricingSettings {
+                a0_input: "99".to_string(),
+                ..ManualPricingSettings::default()
+            },
+            bills: vec![ManualPricingBill {
+                id: "shared-bill".to_string(),
+                subject: "Shared Bill".to_string(),
+                pricing: ManualPricingSettings {
+                    discount_input: "5".to_string(),
+                    ..ManualPricingSettings::default()
+                },
+            }],
+        };
+
+        app.apply_pricing_sync(sync::PricingSyncPayload {
+            id: "sync-1".to_string(),
+            pricing: pricing.clone(),
+            workspace: workspace.clone(),
+        });
+
+        assert_eq!(app.pricing.color_input, "0.75");
+        assert_eq!(app.manual_pricing.a0_input, "99");
+        assert_eq!(app.manual_bills.len(), 1);
+        assert_eq!(app.manual_bills[0].id, "shared-bill");
+        assert_eq!(read_manual_pricing_workspace(&path), workspace);
+        assert_eq!(
+            read_manual_pricing_workspace(&manual_pricing_backup_path(&path, 1))
+                .settings
+                .a0_input,
+            "10"
+        );
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

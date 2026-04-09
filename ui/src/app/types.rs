@@ -510,7 +510,8 @@ impl ManualPricingSettings {
         for modifier in &mut self.modifiers {
             if !modifier.legacy_price_input.trim().is_empty() {
                 for size in ManualPrintSize::ALL {
-                    if modifier.applies_to_size(size) && modifier.price_input(size).trim().is_empty()
+                    if modifier.applies_to_size(size)
+                        && modifier.price_input(size).trim().is_empty()
                     {
                         modifier.set_price_input(size, modifier.legacy_price_input.clone());
                     }
@@ -635,7 +636,7 @@ pub(crate) struct ManualPricingWorkspace {
 }
 
 #[derive(Debug, Clone)]
-pub enum Message {
+pub(crate) enum Message {
     LogTick,
     SyncTick,
     SyncEvent(SyncEvent),
@@ -736,6 +737,7 @@ pub enum Message {
     ManualPricingPathChanged(String),
     LoadManualPricing,
     SaveManualPricing,
+    SyncPrices,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

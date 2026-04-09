@@ -647,17 +647,19 @@ pub(crate) fn manual_finisher_state(
         return ManualFinisherState::Empty;
     }
 
-    let Some(amount) = parse_count_input(&finisher_item.amount_input).ok().flatten() else {
+    let Some(amount) = parse_count_input(&finisher_item.amount_input)
+        .ok()
+        .flatten()
+    else {
         return ManualFinisherState::Invalid;
     };
 
     let (unit_price_cents, label) = match finisher_item.finisher_type {
         ManualFinisherType::Laminate => {
-            let Some(price_cents) = parse_price_input(
-                settings.laminate_price_input(finisher_item.laminate_size),
-            )
-            .ok()
-            .flatten()
+            let Some(price_cents) =
+                parse_price_input(settings.laminate_price_input(finisher_item.laminate_size))
+                    .ok()
+                    .flatten()
             else {
                 return ManualFinisherState::Invalid;
             };

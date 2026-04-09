@@ -182,7 +182,9 @@ pub(crate) fn manual_pricing_header_button_style(
             Color::from_rgb8(0xe5, 0xe9, 0xef)
         };
         let background = match status {
-            button::Status::Pressed => shift_color(base_color, if selected { -0.04 } else { -0.02 }),
+            button::Status::Pressed => {
+                shift_color(base_color, if selected { -0.04 } else { -0.02 })
+            }
             button::Status::Hovered => shift_color(base_color, if selected { 0.03 } else { 0.01 }),
             button::Status::Disabled => Color {
                 a: 0.75,
@@ -280,7 +282,7 @@ fn inset_scrollable_style(
             }
             | scrollable::Status::Dragged {
                 is_vertical_scrollbar_dragged: true,
-                ..                
+                ..
             } => brand,
             _ => inactive_scroller_color,
         };

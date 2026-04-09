@@ -35,10 +35,12 @@ pub use types::{
     DiscoveryOutcome, DiscoveryProbeResult, Flags, ManualBwTier, ManualColorTier,
     ManualFinisherLineItem, ManualFinisherType, ManualLaminateSize, ManualModifierChoice,
     ManualPaperModifier, ManualPricingBill, ManualPricingLineItem, ManualPricingSettings,
-    ManualPricingTab, ManualPrintMode, ManualPrintSize, ManualRoundingMode, Message,
-    PrinterTab, ProfileChoice, RecordingCategory, SnmpErrorInfo, Tab,
+    ManualPricingTab, ManualPrintMode, ManualPrintSize, ManualRoundingMode, PrinterTab,
+    ProfileChoice, RecordingCategory, SnmpErrorInfo, Tab,
 };
-pub(crate) use types::{PricingSettings, RecordingSession, SnmpPollStatus};
+pub(crate) use types::{
+    ManualPricingWorkspace, Message, PricingSettings, RecordingSession, SnmpPollStatus,
+};
 
 use badge_overlay::BadgeOverlay;
 use constants::*;
@@ -90,6 +92,7 @@ pub struct PrintCountApp {
     manual_status: Option<String>,
     manual_pricing_path: String,
     manual_pricing_status: Option<String>,
+    last_manual_pricing_sync_id: Option<String>,
     printers_path: String,
     printers_status: Option<String>,
     printers: Vec<PrinterRecord>,
@@ -194,6 +197,7 @@ impl PrintCountApp {
             manual_status: None,
             manual_pricing_path: String::new(),
             manual_pricing_status: None,
+            last_manual_pricing_sync_id: None,
             printers_path: display_path(&printers_file),
             printers_status: None,
             printers,
@@ -589,26 +593,30 @@ impl PrintCountApp {
                 Command::none()
             }
             Message::ManualPricingLinePrintModeChanged(index, print_mode) => {
-                if let Some(line_item) = self.active_manual_pricing_mut().line_items.get_mut(index) {
+                if let Some(line_item) = self.active_manual_pricing_mut().line_items.get_mut(index)
+                {
                     line_item.print_mode = print_mode;
                 }
                 Command::none()
             }
             Message::ManualPricingLineModifierChanged(index, modifier_index) => {
-                if let Some(line_item) = self.active_manual_pricing_mut().line_items.get_mut(index) {
+                if let Some(line_item) = self.active_manual_pricing_mut().line_items.get_mut(index)
+                {
                     line_item.modifier_index = modifier_index;
                 }
                 Command::none()
             }
             Message::ManualPricingLineSidesChanged(index, value) => {
-                if let Some(line_item) = self.active_manual_pricing_mut().line_items.get_mut(index) {
+                if let Some(line_item) = self.active_manual_pricing_mut().line_items.get_mut(index)
+                {
                     line_item.sides_input = value;
                     line_item.sync_sheets_from_sides();
                 }
                 Command::none()
             }
             Message::ManualPricingLineDoubleSidedChanged(index, value) => {
-                if let Some(line_item) = self.active_manual_pricing_mut().line_items.get_mut(index) {
+                if let Some(line_item) = self.active_manual_pricing_mut().line_items.get_mut(index)
+                {
                     line_item.double_sided = value;
                     line_item.sync_sheets_from_sides();
                 }
@@ -658,7 +666,8 @@ impl PrintCountApp {
                 Command::none()
             }
             Message::ManualPricingBasePriceChanged(size, value) => {
-                self.active_manual_pricing_mut().set_size_price_input(size, value);
+                self.active_manual_pricing_mut()
+                    .set_size_price_input(size, value);
                 Command::none()
             }
             Message::ManualPricingBwTierChanged(size, tier, value) => {
@@ -701,7 +710,9 @@ impl PrintCountApp {
                         manual.modifiers.remove(index);
                         for line_item in &mut manual.line_items {
                             match line_item.modifier_index {
-                                Some(selected) if selected == index => line_item.modifier_index = None,
+                                Some(selected) if selected == index => {
+                                    line_item.modifier_index = None
+                                }
                                 Some(selected) if selected > index => {
                                     line_item.modifier_index = Some(selected - 1);
                                 }
@@ -755,6 +766,10 @@ impl PrintCountApp {
             }
             Message::SaveManualPricing => {
                 self.save_manual_pricing_to_path();
+                Command::none()
+            }
+            Message::SyncPrices => {
+                self.sync_prices_to_network();
                 Command::none()
             }
             Message::ManualPricingCuttingChanged(value) => {
