@@ -1,3 +1,53 @@
+const MANUAL_BILL_ADJECTIVES: &[&str] = &[
+    "amber", "ancient", "autumn", "bright", "brisk", "calm", "cedar", "clear", "cloudy",
+    "copper", "coral", "cosmic", "crisp", "dusty", "ember", "fern", "gentle", "golden",
+    "granite", "harbor", "hazel", "hidden", "ivory", "jade", "lilac", "linen", "lively",
+    "lunar", "mellow", "misty", "noble", "ochre", "olive", "opal", "paper", "pearl",
+    "quiet", "radiant", "river", "rustic", "saffron", "satin", "silver", "soft", "solar",
+    "steady", "stone", "summer", "tender", "velvet", "vivid", "warm", "wild", "willow",
+    "winter", "woodland", "zephyr",
+];
+
+const MANUAL_BILL_SUBJECTS: &[&str] = &[
+    "atlas", "aurora", "beacon", "birch", "bloom", "breeze", "brook", "canvas", "cinder",
+    "circuit", "cloud", "comet", "cove", "crest", "dawn", "ember", "field", "flame",
+    "forest", "garden", "glow", "grove", "harbor", "horizon", "island", "journal",
+    "lantern", "leaf", "meadow", "mesa", "mirror", "mosaic", "notebook", "orbit", "paper",
+    "pebble", "pine", "plume", "prairie", "quartz", "rain", "reef", "river", "shadow",
+    "signal", "sketch", "song", "sparrow", "stone", "summit", "terrace", "thicket", "trail",
+    "valley", "vista", "willow", "wind", "wonder",
+];
+
+fn title_case_word(value: &str) -> String {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+
+    first.to_ascii_uppercase().to_string() + chars.as_str()
+}
+
+fn parse_manual_pricing_contents(contents: &str) -> Result<ManualPricingWorkspace, String> {
+    match from_str::<ManualPricingWorkspace>(contents) {
+        Ok(mut workspace) => {
+            workspace.settings.normalize();
+            Ok(workspace)
+        }
+        Err(workspace_error) => match from_str::<ManualPricingSettings>(contents) {
+            Ok(mut settings) => {
+                settings.normalize();
+                Ok(ManualPricingWorkspace {
+                    settings,
+                    bills: Vec::new(),
+                })
+            }
+            Err(settings_error) => Err(format!(
+                "{workspace_error} | legacy fallback: {settings_error}"
+            )),
+        },
+    }
+}
+
 impl PrintCountApp {
     fn default_manual_pricing_path(&self) -> String {
         Path::new(&self.data_root)
@@ -48,10 +98,12 @@ impl PrintCountApp {
         }
 
         match fs::read_to_string(&path) {
-            Ok(contents) => match from_str::<ManualPricingSettings>(&contents) {
-                Ok(mut settings) => {
-                    settings.normalize();
-                    self.manual_pricing = settings;
+            Ok(contents) => match parse_manual_pricing_contents(&contents) {
+                Ok(workspace) => {
+                    self.manual_pricing = workspace.settings;
+                    self.manual_bills = workspace.bills;
+                    self.normalize_manual_bills();
+                    self.sync_selected_manual_bill();
                     self.manual_pricing_status =
                         Some(format!("Loaded manual pricing from {path}."));
                 }
@@ -73,9 +125,15 @@ impl PrintCountApp {
         }
 
         self.manual_pricing.normalize();
+        self.normalize_manual_bills();
 
         let config = PrettyConfig::new();
-        match to_string_pretty(&self.manual_pricing, config) {
+        let workspace = ManualPricingWorkspace {
+            settings: self.manual_pricing.clone(),
+            bills: self.manual_bills.clone(),
+        };
+
+        match to_string_pretty(&workspace, config) {
             Ok(contents) => match fs::write(&path, contents) {
                 Ok(()) => {
                     self.manual_pricing_status =
@@ -89,6 +147,137 @@ impl PrintCountApp {
                 self.manual_pricing_status = Some(format!("Save failed: {error}"));
             }
         }
+    }
+
+    fn active_manual_pricing(&self) -> &ManualPricingSettings {
+        self.selected_manual_bill()
+            .map(|bill| &bill.pricing)
+            .unwrap_or(&self.manual_pricing)
+    }
+
+    fn active_manual_pricing_mut(&mut self) -> &mut ManualPricingSettings {
+        if let Some(bill_id) = self.selected_manual_bill_id.clone()
+            && let Some(index) = self.manual_bills.iter().position(|bill| bill.id == bill_id)
+        {
+            return &mut self.manual_bills[index].pricing;
+        }
+
+        &mut self.manual_pricing
+    }
+
+    fn selected_manual_bill(&self) -> Option<&ManualPricingBill> {
+        let selected_id = self.selected_manual_bill_id.as_deref()?;
+        self.manual_bills.iter().find(|bill| bill.id == selected_id)
+    }
+
+    fn sync_selected_manual_bill(&mut self) {
+        if self
+            .selected_manual_bill_id
+            .as_deref()
+            .is_some_and(|selected_id| !self.manual_bills.iter().any(|bill| bill.id == selected_id))
+        {
+            self.selected_manual_bill_id = None;
+        }
+    }
+
+    fn normalize_manual_bills(&mut self) {
+        let mut seen_ids = HashSet::new();
+
+        for index in 0..self.manual_bills.len() {
+            self.manual_bills[index].normalize();
+            if self.manual_bills[index].id.trim().is_empty() {
+                let (generated_id, generated_subject) = self.next_manual_bill_name(&seen_ids);
+                self.manual_bills[index].id = generated_id;
+                if self.manual_bills[index].subject.trim().is_empty() {
+                    self.manual_bills[index].subject = generated_subject;
+                }
+            }
+
+            let original_id = self.manual_bills[index].id.trim().to_string();
+            if seen_ids.insert(original_id.clone()) {
+                self.manual_bills[index].id = original_id;
+                continue;
+            }
+
+            let (replacement, generated_subject) = self.next_manual_bill_name(&seen_ids);
+            seen_ids.insert(replacement.clone());
+            self.manual_bills[index].id = replacement;
+            if self.manual_bills[index].subject.trim().is_empty() {
+                self.manual_bills[index].subject = generated_subject;
+            }
+        }
+    }
+
+    fn next_manual_bill_name(&self, reserved_ids: &HashSet<String>) -> (String, String) {
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let adjective_count = MANUAL_BILL_ADJECTIVES.len() as u128;
+        let subject_count = MANUAL_BILL_SUBJECTS.len() as u128;
+        let combinations = adjective_count.saturating_mul(subject_count);
+
+        for attempt in 0..combinations.max(1) {
+            let offset = attempt.saturating_mul(131);
+            let composite = seed.wrapping_add(offset) % combinations.max(1);
+            let adjective = MANUAL_BILL_ADJECTIVES[(composite % adjective_count.max(1)) as usize];
+            let subject = MANUAL_BILL_SUBJECTS
+                [((composite / adjective_count.max(1)) % subject_count.max(1)) as usize];
+            let candidate_id = format!("{adjective}-{subject}");
+
+            let already_used = reserved_ids.contains(&candidate_id)
+                || self.manual_bills.iter().any(|bill| bill.id == candidate_id);
+            if !already_used {
+                return (
+                    candidate_id,
+                    format!("{} {}", title_case_word(adjective), title_case_word(subject)),
+                );
+            }
+        }
+
+        let fallback = format!("{}-{}-{seed:x}", MANUAL_BILL_ADJECTIVES[0], MANUAL_BILL_SUBJECTS[0]);
+        (
+            fallback,
+            format!(
+                "{} {} {seed:x}",
+                title_case_word(MANUAL_BILL_ADJECTIVES[0]),
+                title_case_word(MANUAL_BILL_SUBJECTS[0]),
+            ),
+        )
+    }
+
+    fn save_manual_pricing_as_bill(&mut self) {
+        self.manual_pricing.normalize();
+
+        let (id, subject) = self.next_manual_bill_name(&HashSet::new());
+        self.manual_bills.insert(
+            0,
+            ManualPricingBill {
+                id: id.clone(),
+                subject,
+                pricing: self.manual_pricing.clone(),
+            },
+        );
+        self.manual_pricing_selected = true;
+        self.selected_manual_bill_id = Some(id.clone());
+        self.manual_pricing_status = Some(format!("Saved bill {id}."));
+    }
+
+    fn delete_selected_manual_pricing_bill(&mut self) {
+        let Some(selected_id) = self.selected_manual_bill_id.clone() else {
+            return;
+        };
+
+        let Some(index) = self.manual_bills.iter().position(|bill| bill.id == selected_id) else {
+            self.selected_manual_bill_id = None;
+            return;
+        };
+
+        let deleted_id = self.manual_bills[index].id.clone();
+        self.manual_bills.remove(index);
+        self.selected_manual_bill_id = None;
+        self.manual_pricing_selected = true;
+        self.manual_pricing_status = Some(format!("Deleted bill {deleted_id}."));
     }
 
     fn refresh_logs(&mut self) {
@@ -1384,21 +1573,30 @@ impl PrintCountApp {
             poll_states,
             recording_sessions,
             pricing: self.pricing.clone(),
+            bill_sync_supported: true,
+            manual_bills: self.manual_bills.clone(),
         }
     }
 
     fn apply_shared_state(&mut self, snapshot: SharedState) {
         let selected = self.selected_printer.clone();
+        let selected_manual_bill_id = self.selected_manual_bill_id.clone();
         let SharedState {
             revision,
             printers,
             poll_states,
             recording_sessions,
             pricing,
+            bill_sync_supported,
+            manual_bills,
         } = snapshot;
 
         self.printers = printers;
         self.pricing = pricing;
+        if bill_sync_supported {
+            self.manual_bills = manual_bills;
+            self.normalize_manual_bills();
+        }
         self.poll_states = poll_states
             .into_iter()
             .map(|entry| (entry.printer_id, entry.state))
@@ -1428,6 +1626,10 @@ impl PrintCountApp {
         self.poll_in_flight.retain(|printer_id| known_ids.contains(printer_id));
 
         self.selected_printer = selected.filter(|printer_id| known_ids.contains(printer_id));
+        if bill_sync_supported {
+            self.selected_manual_bill_id = selected_manual_bill_id;
+            self.sync_selected_manual_bill();
+        }
         if let Some(selected) = self.selected_printer.clone() {
             self.apply_profile_for_printer(&selected, None);
         } else {
@@ -1568,6 +1770,8 @@ mod tests {
                 session: remote_session,
             }],
             pricing: app.pricing.clone(),
+            bill_sync_supported: false,
+            manual_bills: Vec::new(),
         });
 
         assert_eq!(
@@ -1576,6 +1780,108 @@ mod tests {
                 .map(|session| session.end_fields_unlocked),
             Some(true)
         );
+    }
+
+    #[test]
+    fn save_manual_pricing_as_bill_copies_current_calculator_state() {
+        let mut app = test_app();
+        app.manual_pricing.line_items[0].sides_input = "12".to_string();
+        app.manual_pricing.line_items[0].sync_sheets_from_sides();
+        app.manual_pricing.discount_input = "5".to_string();
+
+        app.save_manual_pricing_as_bill();
+
+        assert_eq!(app.manual_bills.len(), 1);
+        assert!(app.manual_pricing_selected);
+        assert_eq!(
+            app.selected_manual_bill_id.as_deref(),
+            Some(app.manual_bills[0].id.as_str())
+        );
+        assert!(!app.manual_bills[0].id.is_empty());
+        assert!(app.manual_bills[0].id.contains('-'));
+        assert!(!app.manual_bills[0].subject.trim().is_empty());
+        assert_eq!(app.manual_bills[0].pricing.line_items[0].sides_input, "12");
+        assert_eq!(app.manual_bills[0].pricing.line_items[0].sheets_input, "12");
+        assert_eq!(app.manual_bills[0].pricing.discount_input, "5");
+    }
+
+    #[test]
+    fn legacy_snapshot_preserves_local_manual_pricing_and_bills() {
+        let mut app = test_app();
+        app.manual_pricing.line_items[0].sides_input = "9".to_string();
+        app.manual_pricing.line_items[0].sync_sheets_from_sides();
+        app.manual_pricing.discount_input = "8".to_string();
+        app.save_manual_pricing_as_bill();
+        let local_bill_id = app.manual_bills[0].id.clone();
+
+        app.apply_shared_state(sync::SharedState {
+            revision: 2,
+            printers: Vec::new(),
+            poll_states: Vec::new(),
+            recording_sessions: Vec::new(),
+            pricing: app.pricing.clone(),
+            bill_sync_supported: false,
+            manual_bills: Vec::new(),
+        });
+
+        assert_eq!(app.manual_pricing.line_items[0].sides_input, "9");
+        assert_eq!(app.manual_pricing.discount_input, "8");
+        assert_eq!(app.manual_bills.len(), 1);
+        assert_eq!(app.manual_bills[0].id, local_bill_id);
+    }
+
+    #[test]
+    fn parse_manual_pricing_contents_loads_legacy_settings_file() {
+        let contents = r#"(
+            a0_input: "30",
+            a1_input: "20",
+            a2_input: "10",
+            a3_input: "1.00",
+            a4_input: "0.50",
+            a3_bw_first_input: "0.35",
+            a3_bw_next_input: "0.20",
+            a3_bw_rest_input: "0.12",
+            a3_color_first_input: "1.25",
+            a3_color_rest_input: "0.5",
+            a4_bw_first_input: "0.25",
+            a4_bw_next_input: "0.10",
+            a4_bw_rest_input: "0.06",
+            a4_color_first_input: "0.75",
+            a4_color_rest_input: "0.50",
+            laminate_a2_input: "5",
+            laminate_a3_input: "2",
+            laminate_a4_input: "1",
+            laminate_a5_input: "0.7",
+            folding_input: "0.2",
+            binding_input: "3.50",
+            modifiers: [],
+            line_items: [],
+            finisher_items: [],
+            cutting_enabled: false,
+            discount_input: "",
+            rounding_mode: HalfEuro,
+        )"#;
+
+        let workspace = parse_manual_pricing_contents(contents).expect("legacy pricing file");
+
+        assert_eq!(workspace.settings.a0_input, "30");
+        assert_eq!(workspace.settings.a4_color_first_input, "0.75");
+        assert_eq!(workspace.settings.rounding_mode, ManualRoundingMode::HalfEuro);
+        assert!(workspace.bills.is_empty());
+    }
+
+    #[test]
+    fn delete_selected_manual_pricing_bill_removes_current_bill() {
+        let mut app = test_app();
+        app.save_manual_pricing_as_bill();
+        let deleted_id = app.manual_bills[0].id.clone();
+
+        app.delete_selected_manual_pricing_bill();
+
+        assert!(app.manual_bills.is_empty());
+        assert!(app.manual_pricing_selected);
+        assert_eq!(app.selected_manual_bill_id, None);
+        assert_eq!(app.manual_pricing_status, Some(format!("Deleted bill {deleted_id}.")));
     }
 
     #[test]

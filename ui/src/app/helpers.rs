@@ -1240,6 +1240,24 @@ mod tests {
     }
 
     #[test]
+    fn manual_pricing_adds_a0_laminate_finishers_by_size() {
+        let settings = ManualPricingSettings {
+            laminate_a0_input: "12.00".to_string(),
+            finisher_items: vec![ManualFinisherLineItem {
+                finisher_type: ManualFinisherType::Laminate,
+                laminate_size: ManualLaminateSize::A0,
+                amount_input: "2".to_string(),
+            }],
+            ..ManualPricingSettings::default()
+        };
+
+        let totals = manual_pricing_totals(&settings);
+
+        assert_eq!(totals.finishers_total_cents, Some(2400));
+        assert_eq!(totals.subtotal_cents, Some(2400));
+    }
+
+    #[test]
     fn manual_pricing_counts_binding_amounts() {
         let settings = ManualPricingSettings {
             binding_input: "4.00".to_string(),

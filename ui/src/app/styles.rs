@@ -172,6 +172,55 @@ pub(crate) fn manual_icon_button_style() -> impl Fn(&Theme, button::Status) -> b
     }
 }
 
+pub(crate) fn manual_pricing_header_button_style(
+    selected: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_theme, status| {
+        let base_color = if selected {
+            sampled_brand_color(SIDEBAR_BRAND_SAMPLE)
+        } else {
+            Color::from_rgb8(0xe5, 0xe9, 0xef)
+        };
+        let background = match status {
+            button::Status::Pressed => shift_color(base_color, if selected { -0.04 } else { -0.02 }),
+            button::Status::Hovered => shift_color(base_color, if selected { 0.03 } else { 0.01 }),
+            button::Status::Disabled => Color {
+                a: 0.75,
+                ..base_color
+            },
+            button::Status::Active => base_color,
+        };
+
+        button::Style {
+            background: Some(Background::Color(background)),
+            text_color: if selected {
+                Color::WHITE
+            } else {
+                Color::from_rgb8(0x18, 0x23, 0x33)
+            },
+            border: Border {
+                color: if selected {
+                    Color::TRANSPARENT
+                } else {
+                    Color::from_rgb8(0xd1, 0xd7, 0xe0)
+                },
+                width: if selected { 0.0 } else { 1.0 },
+                radius: 8.0.into(),
+            },
+            shadow: Shadow {
+                color: if selected {
+                    Color::from_rgba8(0x2d, 0x4c, 0xb2, 0.12)
+                } else {
+                    Color::from_rgba8(0x10, 0x19, 0x2b, 0.02)
+                },
+                offset: Vector::new(0.0, if selected { 3.0 } else { 1.0 }),
+                blur_radius: if selected { 8.0 } else { 4.0 },
+            },
+            ..button::Style::default()
+        }
+    }
+}
+
 pub(crate) fn profile_pick_list_style() -> impl Fn(&Theme, pick_list::Status) -> pick_list::Style {
     move |_theme, status| {
         let accent = sampled_brand_color(CONTENT_BRAND_SAMPLE);

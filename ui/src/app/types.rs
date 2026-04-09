@@ -98,6 +98,8 @@ impl std::fmt::Display for ManualFinisherType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ManualLaminateSize {
+    A0,
+    A1,
     A2,
     A3,
     #[default]
@@ -106,12 +108,14 @@ pub enum ManualLaminateSize {
 }
 
 impl ManualLaminateSize {
-    pub const ALL: [Self; 4] = [Self::A2, Self::A3, Self::A4, Self::A5];
+    pub const ALL: [Self; 6] = [Self::A0, Self::A1, Self::A2, Self::A3, Self::A4, Self::A5];
 }
 
 impl std::fmt::Display for ManualLaminateSize {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::A0 => write!(f, "A0"),
+            Self::A1 => write!(f, "A1"),
             Self::A2 => write!(f, "A2"),
             Self::A3 => write!(f, "A3"),
             Self::A4 => write!(f, "A4"),
@@ -337,6 +341,7 @@ impl std::fmt::Display for ManualModifierChoice {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ManualPricingSettings {
     pub(crate) a0_input: String,
     pub(crate) a1_input: String,
@@ -363,6 +368,10 @@ pub struct ManualPricingSettings {
     pub(crate) a4_color_first_input: String,
     #[serde(default)]
     pub(crate) a4_color_rest_input: String,
+    #[serde(default)]
+    pub(crate) laminate_a0_input: String,
+    #[serde(default)]
+    pub(crate) laminate_a1_input: String,
     #[serde(default)]
     pub(crate) laminate_a2_input: String,
     #[serde(default)]
@@ -470,6 +479,8 @@ impl ManualPricingSettings {
 
     pub(crate) fn laminate_price_input(&self, size: ManualLaminateSize) -> &str {
         match size {
+            ManualLaminateSize::A0 => &self.laminate_a0_input,
+            ManualLaminateSize::A1 => &self.laminate_a1_input,
             ManualLaminateSize::A2 => &self.laminate_a2_input,
             ManualLaminateSize::A3 => &self.laminate_a3_input,
             ManualLaminateSize::A4 => &self.laminate_a4_input,
@@ -479,6 +490,8 @@ impl ManualPricingSettings {
 
     pub(crate) fn set_laminate_price_input(&mut self, size: ManualLaminateSize, value: String) {
         match size {
+            ManualLaminateSize::A0 => self.laminate_a0_input = value,
+            ManualLaminateSize::A1 => self.laminate_a1_input = value,
             ManualLaminateSize::A2 => self.laminate_a2_input = value,
             ManualLaminateSize::A3 => self.laminate_a3_input = value,
             ManualLaminateSize::A4 => self.laminate_a4_input = value,
@@ -559,6 +572,8 @@ impl Default for ManualPricingSettings {
             a4_bw_rest_input: "0.00".to_string(),
             a4_color_first_input: "0.00".to_string(),
             a4_color_rest_input: "0.00".to_string(),
+            laminate_a0_input: "0.00".to_string(),
+            laminate_a1_input: "0.00".to_string(),
             laminate_a2_input: "0.00".to_string(),
             laminate_a3_input: "0.00".to_string(),
             laminate_a4_input: "0.00".to_string(),
@@ -573,6 +588,50 @@ impl Default for ManualPricingSettings {
             rounding_mode: ManualRoundingMode::None,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManualPricingBill {
+    #[serde(default)]
+    pub(crate) id: String,
+    #[serde(default)]
+    pub(crate) subject: String,
+    #[serde(default)]
+    pub(crate) pricing: ManualPricingSettings,
+}
+
+impl Default for ManualPricingBill {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            subject: String::new(),
+            pricing: ManualPricingSettings::default(),
+        }
+    }
+}
+
+impl ManualPricingBill {
+    pub(crate) fn display_subject(&self) -> &str {
+        let subject = self.subject.trim();
+        if subject.is_empty() {
+            self.id.as_str()
+        } else {
+            subject
+        }
+    }
+
+    pub(crate) fn normalize(&mut self) {
+        self.pricing.normalize();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ManualPricingWorkspace {
+    #[serde(default)]
+    pub(crate) settings: ManualPricingSettings,
+    #[serde(default)]
+    pub(crate) bills: Vec<ManualPricingBill>,
 }
 
 #[derive(Debug, Clone)]
@@ -602,6 +661,7 @@ pub enum Message {
     DiscoveryProbeFinished(DiscoveryProbeResult),
     SelectTab(Tab),
     SelectManualPricing,
+    SelectManualPricingBill(String),
     SelectManualPricingTab(ManualPricingTab),
     SelectPrinterTab(PrinterTab),
     SelectPrinter(PrinterId),
@@ -644,6 +704,9 @@ pub enum Message {
     PricingBwRestChanged(String),
     PricingColorChanged(String),
     PricingRoundChanged(bool),
+    SaveManualPricingAsBill,
+    DeleteSelectedManualPricingBill,
+    ManualPricingBillSubjectChanged(String),
     ManualPricingLineAdded,
     ManualPricingLineRemoved(usize),
     ManualPricingLineSizeChanged(usize, ManualPrintSize),

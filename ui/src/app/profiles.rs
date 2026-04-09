@@ -345,4 +345,30 @@ mod tests {
             vec![oid("1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.59")]
         );
     }
+
+    #[test]
+    fn c7200_profile_uses_verified_panel_matching_recording_counters() {
+        let profile = from_str::<MachineProfile>(include_str!(
+            "../../../profiles/machines/ricoh-pro-c7200s-light.ron"
+        ))
+        .expect("c7200 profile should parse");
+
+        assert_eq!(profile.id, "ricoh-pro-c7200s-light");
+        assert_eq!(
+            profile.recording.copies_bw,
+            vec![oid("1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3")]
+        );
+        assert_eq!(
+            profile.recording.copies_color,
+            vec![oid("1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5")]
+        );
+        assert_eq!(
+            profile.recording.prints_bw,
+            vec![oid("1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9")]
+        );
+        assert_eq!(
+            profile.recording.prints_color,
+            vec![oid("1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11")]
+        );
+    }
 }

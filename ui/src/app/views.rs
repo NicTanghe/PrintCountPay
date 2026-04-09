@@ -696,35 +696,86 @@ impl PrintCountApp {
     }
 
     fn manual_pricing_panel_view(&self) -> Element<'_, Message> {
-        let content = column![
-            column![
-                text("Manual pricing")
-                    .size(20)
-                    .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-                text("Use sheets for paper cost and printed sides for print cost, including recto verso.")
-                    .size(12)
-                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+        let title_block: Element<'_, Message> = if let Some(bill) = self.selected_manual_bill() {
+            let subject_input = text_input("Bill subject", &bill.subject)
+                .on_input(Message::ManualPricingBillSubjectChanged)
+                .padding(6)
+                .size(12)
+                .width(Length::Fixed(220.0));
+
+            row![
+                column![
+                    text("Shared bill")
+                        .size(20)
+                        .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+                    text(format!("ID: {}", bill.id))
+                        .size(12)
+                        .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                ]
+                .spacing(4),
+                horizontal_space(),
+                button("Delete bill")
+                    .style(theme::Button::custom(muted_content_button_style()))
+                    .on_press(Message::DeleteSelectedManualPricingBill),
+                column![
+                    text("Subject")
+                        .size(12)
+                        .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                    subject_input,
+                ]
+                .spacing(4),
             ]
-            .spacing(4),
-            self.manual_pricing_tab_bar(),
+            .spacing(12)
+            .align_items(Alignment::Center)
+            .into()
+        } else {
+            row![
+                column![
+                    text("Manual pricing")
+                        .size(20)
+                        .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+                    text("Use sheets for paper cost and printed sides for print cost, including recto verso.")
+                        .size(12)
+                        .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                ]
+                .spacing(4),
+                horizontal_space(),
+                button("Save as bill")
+                    .style(theme::Button::custom(solid_brand_button_style(
+                        CONTENT_BRAND_SAMPLE,
+                    )))
+                    .on_press(Message::SaveManualPricingAsBill),
+            ]
+            .spacing(12)
+            .align_items(Alignment::Center)
+            .into()
+        };
+
+        let mut content = column![title_block]
+            .spacing(12)
+            .height(Length::Fill);
+
+        if self.selected_manual_bill().is_none() {
+            content = content.push(self.manual_pricing_tab_bar());
+        }
+
+        content = content.push(
             scrollable(container(self.manual_pricing_body_view()).padding(iced::Padding {
                 top: 0.0,
                 right: 16.0,
                 bottom: 0.0,
                 left: 0.0,
             }))
-                .direction(scrollable::Direction::Vertical(
-                    scrollable::Scrollbar::new()
-                        .width(8)
-                        .margin(2)
-                        .scroller_width(8),
-                ))
-                .style(manual_pricing_scrollable_style())
-                .height(Length::Fill)
-                .width(Length::Fill),
-        ]
-        .spacing(12)
-        .height(Length::Fill);
+            .direction(scrollable::Direction::Vertical(
+                scrollable::Scrollbar::new()
+                    .width(8)
+                    .margin(2)
+                    .scroller_width(8),
+            ))
+            .style(manual_pricing_scrollable_style())
+            .height(Length::Fill)
+            .width(Length::Fill),
+        );
 
         container(content)
             .padding(12)
@@ -760,8 +811,9 @@ impl PrintCountApp {
     }
 
     fn manual_pricing_body_view(&self) -> Element<'_, Message> {
-        let manual = &self.manual_pricing;
+        let manual = self.active_manual_pricing();
         let totals = manual_pricing_totals(manual);
+        let calculator_only = self.selected_manual_bill().is_some();
 
         let mut size_prices = column![
             text("Flat print price per side")
@@ -1031,6 +1083,13 @@ impl PrintCountApp {
             .width(Length::Fill)
             .style(theme::Container::Box);
 
+        if calculator_only {
+            return column![calculator_section, summary]
+                .spacing(12)
+                .width(Length::Fill)
+                .into();
+        }
+
         match self.manual_pricing_tab {
             ManualPricingTab::Calculator => column![calculator_section, summary]
                 .spacing(12)
@@ -1102,13 +1161,13 @@ impl PrintCountApp {
     }
 
     fn manual_pricing_finishers_config_view(&self) -> Element<'_, Message> {
-        let manual = &self.manual_pricing;
+        let manual = self.active_manual_pricing();
 
         let mut laminate_prices = column![
             text("Laminate pricing")
                 .size(15)
                 .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-            text("Laminate uses a page size plus an amount. Configure A2 through A5 separately.")
+            text("Laminate uses a page size plus an amount. Configure A0 through A5 separately.")
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
         ]
@@ -1474,7 +1533,7 @@ impl PrintCountApp {
     }
 
     fn manual_tiered_price_box(&self, size: ManualPrintSize) -> Element<'_, Message> {
-        let manual = &self.manual_pricing;
+        let manual = self.active_manual_pricing();
         let bw = column![
             text("B/W")
                 .size(14)
@@ -1627,12 +1686,13 @@ impl PrintCountApp {
         size: ManualPrintSize,
         selected_index: Option<usize>,
     ) -> Vec<ManualModifierChoice> {
+        let manual = self.active_manual_pricing();
         let mut choices = vec![ManualModifierChoice {
             index: None,
             label: "No modifier".to_string(),
         }];
 
-        for (index, modifier) in self.manual_pricing.modifiers.iter().enumerate() {
+        for (index, modifier) in manual.modifiers.iter().enumerate() {
             if modifier.applies_to_size(size) {
                 choices.push(ManualModifierChoice {
                     index: Some(index),
@@ -1644,8 +1704,7 @@ impl PrintCountApp {
         if let Some(selected_index) = selected_index
             && !choices.iter().any(|choice| choice.index == Some(selected_index))
         {
-            let label = self
-                .manual_pricing
+            let label = manual
                 .modifiers
                 .get(selected_index)
                 .map(|modifier| format!("{} (not for {size})", modifier.display_name()))
@@ -1660,8 +1719,7 @@ impl PrintCountApp {
     }
 
     fn manual_pricing_row(&self) -> Element<'_, Message> {
-        let is_selected = self.manual_pricing_selected;
-        let base_color = Color::from_rgb8(0xeb, 0xf2, 0xe8);
+        let is_selected = self.manual_pricing_selected && self.selected_manual_bill_id.is_none();
         let name_color = if is_selected {
             Color::WHITE
         } else {
@@ -1673,30 +1731,92 @@ impl PrintCountApp {
             Color::from_rgb8(0x5a, 0x66, 0x78)
         };
 
-        let content = column![
-            text("Manual pricing")
-                .size(16)
-                .style(theme::Text::Color(name_color)),
-            text("A0-A4, paper types, discount, rounding")
-                .size(13)
+        let bill_count = self.manual_bills.len();
+        let bill_label = if bill_count == 1 {
+            "1 bill".to_string()
+        } else {
+            format!("{bill_count} bills")
+        };
+
+        let content = row![
+            column![
+                text("Manual pricing")
+                    .size(15)
+                    .style(theme::Text::Color(name_color)),
+                text("A0-A4, paper types, discount, rounding")
+                    .size(12)
+                    .style(theme::Text::Color(secondary_color)),
+            ]
+            .spacing(4),
+            horizontal_space(),
+            text(bill_label)
+                .size(12)
                 .style(theme::Text::Color(secondary_color)),
         ]
-        .spacing(6);
+        .spacing(10)
+        .align_items(Alignment::Center);
 
         button(content)
-            .style(theme::Button::custom(printer_card_style(
+            .style(theme::Button::custom(manual_pricing_header_button_style(
                 is_selected,
-                base_color,
             )))
             .width(Length::Fill)
-            .padding([14, 16])
+            .padding([10, 12])
             .clip(true)
             .on_press(Message::SelectManualPricing)
             .into()
     }
 
+    fn manual_pricing_bill_row(&self, bill: &ManualPricingBill) -> Element<'_, Message> {
+        let is_selected =
+            self.manual_pricing_selected
+                && self.selected_manual_bill_id.as_deref() == Some(bill.id.as_str());
+        let bill_id = bill.id.clone();
+        let bill_subject = bill.display_subject().to_string();
+        let base_color = Color::from_rgb8(0xf3, 0xf6, 0xfa);
+        let name_color = if is_selected {
+            Color::WHITE
+        } else {
+            Color::from_rgb8(0x1f, 0x2a, 0x37)
+        };
+        let secondary_color = if is_selected {
+            Color::from_rgba8(0xff, 0xff, 0xff, 0.82)
+        } else {
+            Color::from_rgb8(0x5a, 0x66, 0x78)
+        };
+
+        let card = button(
+            column![
+                text(bill_id.clone())
+                    .size(11)
+                    .style(theme::Text::Color(secondary_color)),
+                text(bill_subject)
+                    .size(14)
+                    .style(theme::Text::Color(name_color)),
+            ]
+            .spacing(4),
+        )
+        .style(theme::Button::custom(printer_card_style(
+            is_selected,
+            base_color,
+        )))
+        .width(Length::Fixed(266.0))
+        .padding([11, 12])
+        .clip(true)
+        .on_press(Message::SelectManualPricingBill(bill_id));
+
+        row![horizontal_space(), card]
+            .width(Length::Fill)
+            .align_items(Alignment::Center)
+            .into()
+    }
+
     fn printer_list_view(&self) -> Element<'_, Message> {
         let mut list_items = column![self.manual_pricing_row()].spacing(10);
+
+        for bill in &self.manual_bills {
+            list_items = list_items.push(self.manual_pricing_bill_row(bill));
+        }
 
         if self.printers.is_empty() {
             list_items = list_items.push(
