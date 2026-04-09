@@ -194,7 +194,9 @@ impl PrintCountApp {
         match fs::read_to_string(&path) {
             Ok(contents) => match parse_manual_pricing_contents(&contents) {
                 Ok(workspace) => {
-                    self.manual_pricing = workspace.settings;
+                    let mut settings = workspace.settings;
+                    settings.reset_calculator_state();
+                    self.manual_pricing = settings;
                     self.manual_bills = workspace.bills;
                     self.normalize_manual_bills();
                     self.sync_selected_manual_bill();
@@ -293,10 +295,11 @@ impl PrintCountApp {
         let sync::PricingSyncPayload {
             id,
             pricing,
-            workspace,
+            mut workspace,
         } = payload;
         self.last_manual_pricing_sync_id = Some(id);
         self.pricing = pricing;
+        workspace.settings.reset_calculator_state();
         self.manual_pricing = workspace.settings.clone();
         self.manual_bills = workspace.bills.clone();
         self.normalize_manual_bills();
@@ -409,6 +412,7 @@ impl PrintCountApp {
 
     fn save_manual_pricing_as_bill(&mut self) {
         self.manual_pricing.normalize();
+        let saved_pricing = self.manual_pricing.clone();
 
         let (id, subject) = self.next_manual_bill_name(&HashSet::new());
         self.manual_bills.insert(
@@ -416,12 +420,14 @@ impl PrintCountApp {
             ManualPricingBill {
                 id: id.clone(),
                 subject,
-                pricing: self.manual_pricing.clone(),
+                pricing: saved_pricing,
             },
         );
+        self.manual_pricing.reset_calculator_state();
         self.manual_pricing_selected = true;
-        self.selected_manual_bill_id = Some(id.clone());
-        self.manual_pricing_status = Some(format!("Saved bill {id}."));
+        self.selected_manual_bill_id = None;
+        self.manual_pricing_tab = ManualPricingTab::Calculator;
+        self.manual_pricing_status = Some(format!("Saved bill {id} and cleared calculator."));
     }
 
     fn delete_selected_manual_pricing_bill(&mut self) {
@@ -1966,24 +1972,41 @@ mod tests {
     #[test]
     fn save_manual_pricing_as_bill_copies_current_calculator_state() {
         let mut app = test_app();
+        app.manual_pricing.a3_input = "3.25".to_string();
+        app.manual_pricing.binding_input = "4.20".to_string();
         app.manual_pricing.line_items[0].sides_input = "12".to_string();
         app.manual_pricing.line_items[0].sync_sheets_from_sides();
+        app.manual_pricing.finisher_items.push(ManualFinisherLineItem {
+            finisher_type: ManualFinisherType::Binding,
+            laminate_size: ManualLaminateSize::A4,
+            amount_input: "2".to_string(),
+        });
         app.manual_pricing.discount_input = "5".to_string();
+        app.manual_pricing.rounding_mode = ManualRoundingMode::HalfEuro;
 
         app.save_manual_pricing_as_bill();
 
         assert_eq!(app.manual_bills.len(), 1);
         assert!(app.manual_pricing_selected);
-        assert_eq!(
-            app.selected_manual_bill_id.as_deref(),
-            Some(app.manual_bills[0].id.as_str())
-        );
+        assert_eq!(app.selected_manual_bill_id, None);
+        assert_eq!(app.manual_pricing_tab, ManualPricingTab::Calculator);
         assert!(!app.manual_bills[0].id.is_empty());
         assert!(app.manual_bills[0].id.contains('-'));
         assert!(!app.manual_bills[0].subject.trim().is_empty());
         assert_eq!(app.manual_bills[0].pricing.line_items[0].sides_input, "12");
         assert_eq!(app.manual_bills[0].pricing.line_items[0].sheets_input, "12");
+        assert_eq!(app.manual_bills[0].pricing.finisher_items.len(), 1);
         assert_eq!(app.manual_bills[0].pricing.discount_input, "5");
+        assert_eq!(
+            app.manual_bills[0].pricing.rounding_mode,
+            ManualRoundingMode::HalfEuro
+        );
+        assert_eq!(app.manual_pricing.a3_input, "3.25");
+        assert_eq!(app.manual_pricing.binding_input, "4.20");
+        assert_eq!(app.manual_pricing.line_items, vec![ManualPricingLineItem::default()]);
+        assert!(app.manual_pricing.finisher_items.is_empty());
+        assert!(app.manual_pricing.discount_input.is_empty());
+        assert_eq!(app.manual_pricing.rounding_mode, ManualRoundingMode::FiveCents);
     }
 
     #[test]
@@ -1993,6 +2016,7 @@ mod tests {
         app.manual_pricing.line_items[0].sync_sheets_from_sides();
         app.manual_pricing.discount_input = "8".to_string();
         app.save_manual_pricing_as_bill();
+        let local_manual_pricing = app.manual_pricing.clone();
         let local_bill_id = app.manual_bills[0].id.clone();
 
         app.apply_shared_state(sync::SharedState {
@@ -2005,10 +2029,76 @@ mod tests {
             manual_bills: Vec::new(),
         });
 
-        assert_eq!(app.manual_pricing.line_items[0].sides_input, "9");
-        assert_eq!(app.manual_pricing.discount_input, "8");
+        assert_eq!(app.manual_pricing, local_manual_pricing);
         assert_eq!(app.manual_bills.len(), 1);
         assert_eq!(app.manual_bills[0].id, local_bill_id);
+    }
+
+    #[test]
+    fn load_manual_pricing_from_path_clears_main_calculator_preserving_prices_and_bills() {
+        let mut app = test_app();
+        let root = temp_test_dir("load-manual-pricing-reset");
+        fs::create_dir_all(&root).expect("create temp root");
+        let path = root.join("manual_pricing.ron");
+
+        let workspace = ManualPricingWorkspace {
+            settings: ManualPricingSettings {
+                a0_input: "30".to_string(),
+                a3_input: "3.25".to_string(),
+                binding_input: "6.50".to_string(),
+                line_items: vec![ManualPricingLineItem {
+                    size: ManualPrintSize::A0,
+                    print_mode: ManualPrintMode::Bw,
+                    modifier_index: Some(0),
+                    double_sided: false,
+                    sheets_input: "7".to_string(),
+                    sides_input: "7".to_string(),
+                }],
+                finisher_items: vec![ManualFinisherLineItem {
+                    finisher_type: ManualFinisherType::Laminate,
+                    laminate_size: ManualLaminateSize::A0,
+                    amount_input: "10".to_string(),
+                }],
+                discount_input: "15".to_string(),
+                rounding_mode: ManualRoundingMode::HalfEuro,
+                ..ManualPricingSettings::default()
+            },
+            bills: vec![ManualPricingBill {
+                id: "saved-bill".to_string(),
+                subject: "Saved Bill".to_string(),
+                pricing: ManualPricingSettings {
+                    discount_input: "5".to_string(),
+                    rounding_mode: ManualRoundingMode::HalfEuro,
+                    line_items: vec![ManualPricingLineItem {
+                        sides_input: "9".to_string(),
+                        sheets_input: "9".to_string(),
+                        ..ManualPricingLineItem::default()
+                    }],
+                    ..ManualPricingSettings::default()
+                },
+            }],
+        };
+        write_manual_pricing_workspace(&path, &workspace).expect("write workspace");
+        app.manual_pricing_path = path.to_string_lossy().to_string();
+
+        app.load_manual_pricing_from_path();
+
+        assert_eq!(app.manual_pricing.a0_input, "30");
+        assert_eq!(app.manual_pricing.a3_input, "3.25");
+        assert_eq!(app.manual_pricing.binding_input, "6.50");
+        assert_eq!(app.manual_pricing.line_items, vec![ManualPricingLineItem::default()]);
+        assert!(app.manual_pricing.finisher_items.is_empty());
+        assert!(app.manual_pricing.discount_input.is_empty());
+        assert_eq!(app.manual_pricing.rounding_mode, ManualRoundingMode::FiveCents);
+        assert_eq!(app.manual_bills.len(), 1);
+        assert_eq!(app.manual_bills[0].id, "saved-bill");
+        assert_eq!(app.manual_bills[0].pricing.discount_input, "5");
+        assert_eq!(
+            app.manual_bills[0].pricing.rounding_mode,
+            ManualRoundingMode::HalfEuro
+        );
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -2056,6 +2146,7 @@ mod tests {
         let mut app = test_app();
         app.save_manual_pricing_as_bill();
         let deleted_id = app.manual_bills[0].id.clone();
+        app.selected_manual_bill_id = Some(deleted_id.clone());
 
         app.delete_selected_manual_pricing_bill();
 
@@ -2118,6 +2209,13 @@ mod tests {
         let workspace = ManualPricingWorkspace {
             settings: ManualPricingSettings {
                 a0_input: "99".to_string(),
+                discount_input: "12".to_string(),
+                rounding_mode: ManualRoundingMode::HalfEuro,
+                line_items: vec![ManualPricingLineItem {
+                    sides_input: "4".to_string(),
+                    sheets_input: "4".to_string(),
+                    ..ManualPricingLineItem::default()
+                }],
                 ..ManualPricingSettings::default()
             },
             bills: vec![ManualPricingBill {
@@ -2138,9 +2236,23 @@ mod tests {
 
         assert_eq!(app.pricing.color_input, "0.75");
         assert_eq!(app.manual_pricing.a0_input, "99");
+        assert_eq!(app.manual_pricing.line_items, vec![ManualPricingLineItem::default()]);
+        assert!(app.manual_pricing.discount_input.is_empty());
+        assert_eq!(app.manual_pricing.rounding_mode, ManualRoundingMode::FiveCents);
         assert_eq!(app.manual_bills.len(), 1);
         assert_eq!(app.manual_bills[0].id, "shared-bill");
-        assert_eq!(read_manual_pricing_workspace(&path), workspace);
+        let persisted_workspace = read_manual_pricing_workspace(&path);
+        assert_eq!(persisted_workspace.settings.a0_input, "99");
+        assert_eq!(
+            persisted_workspace.settings.line_items,
+            vec![ManualPricingLineItem::default()]
+        );
+        assert!(persisted_workspace.settings.discount_input.is_empty());
+        assert_eq!(
+            persisted_workspace.settings.rounding_mode,
+            ManualRoundingMode::FiveCents
+        );
+        assert_eq!(persisted_workspace.bills, workspace.bills);
         assert_eq!(
             read_manual_pricing_workspace(&manual_pricing_backup_path(&path, 1))
                 .settings

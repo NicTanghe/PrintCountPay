@@ -140,8 +140,8 @@ pub enum ManualColorTier {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ManualRoundingMode {
     #[default]
-    None,
     FiveCents,
+    None,
     HalfEuro,
     DownToFiveEuro,
     DownToTenEuro,
@@ -176,11 +176,11 @@ impl Default for ManualPricingLineItem {
     fn default() -> Self {
         Self {
             size: ManualPrintSize::A3,
-            print_mode: ManualPrintMode::Bw,
+            print_mode: ManualPrintMode::Color,
             modifier_index: None,
             double_sided: false,
-            sheets_input: String::new(),
-            sides_input: String::new(),
+            sheets_input: "0".to_string(),
+            sides_input: "0".to_string(),
         }
     }
 }
@@ -499,6 +499,14 @@ impl ManualPricingSettings {
         }
     }
 
+    pub(crate) fn reset_calculator_state(&mut self) {
+        self.line_items = vec![ManualPricingLineItem::default()];
+        self.finisher_items.clear();
+        self.cutting_enabled = false;
+        self.discount_input.clear();
+        self.rounding_mode = ManualRoundingMode::FiveCents;
+    }
+
     pub(crate) fn normalize(&mut self) {
         if self.modifiers.is_empty() {
             self.modifiers = default_manual_paper_modifiers();
@@ -586,7 +594,7 @@ impl Default for ManualPricingSettings {
             finisher_items: Vec::new(),
             cutting_enabled: false,
             discount_input: String::new(),
-            rounding_mode: ManualRoundingMode::None,
+            rounding_mode: ManualRoundingMode::FiveCents,
         }
     }
 }
@@ -978,5 +986,89 @@ impl std::fmt::Display for ProfileChoice {
             ProfileChoice::Auto => write!(f, "Auto match"),
             ProfileChoice::Profile(id) => write!(f, "{id}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manual_pricing_line_item_defaults_to_color_a3_with_zero_sides() {
+        let default_line = ManualPricingLineItem::default();
+
+        assert_eq!(default_line.size, ManualPrintSize::A3);
+        assert_eq!(default_line.print_mode, ManualPrintMode::Color);
+        assert_eq!(default_line.modifier_index, None);
+        assert_eq!(default_line.sides_input, "0");
+        assert_eq!(default_line.sheets_input, "0");
+    }
+
+    #[test]
+    fn manual_pricing_settings_default_to_five_cent_rounding() {
+        let default_settings = ManualPricingSettings::default();
+
+        assert_eq!(default_settings.rounding_mode, ManualRoundingMode::FiveCents);
+        assert!(default_settings.finisher_items.is_empty());
+        assert_eq!(
+            default_settings.line_items,
+            vec![ManualPricingLineItem::default()]
+        );
+    }
+
+    #[test]
+    fn manual_pricing_reset_calculator_state_preserves_price_configuration() {
+        let modifiers = vec![ManualPaperModifier {
+            name_input: "Satin".to_string(),
+            legacy_price_input: String::new(),
+            applies_a0: false,
+            a0_price_input: "0.00".to_string(),
+            applies_a1: false,
+            a1_price_input: "0.00".to_string(),
+            applies_a2: false,
+            a2_price_input: "0.00".to_string(),
+            applies_a3: true,
+            a3_price_input: "2.25".to_string(),
+            applies_a4: true,
+            a4_price_input: "1.25".to_string(),
+        }];
+        let mut settings = ManualPricingSettings {
+            a0_input: "30.00".to_string(),
+            a1_input: "20.00".to_string(),
+            a2_input: "10.00".to_string(),
+            a3_input: "3.25".to_string(),
+            a4_input: "1.50".to_string(),
+            binding_input: "7.50".to_string(),
+            modifiers: modifiers.clone(),
+            line_items: vec![ManualPricingLineItem {
+                size: ManualPrintSize::A0,
+                print_mode: ManualPrintMode::Bw,
+                modifier_index: Some(0),
+                double_sided: false,
+                sheets_input: "4".to_string(),
+                sides_input: "4".to_string(),
+            }],
+            finisher_items: vec![ManualFinisherLineItem {
+                finisher_type: ManualFinisherType::Binding,
+                laminate_size: ManualLaminateSize::A4,
+                amount_input: "3".to_string(),
+            }],
+            cutting_enabled: true,
+            discount_input: "12".to_string(),
+            rounding_mode: ManualRoundingMode::HalfEuro,
+            ..ManualPricingSettings::default()
+        };
+
+        settings.reset_calculator_state();
+
+        assert_eq!(settings.a0_input, "30.00");
+        assert_eq!(settings.a3_input, "3.25");
+        assert_eq!(settings.binding_input, "7.50");
+        assert_eq!(settings.modifiers, modifiers);
+        assert_eq!(settings.line_items, vec![ManualPricingLineItem::default()]);
+        assert!(settings.finisher_items.is_empty());
+        assert!(!settings.cutting_enabled);
+        assert!(settings.discount_input.is_empty());
+        assert_eq!(settings.rounding_mode, ManualRoundingMode::FiveCents);
     }
 }
