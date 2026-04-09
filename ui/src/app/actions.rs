@@ -929,6 +929,65 @@ impl PrintCountApp {
         }
     }
 
+    fn start_printer_reorder_drag(&mut self, printer_id: PrinterId) {
+        let Some(source_index) = self.printers.iter().position(|record| record.id == printer_id)
+        else {
+            return;
+        };
+
+        self.active_printer_drag = Some(PrinterReorderDrag {
+            printer_id,
+            drop_index: source_index,
+        });
+    }
+
+    fn hover_printer_reorder_drop(&mut self, drop_index: usize) {
+        let Some(drag) = self.active_printer_drag.as_mut() else {
+            return;
+        };
+
+        drag.drop_index = drop_index.min(self.printers.len());
+    }
+
+    fn finish_printer_reorder_drag(&mut self) -> bool {
+        let Some(drag) = self.active_printer_drag.take() else {
+            return false;
+        };
+
+        let Some(source_index) = self
+            .printers
+            .iter()
+            .position(|record| record.id == drag.printer_id)
+        else {
+            return false;
+        };
+
+        let mut target_index = drag.drop_index.min(self.printers.len());
+        if source_index < target_index {
+            target_index = target_index.saturating_sub(1);
+        }
+
+        if target_index == source_index {
+            return false;
+        }
+
+        let record = self.printers.remove(source_index);
+        self.printers.insert(target_index, record);
+
+        let synced = self.sync_sender.is_some();
+        self.printers_status = Some(if synced {
+            "Reordered printers and synced the list across the network. Use Export to save it to disk.".to_string()
+        } else {
+            "Reordered printers. Sync unavailable; use Export to save it to disk.".to_string()
+        });
+
+        true
+    }
+
+    fn cancel_printer_reorder_drag(&mut self) {
+        self.active_printer_drag = None;
+    }
+
     fn delete_selected_printer(&mut self) {
         if self.active_tab != Tab::Printers || self.manual_pricing_selected {
             return;
@@ -1150,6 +1209,7 @@ impl PrintCountApp {
 
     fn replace_printers(&mut self, printers: Vec<PrinterRecord>) {
         let selected = self.selected_printer.clone();
+        self.active_printer_drag = None;
         self.printers = printers;
         self.poll_states.clear();
         self.poll_in_flight.clear();
@@ -2031,6 +2091,7 @@ impl PrintCountApp {
             manual_bill_tombstones,
         } = snapshot;
 
+        self.active_printer_drag = None;
         self.printers = printers;
         self.pricing = pricing;
         if bill_sync_supported {
@@ -2113,6 +2174,14 @@ mod tests {
         record.snmp_address = Some(SnmpAddress::with_default_port("192.0.2.10"));
         record.status = status;
         record.last_seen = last_seen;
+        record
+    }
+
+    fn printer_record_with_id(id: &str) -> PrinterRecord {
+        let mut record = printer_record(PrinterStatus::Unknown, None);
+        record.id = PrinterId::new(id);
+        record.model = Some(id.to_string());
+        record.ip_or_hostname = Some(format!("{id}.local"));
         record
     }
 
@@ -2204,6 +2273,68 @@ mod tests {
         assert_eq!(
             printer.snmp_address,
             Some(SnmpAddress::new("192.0.2.10", 1161))
+        );
+    }
+
+    #[test]
+    fn finish_printer_reorder_drag_moves_printer_to_target_slot() {
+        let mut app = test_app();
+        let printer_a = printer_record_with_id("printer-a");
+        let printer_b = printer_record_with_id("printer-b");
+        let printer_c = printer_record_with_id("printer-c");
+
+        app.replace_printers(vec![
+            printer_a.clone(),
+            printer_b.clone(),
+            printer_c.clone(),
+        ]);
+
+        app.start_printer_reorder_drag(printer_a.id.clone());
+        app.hover_printer_reorder_drop(3);
+
+        assert!(app.finish_printer_reorder_drag());
+        assert_eq!(
+            app.printers
+                .iter()
+                .map(|record| record.id.to_string())
+                .collect::<Vec<_>>(),
+            vec!["printer-b", "printer-c", "printer-a"]
+        );
+    }
+
+    #[test]
+    fn apply_shared_state_preserves_snapshot_printer_order() {
+        let mut app = test_app();
+        let printer_a = printer_record_with_id("printer-a");
+        let printer_b = printer_record_with_id("printer-b");
+
+        app.replace_printers(vec![printer_a.clone(), printer_b.clone()]);
+        app.apply_shared_state(sync::SharedState {
+            revision: 2,
+            printers: vec![printer_b.clone(), printer_a.clone()],
+            poll_states: vec![
+                sync::PollStateEntry {
+                    printer_id: printer_b.id.clone(),
+                    state: SnmpPollStatus::Idle,
+                },
+                sync::PollStateEntry {
+                    printer_id: printer_a.id.clone(),
+                    state: SnmpPollStatus::Idle,
+                },
+            ],
+            recording_sessions: Vec::new(),
+            pricing: app.pricing.clone(),
+            bill_sync_supported: false,
+            manual_bills: Vec::new(),
+            manual_bill_tombstones: Vec::new(),
+        });
+
+        assert_eq!(
+            app.printers
+                .iter()
+                .map(|record| record.id.to_string())
+                .collect::<Vec<_>>(),
+            vec!["printer-b", "printer-a"]
         );
     }
 

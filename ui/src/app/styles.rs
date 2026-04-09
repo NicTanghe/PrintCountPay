@@ -486,6 +486,19 @@ pub(crate) fn sidebar_panel_style() -> impl Fn(&Theme) -> container::Style {
     }
 }
 
+pub(crate) fn printer_drop_indicator_style() -> impl Fn(&Theme) -> container::Style {
+    move |_theme| container::Style {
+        background: Some(Background::Color(sampled_brand_color(CONTENT_BRAND_SAMPLE))),
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 999.0.into(),
+        },
+        shadow: Shadow::default(),
+        ..container::Style::default()
+    }
+}
+
 pub(crate) fn printer_card_style(
     selected: bool,
     base_color: Color,

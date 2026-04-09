@@ -1,3 +1,7 @@
+const PRINTER_DRAG_HANDLE_WIDTH: f32 = 46.0;
+const PRINTER_ROW_SPACING: f32 = 10.0;
+const PRINTER_DROP_SPLIT_Y: f32 = 32.0;
+
 impl PrintCountApp {
     fn tab_bar(&self) -> Element<'_, Message> {
         let mut left_tabs = row![self.tab_button(Tab::Printers, "Printers")]
@@ -1861,9 +1865,16 @@ impl PrintCountApp {
                     .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a))),
             );
         } else {
+            let active_drop_index = self.active_printer_drag.as_ref().map(|drag| drag.drop_index);
             let total = self.printers.len();
             for (index, record) in self.printers.iter().enumerate() {
+                if active_drop_index == Some(index) {
+                    list_items = list_items.push(self.printer_drop_indicator());
+                }
                 list_items = list_items.push(self.printer_row(record, index, total));
+            }
+            if active_drop_index == Some(self.printers.len()) {
+                list_items = list_items.push(self.printer_drop_indicator());
             }
         }
 
@@ -1910,6 +1921,52 @@ impl PrintCountApp {
             .width(Length::Fill)
             .height(Length::Fill)
             .style(theme::Container::Custom(sidebar_panel_style()))
+            .into()
+    }
+
+    fn printer_drop_indicator(&self) -> Element<'_, Message> {
+        row![
+            Space::new().width(Length::Fixed(PRINTER_DRAG_HANDLE_WIDTH)),
+            container(Space::new().height(Length::Fixed(4.0)))
+                .width(Length::Fill)
+                .height(Length::Fixed(4.0))
+                .style(theme::Container::Custom(printer_drop_indicator_style())),
+        ]
+        .spacing(PRINTER_ROW_SPACING)
+        .width(Length::Fill)
+        .align_items(Alignment::Center)
+        .into()
+    }
+
+    fn printer_drag_handle(&self, printer_id: &PrinterId) -> Element<'_, Message> {
+        let is_active = self
+            .active_printer_drag
+            .as_ref()
+            .is_some_and(|drag| drag.printer_id == *printer_id);
+        let label_color = if is_active {
+            sampled_brand_color(CONTENT_BRAND_SAMPLE)
+        } else {
+            Color::from_rgb8(0x5a, 0x66, 0x78)
+        };
+        let interaction = if is_active {
+            iced::mouse::Interaction::Grabbing
+        } else {
+            iced::mouse::Interaction::Grab
+        };
+
+        let handle = container(
+            text("drag")
+                .size(11)
+                .style(theme::Text::Color(label_color)),
+        )
+        .width(Length::Fixed(PRINTER_DRAG_HANDLE_WIDTH))
+        .padding([12, 8])
+        .align_x(iced::alignment::Horizontal::Center)
+        .style(theme::Container::Box);
+
+        mouse_area(handle)
+            .on_press(Message::StartPrinterReorderDrag(printer_id.clone()))
+            .interaction(interaction)
             .into()
     }
 
@@ -1983,8 +2040,22 @@ impl PrintCountApp {
             .clip(true)
             .on_press(Message::SelectPrinter(record.id.clone()));
 
-        BadgeOverlay::new(base, self.recording_badge(is_recording), is_recording)
-            .margin(6.0)
+        let card = BadgeOverlay::new(base, self.recording_badge(is_recording), is_recording)
+            .margin(6.0);
+        let row = row![self.printer_drag_handle(&record.id), card]
+            .spacing(PRINTER_ROW_SPACING)
+            .width(Length::Fill)
+            .align_items(Alignment::Center);
+
+        mouse_area(row)
+            .on_move(move |point| {
+                let drop_index = if point.y < PRINTER_DROP_SPLIT_Y {
+                    index
+                } else {
+                    index + 1
+                };
+                Message::HoverPrinterReorderDrop(drop_index)
+            })
             .into()
     }
 

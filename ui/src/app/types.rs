@@ -751,6 +751,10 @@ pub(crate) enum Message {
     SelectManualPricingTab(ManualPricingTab),
     SelectPrinterTab(PrinterTab),
     SelectPrinter(PrinterId),
+    StartPrinterReorderDrag(PrinterId),
+    HoverPrinterReorderDrop(usize),
+    FinishPrinterReorderDrag,
+    CancelPrinterReorderDrag,
     ProfileChoiceChanged(ProfileChoice),
     DeleteSelectedPrinter,
     PollSelectedSnmp,
@@ -1085,7 +1089,10 @@ mod tests {
     fn manual_pricing_settings_default_to_five_cent_rounding() {
         let default_settings = ManualPricingSettings::default();
 
-        assert_eq!(default_settings.rounding_mode, ManualRoundingMode::FiveCents);
+        assert_eq!(
+            default_settings.rounding_mode,
+            ManualRoundingMode::FiveCents
+        );
         assert!(default_settings.finisher_items.is_empty());
         assert_eq!(
             default_settings.line_items,

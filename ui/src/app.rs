@@ -35,8 +35,8 @@ pub use types::{
     DiscoveryOutcome, DiscoveryProbeResult, Flags, ManualBwTier, ManualColorTier,
     ManualFinisherLineItem, ManualFinisherType, ManualLaminateSize, ManualModifierChoice,
     ManualPaperModifier, ManualPricingBill, ManualPricingBillTombstone, ManualPricingLineItem,
-    ManualPricingSettings, ManualPricingTab, ManualPrintMode, ManualPrintSize,
-    ManualRoundingMode, PrinterTab, ProfileChoice, RecordingCategory, SnmpErrorInfo, Tab,
+    ManualPricingSettings, ManualPricingTab, ManualPrintMode, ManualPrintSize, ManualRoundingMode,
+    PrinterTab, ProfileChoice, RecordingCategory, SnmpErrorInfo, Tab,
 };
 pub(crate) use types::{
     ManualBillStore, ManualPricingWorkspace, Message, PricingSettings, RecordingSession,
@@ -62,6 +62,12 @@ fn merge_status_messages(primary: Option<String>, secondary: Option<String>) -> 
 
 fn display_path(path: &Path) -> String {
     path.to_string_lossy().to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PrinterReorderDrag {
+    printer_id: PrinterId,
+    drop_index: usize,
 }
 
 pub struct PrintCountApp {
@@ -98,6 +104,7 @@ pub struct PrintCountApp {
     printers_path: String,
     printers_status: Option<String>,
     printers: Vec<PrinterRecord>,
+    active_printer_drag: Option<PrinterReorderDrag>,
     selected_printer: Option<PrinterId>,
     manual_pricing_selected: bool,
     selected_manual_bill_id: Option<String>,
@@ -207,6 +214,7 @@ impl PrintCountApp {
             printers_path: display_path(&printers_file),
             printers_status: None,
             printers,
+            active_printer_drag: None,
             selected_printer: None,
             manual_pricing_selected: false,
             selected_manual_bill_id: None,
@@ -387,6 +395,22 @@ impl PrintCountApp {
                 self.selected_printer = Some(printer_id.clone());
                 self.apply_profile_for_printer(&printer_id, None);
                 self.poll_selected_printer()
+            }
+            Message::StartPrinterReorderDrag(printer_id) => {
+                self.start_printer_reorder_drag(printer_id);
+                Command::none()
+            }
+            Message::HoverPrinterReorderDrop(drop_index) => {
+                self.hover_printer_reorder_drop(drop_index);
+                Command::none()
+            }
+            Message::FinishPrinterReorderDrag => {
+                self.finish_printer_reorder_drag();
+                Command::none()
+            }
+            Message::CancelPrinterReorderDrag => {
+                self.cancel_printer_reorder_drag();
+                Command::none()
             }
             Message::ProfileChoiceChanged(choice) => {
                 if let Some(printer_id) = self.selected_printer.clone() {
@@ -817,9 +841,16 @@ impl PrintCountApp {
             iced::time::every(Duration::from_secs(5)).map(|_| Message::PollSelectedSnmp);
         let sync_tick = iced::time::every(sync::SYNC_FLUSH_INTERVAL).map(|_| Message::SyncTick);
         let sync_subscription = sync::subscription().map(Message::SyncEvent);
-        let delete_key = iced::event::listen_with(|event, _status, _window| match event {
+        let global_events = iced::event::listen_with(|event, _status, _window| match event {
             iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
                 delete_key_event(key.clone(), modifiers)
+            }
+            iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left))
+            | iced::Event::Touch(iced::touch::Event::FingerLifted { .. }) => {
+                Some(Message::FinishPrinterReorderDrag)
+            }
+            iced::Event::Mouse(iced::mouse::Event::CursorLeft) => {
+                Some(Message::CancelPrinterReorderDrag)
             }
             _ => None,
         });
@@ -828,7 +859,7 @@ impl PrintCountApp {
             poll_tick,
             sync_tick,
             sync_subscription,
-            delete_key,
+            global_events,
         ])
     }
 
