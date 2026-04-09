@@ -9,7 +9,7 @@
         a3_bw_next_input: "0.20",
         a3_bw_rest_input: "0.12",
         a3_color_first_input: "1.25",
-        a3_color_rest_input: "0.5",
+        a3_color_rest_input: "1",
         a4_bw_first_input: "0.25",
         a4_bw_next_input: "0.10",
         a4_bw_rest_input: "0.06",
@@ -119,4 +119,5 @@
         rounding_mode: FiveCents,
     ),
     bills: [],
+    bill_tombstones: [],
 )

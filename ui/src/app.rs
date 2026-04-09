@@ -34,12 +34,13 @@ mod types;
 pub use types::{
     DiscoveryOutcome, DiscoveryProbeResult, Flags, ManualBwTier, ManualColorTier,
     ManualFinisherLineItem, ManualFinisherType, ManualLaminateSize, ManualModifierChoice,
-    ManualPaperModifier, ManualPricingBill, ManualPricingLineItem, ManualPricingSettings,
-    ManualPricingTab, ManualPrintMode, ManualPrintSize, ManualRoundingMode, PrinterTab,
-    ProfileChoice, RecordingCategory, SnmpErrorInfo, Tab,
+    ManualPaperModifier, ManualPricingBill, ManualPricingBillTombstone, ManualPricingLineItem,
+    ManualPricingSettings, ManualPricingTab, ManualPrintMode, ManualPrintSize,
+    ManualRoundingMode, PrinterTab, ProfileChoice, RecordingCategory, SnmpErrorInfo, Tab,
 };
 pub(crate) use types::{
-    ManualPricingWorkspace, Message, PricingSettings, RecordingSession, SnmpPollStatus,
+    ManualBillStore, ManualPricingWorkspace, Message, PricingSettings, RecordingSession,
+    SnmpPollStatus,
 };
 
 use badge_overlay::BadgeOverlay;
@@ -91,6 +92,7 @@ pub struct PrintCountApp {
     manual_community: String,
     manual_status: Option<String>,
     manual_pricing_path: String,
+    manual_bill_store_path: String,
     manual_pricing_status: Option<String>,
     last_manual_pricing_sync_id: Option<String>,
     printers_path: String,
@@ -102,6 +104,8 @@ pub struct PrintCountApp {
     manual_pricing_tab: ManualPricingTab,
     manual_pricing: ManualPricingSettings,
     manual_bills: Vec<ManualPricingBill>,
+    manual_bill_tombstones: Vec<ManualPricingBillTombstone>,
+    manual_bills_dirty: bool,
     poll_states: HashMap<PrinterId, SnmpPollStatus>,
     poll_in_flight: HashSet<PrinterId>,
     poll_export_path: String,
@@ -145,6 +149,7 @@ impl PrintCountApp {
             data_root,
             profiles_root,
             printers_file,
+            manual_bills_file,
             counter_oids_file,
             poll_export_file,
             status: path_status,
@@ -196,6 +201,7 @@ impl PrintCountApp {
             manual_community: "public".to_string(),
             manual_status: None,
             manual_pricing_path: String::new(),
+            manual_bill_store_path: display_path(&manual_bills_file),
             manual_pricing_status: None,
             last_manual_pricing_sync_id: None,
             printers_path: display_path(&printers_file),
@@ -207,6 +213,8 @@ impl PrintCountApp {
             manual_pricing_tab: ManualPricingTab::Calculator,
             manual_pricing: ManualPricingSettings::default(),
             manual_bills: Vec::new(),
+            manual_bill_tombstones: Vec::new(),
+            manual_bills_dirty: false,
             poll_states,
             poll_in_flight: HashSet::new(),
             poll_export_path: display_path(&poll_export_file),
@@ -240,6 +248,8 @@ impl PrintCountApp {
         }
         app.manual_pricing_path = app.default_manual_pricing_path();
         app.load_manual_pricing_if_present();
+        app.load_manual_bill_store_if_present();
+        app.persist_manual_bill_store_if_dirty();
         app.last_shared_state = app.build_shared_state(app.last_shared_state.revision);
 
         (app, Command::none())
@@ -547,6 +557,8 @@ impl PrintCountApp {
                     && let Some(bill) = self.manual_bills.iter_mut().find(|bill| bill.id == bill_id)
                 {
                     bill.subject = value;
+                    bill.touch();
+                    self.manual_bills_dirty = true;
                 }
                 Command::none()
             }
@@ -762,6 +774,7 @@ impl PrintCountApp {
             }
             Message::LoadManualPricing => {
                 self.load_manual_pricing_from_path();
+                self.load_manual_bill_store_if_present();
                 Command::none()
             }
             Message::SaveManualPricing => {
@@ -793,6 +806,7 @@ impl PrintCountApp {
             }
         };
 
+        self.persist_manual_bill_store_if_dirty();
         self.flush_shared_state();
         command
     }

@@ -17,7 +17,8 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::{MissedTickBehavior, sleep, timeout};
 
 use crate::app::{
-    ManualPricingBill, ManualPricingWorkspace, PricingSettings, RecordingSession, SnmpPollStatus,
+    ManualPricingBill, ManualPricingBillTombstone, ManualPricingWorkspace, PricingSettings,
+    RecordingSession, SnmpPollStatus,
 };
 
 pub const SYNC_PORT: u16 = 32_161;
@@ -56,6 +57,8 @@ pub(crate) struct SharedState {
     pub(crate) bill_sync_supported: bool,
     #[serde(default)]
     pub(crate) manual_bills: Vec<ManualPricingBill>,
+    #[serde(default)]
+    pub(crate) manual_bill_tombstones: Vec<ManualPricingBillTombstone>,
 }
 
 impl Default for SharedState {
@@ -68,6 +71,7 @@ impl Default for SharedState {
             pricing: PricingSettings::default(),
             bill_sync_supported: false,
             manual_bills: Vec::new(),
+            manual_bill_tombstones: Vec::new(),
         }
     }
 }

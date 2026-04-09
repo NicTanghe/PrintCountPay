@@ -119,4 +119,5 @@
         rounding_mode: FiveCents,
     ),
     bills: [],
+    bill_tombstones: [],
 )

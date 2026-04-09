@@ -32,7 +32,7 @@ fn title_case_word(value: &str) -> String {
 fn parse_manual_pricing_contents(contents: &str) -> Result<ManualPricingWorkspace, String> {
     match from_str::<ManualPricingWorkspace>(contents) {
         Ok(mut workspace) => {
-            workspace.settings.normalize();
+            workspace.normalize();
             Ok(workspace)
         }
         Err(workspace_error) => match from_str::<ManualPricingSettings>(contents) {
@@ -41,6 +41,7 @@ fn parse_manual_pricing_contents(contents: &str) -> Result<ManualPricingWorkspac
                 Ok(ManualPricingWorkspace {
                     settings,
                     bills: Vec::new(),
+                    bill_tombstones: Vec::new(),
                 })
             }
             Err(settings_error) => Err(format!(
@@ -50,11 +51,71 @@ fn parse_manual_pricing_contents(contents: &str) -> Result<ManualPricingWorkspac
     }
 }
 
+fn parse_manual_bill_store_contents(contents: &str) -> Result<ManualBillStore, String> {
+    match from_str::<ManualBillStore>(contents) {
+        Ok(mut store) => {
+            store.normalize();
+            Ok(store)
+        }
+        Err(store_error) => match from_str::<Vec<ManualPricingBill>>(contents) {
+            Ok(mut bills) => {
+                for bill in &mut bills {
+                    bill.normalize();
+                }
+                Ok(ManualBillStore {
+                    bills,
+                    bill_tombstones: Vec::new(),
+                })
+            }
+            Err(legacy_error) => Err(format!("{store_error} | legacy fallback: {legacy_error}")),
+        },
+    }
+}
+
+fn pricing_sync_id_value(id: &str) -> Option<u128> {
+    id.parse::<u128>().ok()
+}
+
+fn current_pricing_sync_id() -> String {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos().to_string())
+        .unwrap_or_else(|_| "0".to_string())
+}
+
+fn manual_pricing_version_id(path: &Path) -> Option<String> {
+    fs::metadata(path)
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_nanos().to_string())
+}
+
+fn pricing_sync_is_stale(candidate_id: &str, current_id: Option<&str>) -> bool {
+    let Some(current_id) = current_id else {
+        return false;
+    };
+
+    match (
+        pricing_sync_id_value(candidate_id),
+        pricing_sync_id_value(current_id),
+    ) {
+        (Some(candidate), Some(current)) => candidate <= current,
+        _ => candidate_id == current_id,
+    }
+}
+
 fn manual_pricing_backup_path(path: &Path, index: usize) -> std::path::PathBuf {
     std::path::PathBuf::from(format!("{}.bak{index}", path.to_string_lossy()))
 }
 
 fn manual_pricing_temp_path(path: &Path) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("{}.tmp", path.to_string_lossy()))
+}
+
+fn manual_bill_store_temp_path(path: &Path) -> std::path::PathBuf {
     std::path::PathBuf::from(format!("{}.tmp", path.to_string_lossy()))
 }
 
@@ -142,6 +203,122 @@ fn write_manual_pricing_workspace(
     Ok(())
 }
 
+fn write_manual_bill_store(path: &Path, store: &ManualBillStore) -> Result<(), String> {
+    let contents = to_string_pretty(store, PrettyConfig::new()).map_err(|error| error.to_string())?;
+    let temp_path = manual_bill_store_temp_path(path);
+
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Failed to prepare {}: {error}", parent.display()))?;
+    }
+
+    if path.exists() && !path.is_file() {
+        return Err(format!("{} is not a file.", path.display()));
+    }
+
+    fs::write(&temp_path, contents)
+        .map_err(|error| format!("Failed to write {}: {error}", temp_path.display()))?;
+    if path.is_file() {
+        fs::remove_file(path)
+            .map_err(|error| format!("Failed to replace {}: {error}", path.display()))?;
+    }
+    fs::rename(&temp_path, path)
+        .map_err(|error| format!("Failed to finalize {}: {error}", path.display()))?;
+
+    Ok(())
+}
+
+#[derive(Clone)]
+enum ManualBillRevision {
+    Bill(ManualPricingBill),
+    Tombstone(ManualPricingBillTombstone),
+}
+
+impl ManualBillRevision {
+    fn timestamp(&self) -> u64 {
+        match self {
+            Self::Bill(bill) => bill.updated_at_millis,
+            Self::Tombstone(tombstone) => tombstone.deleted_at_millis,
+        }
+    }
+}
+
+fn prefer_manual_bill_revision(candidate: &ManualBillRevision, current: &ManualBillRevision) -> bool {
+    candidate.timestamp() > current.timestamp()
+        || (candidate.timestamp() == current.timestamp()
+            && matches!(candidate, ManualBillRevision::Tombstone(_))
+            && matches!(current, ManualBillRevision::Bill(_)))
+}
+
+fn canonical_manual_bill_store(
+    bills: Vec<ManualPricingBill>,
+    tombstones: Vec<ManualPricingBillTombstone>,
+) -> ManualBillStore {
+    let mut latest: HashMap<String, ManualBillRevision> = HashMap::new();
+
+    for mut bill in bills {
+        bill.normalize();
+        if bill.id.trim().is_empty() {
+            continue;
+        }
+
+        let key = bill.id.trim().to_string();
+        bill.id = key.clone();
+        let revision = ManualBillRevision::Bill(bill);
+        let replace = latest
+            .get(&key)
+            .is_none_or(|current| prefer_manual_bill_revision(&revision, current));
+        if replace {
+            latest.insert(key, revision);
+        }
+    }
+
+    for mut tombstone in tombstones {
+        tombstone.normalize();
+        if tombstone.id.is_empty() {
+            continue;
+        }
+
+        let key = tombstone.id.clone();
+        let revision = ManualBillRevision::Tombstone(tombstone);
+        let replace = latest
+            .get(&key)
+            .is_none_or(|current| prefer_manual_bill_revision(&revision, current));
+        if replace {
+            latest.insert(key, revision);
+        }
+    }
+
+    let mut bills = Vec::new();
+    let mut bill_tombstones = Vec::new();
+    for revision in latest.into_values() {
+        match revision {
+            ManualBillRevision::Bill(bill) => bills.push(bill),
+            ManualBillRevision::Tombstone(tombstone) => bill_tombstones.push(tombstone),
+        }
+    }
+
+    bills.sort_by(|left, right| {
+        right
+            .updated_at_millis
+            .cmp(&left.updated_at_millis)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    bill_tombstones.sort_by(|left, right| {
+        right
+            .deleted_at_millis
+            .cmp(&left.deleted_at_millis)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    ManualBillStore {
+        bills,
+        bill_tombstones,
+    }
+}
+
 impl PrintCountApp {
     fn default_manual_pricing_path(&self) -> String {
         Path::new(&self.data_root)
@@ -184,6 +361,37 @@ impl PrintCountApp {
         self.load_manual_pricing_from_path();
     }
 
+    fn load_manual_bill_store_if_present(&mut self) {
+        let path = self.manual_bill_store_path.trim();
+        if path.is_empty() || !Path::new(path).is_file() {
+            return;
+        }
+
+        match fs::read_to_string(path) {
+            Ok(contents) => match parse_manual_bill_store_contents(&contents) {
+                Ok(store) => {
+                    self.manual_bills.extend(store.bills);
+                    self.manual_bill_tombstones.extend(store.bill_tombstones);
+                    self.normalize_manual_bills();
+                    self.sync_selected_manual_bill();
+                    self.manual_bills_dirty = true;
+                }
+                Err(error) => tracing::warn!(
+                    target: targets::STORAGE,
+                    "Failed to load manual bill store from {}: {}",
+                    path,
+                    error
+                ),
+            },
+            Err(error) => tracing::warn!(
+                target: targets::STORAGE,
+                "Failed to read manual bill store from {}: {}",
+                path,
+                error
+            ),
+        }
+    }
+
     fn load_manual_pricing_from_path(&mut self) {
         let path = self.manual_pricing_path.trim().to_string();
         if path.is_empty() {
@@ -198,8 +406,12 @@ impl PrintCountApp {
                     settings.reset_calculator_state();
                     self.manual_pricing = settings;
                     self.manual_bills = workspace.bills;
+                    self.manual_bill_tombstones = workspace.bill_tombstones;
+                    self.last_manual_pricing_sync_id = manual_pricing_version_id(Path::new(&path))
+                        .or_else(|| Some(current_pricing_sync_id()));
                     self.normalize_manual_bills();
                     self.sync_selected_manual_bill();
+                    self.manual_bills_dirty = true;
                     self.manual_pricing_status =
                         Some(format!("Loaded manual pricing from {path}."));
                 }
@@ -225,6 +437,15 @@ impl PrintCountApp {
         ManualPricingWorkspace {
             settings: self.manual_pricing.clone(),
             bills: self.manual_bills.clone(),
+            bill_tombstones: self.manual_bill_tombstones.clone(),
+        }
+    }
+
+    fn current_manual_bill_store(&mut self) -> ManualBillStore {
+        self.normalize_manual_bills();
+        ManualBillStore {
+            bills: self.manual_bills.clone(),
+            bill_tombstones: self.manual_bill_tombstones.clone(),
         }
     }
 
@@ -241,11 +462,41 @@ impl PrintCountApp {
         Ok(path)
     }
 
+    fn persist_manual_bill_store(&mut self) -> Result<String, String> {
+        let path = self.manual_bill_store_path.trim().to_string();
+        if path.is_empty() {
+            return Err("bill store path is empty.".to_string());
+        }
+
+        let store = self.current_manual_bill_store();
+        write_manual_bill_store(Path::new(&path), &store)?;
+        Ok(path)
+    }
+
+    fn persist_manual_bill_store_if_dirty(&mut self) {
+        if !self.manual_bills_dirty {
+            return;
+        }
+
+        match self.persist_manual_bill_store() {
+            Ok(_) => {
+                self.manual_bills_dirty = false;
+            }
+            Err(error) => tracing::warn!(
+                target: targets::STORAGE,
+                "Failed to persist manual bill store: {}",
+                error
+            ),
+        }
+    }
+
     fn save_manual_pricing_to_path(&mut self) {
         let workspace = self.current_manual_pricing_workspace();
 
         match self.persist_manual_pricing_workspace(&workspace) {
             Ok(path) => {
+                self.last_manual_pricing_sync_id = manual_pricing_version_id(Path::new(&path))
+                    .or_else(|| Some(current_pricing_sync_id()));
                 self.manual_pricing_status = Some(format!("Saved manual pricing to {path}."));
             }
             Err(error) => {
@@ -264,10 +515,7 @@ impl PrintCountApp {
             }
         };
 
-        let sync_id = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_nanos().to_string())
-            .unwrap_or_else(|_| "0".to_string());
+        let sync_id = current_pricing_sync_id();
         let payload = sync::PricingSyncPayload {
             id: sync_id.clone(),
             pricing: self.synced_pricing_settings(),
@@ -288,7 +536,15 @@ impl PrintCountApp {
     }
 
     fn apply_pricing_sync(&mut self, payload: sync::PricingSyncPayload) {
-        if self.last_manual_pricing_sync_id.as_deref() == Some(payload.id.as_str()) {
+        if pricing_sync_is_stale(
+            &payload.id,
+            self.last_manual_pricing_sync_id.as_deref(),
+        ) {
+            tracing::info!(
+                target: "sync",
+                "Ignoring stale pricing sync {} because local manual pricing is newer.",
+                payload.id
+            );
             return;
         }
 
@@ -302,8 +558,10 @@ impl PrintCountApp {
         workspace.settings.reset_calculator_state();
         self.manual_pricing = workspace.settings.clone();
         self.manual_bills = workspace.bills.clone();
+        self.manual_bill_tombstones = workspace.bill_tombstones.clone();
         self.normalize_manual_bills();
         self.sync_selected_manual_bill();
+        self.manual_bills_dirty = true;
 
         self.manual_pricing_status = Some(match self.persist_manual_pricing_workspace(&workspace) {
             Ok(path) => format!("Applied synced prices and saved manual pricing to {path}."),
@@ -323,6 +581,8 @@ impl PrintCountApp {
         if let Some(bill_id) = self.selected_manual_bill_id.clone()
             && let Some(index) = self.manual_bills.iter().position(|bill| bill.id == bill_id)
         {
+            self.manual_bills[index].touch();
+            self.manual_bills_dirty = true;
             return &mut self.manual_bills[index].pricing;
         }
 
@@ -357,19 +617,16 @@ impl PrintCountApp {
                 }
             }
 
-            let original_id = self.manual_bills[index].id.trim().to_string();
-            if seen_ids.insert(original_id.clone()) {
-                self.manual_bills[index].id = original_id;
-                continue;
-            }
-
-            let (replacement, generated_subject) = self.next_manual_bill_name(&seen_ids);
-            seen_ids.insert(replacement.clone());
-            self.manual_bills[index].id = replacement;
-            if self.manual_bills[index].subject.trim().is_empty() {
-                self.manual_bills[index].subject = generated_subject;
-            }
+            self.manual_bills[index].id = self.manual_bills[index].id.trim().to_string();
+            seen_ids.insert(self.manual_bills[index].id.clone());
         }
+
+        let store = canonical_manual_bill_store(
+            std::mem::take(&mut self.manual_bills),
+            std::mem::take(&mut self.manual_bill_tombstones),
+        );
+        self.manual_bills = store.bills;
+        self.manual_bill_tombstones = store.bill_tombstones;
     }
 
     fn next_manual_bill_name(&self, reserved_ids: &HashSet<String>) -> (String, String) {
@@ -421,8 +678,14 @@ impl PrintCountApp {
                 id: id.clone(),
                 subject,
                 pricing: saved_pricing,
+                updated_at_millis: 0,
             },
         );
+        if let Some(saved_bill) = self.manual_bills.first_mut() {
+            saved_bill.touch();
+        }
+        self.manual_bill_tombstones.retain(|tombstone| tombstone.id != id);
+        self.manual_bills_dirty = true;
         self.manual_pricing.reset_calculator_state();
         self.manual_pricing_selected = true;
         self.selected_manual_bill_id = None;
@@ -442,6 +705,10 @@ impl PrintCountApp {
 
         let deleted_id = self.manual_bills[index].id.clone();
         self.manual_bills.remove(index);
+        self.manual_bill_tombstones
+            .push(ManualPricingBillTombstone::new(deleted_id.clone()));
+        self.normalize_manual_bills();
+        self.manual_bills_dirty = true;
         self.selected_manual_bill_id = None;
         self.manual_pricing_selected = true;
         self.manual_pricing_status = Some(format!("Deleted bill {deleted_id}."));
@@ -1746,6 +2013,7 @@ impl PrintCountApp {
             pricing: self.pricing.clone(),
             bill_sync_supported: true,
             manual_bills: self.manual_bills.clone(),
+            manual_bill_tombstones: self.manual_bill_tombstones.clone(),
         }
     }
 
@@ -1760,13 +2028,16 @@ impl PrintCountApp {
             pricing,
             bill_sync_supported,
             manual_bills,
+            manual_bill_tombstones,
         } = snapshot;
 
         self.printers = printers;
         self.pricing = pricing;
         if bill_sync_supported {
-            self.manual_bills = manual_bills;
+            self.manual_bills.extend(manual_bills);
+            self.manual_bill_tombstones.extend(manual_bill_tombstones);
             self.normalize_manual_bills();
+            self.manual_bills_dirty = true;
         }
         self.poll_states = poll_states
             .into_iter()
@@ -1859,6 +2130,11 @@ mod tests {
     fn read_manual_pricing_workspace(path: &Path) -> ManualPricingWorkspace {
         let contents = fs::read_to_string(path).expect("read manual pricing file");
         parse_manual_pricing_contents(&contents).expect("parse manual pricing file")
+    }
+
+    fn read_manual_bill_store(path: &Path) -> ManualBillStore {
+        let contents = fs::read_to_string(path).expect("read manual bill store file");
+        parse_manual_bill_store_contents(&contents).expect("parse manual bill store file")
     }
 
     #[test]
@@ -1959,6 +2235,7 @@ mod tests {
             pricing: app.pricing.clone(),
             bill_sync_supported: false,
             manual_bills: Vec::new(),
+            manual_bill_tombstones: Vec::new(),
         });
 
         assert_eq!(
@@ -2027,6 +2304,7 @@ mod tests {
             pricing: app.pricing.clone(),
             bill_sync_supported: false,
             manual_bills: Vec::new(),
+            manual_bill_tombstones: Vec::new(),
         });
 
         assert_eq!(app.manual_pricing, local_manual_pricing);
@@ -2076,7 +2354,9 @@ mod tests {
                     }],
                     ..ManualPricingSettings::default()
                 },
+                updated_at_millis: 100,
             }],
+            bill_tombstones: Vec::new(),
         };
         write_manual_pricing_workspace(&path, &workspace).expect("write workspace");
         app.manual_pricing_path = path.to_string_lossy().to_string();
@@ -2151,9 +2431,96 @@ mod tests {
         app.delete_selected_manual_pricing_bill();
 
         assert!(app.manual_bills.is_empty());
+        assert_eq!(app.manual_bill_tombstones.len(), 1);
+        assert_eq!(app.manual_bill_tombstones[0].id, deleted_id);
         assert!(app.manual_pricing_selected);
         assert_eq!(app.selected_manual_bill_id, None);
         assert_eq!(app.manual_pricing_status, Some(format!("Deleted bill {deleted_id}.")));
+    }
+
+    #[test]
+    fn manual_bill_store_persists_saved_bills_and_tombstones() {
+        let mut app = test_app();
+        let root = temp_test_dir("manual-bill-store");
+        fs::create_dir_all(&root).expect("create temp root");
+        let store_path = root.join("manual_bills.ron");
+        app.manual_bill_store_path = store_path.to_string_lossy().to_string();
+
+        app.save_manual_pricing_as_bill();
+        app.persist_manual_bill_store_if_dirty();
+
+        let stored = read_manual_bill_store(&store_path);
+        assert_eq!(stored.bills.len(), 1);
+        assert!(stored.bill_tombstones.is_empty());
+
+        let deleted_id = stored.bills[0].id.clone();
+        app.selected_manual_bill_id = Some(deleted_id.clone());
+        app.delete_selected_manual_pricing_bill();
+        app.persist_manual_bill_store_if_dirty();
+
+        let stored = read_manual_bill_store(&store_path);
+        assert!(stored.bills.is_empty());
+        assert_eq!(stored.bill_tombstones.len(), 1);
+        assert_eq!(stored.bill_tombstones[0].id, deleted_id);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn load_manual_bill_store_prefers_newer_local_bill_snapshot() {
+        let mut app = test_app();
+        let root = temp_test_dir("manual-bill-merge");
+        fs::create_dir_all(&root).expect("create temp root");
+        let workspace_path = root.join("manual_pricing.ron");
+        let store_path = root.join("manual_bills.ron");
+
+        let workspace = ManualPricingWorkspace {
+            settings: ManualPricingSettings::default(),
+            bills: vec![ManualPricingBill {
+                id: "saved-bill".to_string(),
+                subject: "Older Subject".to_string(),
+                pricing: ManualPricingSettings::default(),
+                updated_at_millis: 10,
+            }],
+            bill_tombstones: Vec::new(),
+        };
+        write_manual_pricing_workspace(&workspace_path, &workspace).expect("write workspace");
+
+        let store = ManualBillStore {
+            bills: vec![
+                ManualPricingBill {
+                    id: "saved-bill".to_string(),
+                    subject: "Newer Subject".to_string(),
+                    pricing: ManualPricingSettings {
+                        discount_input: "5".to_string(),
+                        ..ManualPricingSettings::default()
+                    },
+                    updated_at_millis: 20,
+                },
+                ManualPricingBill {
+                    id: "local-only".to_string(),
+                    subject: "Local Only".to_string(),
+                    pricing: ManualPricingSettings::default(),
+                    updated_at_millis: 15,
+                },
+            ],
+            bill_tombstones: Vec::new(),
+        };
+        write_manual_bill_store(&store_path, &store).expect("write bill store");
+
+        app.manual_pricing_path = workspace_path.to_string_lossy().to_string();
+        app.manual_bill_store_path = store_path.to_string_lossy().to_string();
+
+        app.load_manual_pricing_from_path();
+        app.load_manual_bill_store_if_present();
+
+        assert_eq!(app.manual_bills.len(), 2);
+        assert_eq!(app.manual_bills[0].id, "saved-bill");
+        assert_eq!(app.manual_bills[0].subject, "Newer Subject");
+        assert_eq!(app.manual_bills[0].pricing.discount_input, "5");
+        assert!(app.manual_bills.iter().any(|bill| bill.id == "local-only"));
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -2225,7 +2592,9 @@ mod tests {
                     discount_input: "5".to_string(),
                     ..ManualPricingSettings::default()
                 },
+                updated_at_millis: 200,
             }],
+            bill_tombstones: Vec::new(),
         };
 
         app.apply_pricing_sync(sync::PricingSyncPayload {
@@ -2258,6 +2627,38 @@ mod tests {
                 .settings
                 .a0_input,
             "10"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn apply_pricing_sync_ignores_older_payload_than_loaded_workspace() {
+        let mut app = test_app();
+        let root = temp_test_dir("stale-pricing-sync");
+        fs::create_dir_all(&root).expect("create temp root");
+        let path = root.join("manual_pricing.ron");
+
+        let mut current_workspace = ManualPricingWorkspace::default();
+        current_workspace.settings.a3_color_rest_input = "1".to_string();
+        write_manual_pricing_workspace(&path, &current_workspace).expect("seed workspace");
+
+        app.manual_pricing_path = path.to_string_lossy().to_string();
+        app.load_manual_pricing_from_path();
+
+        let mut stale_workspace = ManualPricingWorkspace::default();
+        stale_workspace.settings.a3_color_rest_input = "0.5".to_string();
+
+        app.apply_pricing_sync(sync::PricingSyncPayload {
+            id: "1".to_string(),
+            pricing: PricingSettings::default(),
+            workspace: stale_workspace,
+        });
+
+        assert_eq!(app.manual_pricing.a3_color_rest_input, "1");
+        assert_eq!(
+            read_manual_pricing_workspace(&path).settings.a3_color_rest_input,
+            "1"
         );
 
         let _ = fs::remove_dir_all(root);

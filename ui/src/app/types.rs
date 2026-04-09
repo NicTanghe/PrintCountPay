@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use printcountpay_core::{
     CounterOidSet, Error as CoreError, PrinterId, PrinterRecord, PrinterStatus, SnmpResponse,
     SnmpVarBind,
@@ -599,6 +601,13 @@ impl Default for ManualPricingSettings {
     }
 }
 
+fn current_timestamp_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManualPricingBill {
     #[serde(default)]
@@ -607,6 +616,8 @@ pub struct ManualPricingBill {
     pub(crate) subject: String,
     #[serde(default)]
     pub(crate) pricing: ManualPricingSettings,
+    #[serde(default)]
+    pub(crate) updated_at_millis: u64,
 }
 
 impl Default for ManualPricingBill {
@@ -615,6 +626,7 @@ impl Default for ManualPricingBill {
             id: String::new(),
             subject: String::new(),
             pricing: ManualPricingSettings::default(),
+            updated_at_millis: 0,
         }
     }
 }
@@ -631,6 +643,57 @@ impl ManualPricingBill {
 
     pub(crate) fn normalize(&mut self) {
         self.pricing.normalize();
+        if self.updated_at_millis == 0 {
+            self.touch();
+        }
+    }
+
+    pub(crate) fn touch(&mut self) {
+        self.updated_at_millis = current_timestamp_millis();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManualPricingBillTombstone {
+    #[serde(default)]
+    pub(crate) id: String,
+    #[serde(default)]
+    pub(crate) deleted_at_millis: u64,
+}
+
+impl ManualPricingBillTombstone {
+    pub(crate) fn new(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            deleted_at_millis: current_timestamp_millis(),
+        }
+    }
+
+    pub(crate) fn normalize(&mut self) {
+        self.id = self.id.trim().to_string();
+        if self.deleted_at_millis == 0 {
+            self.deleted_at_millis = current_timestamp_millis();
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ManualBillStore {
+    #[serde(default)]
+    pub(crate) bills: Vec<ManualPricingBill>,
+    #[serde(default)]
+    pub(crate) bill_tombstones: Vec<ManualPricingBillTombstone>,
+}
+
+impl ManualBillStore {
+    pub(crate) fn normalize(&mut self) {
+        for bill in &mut self.bills {
+            bill.normalize();
+        }
+        for tombstone in &mut self.bill_tombstones {
+            tombstone.normalize();
+        }
     }
 }
 
@@ -641,6 +704,20 @@ pub(crate) struct ManualPricingWorkspace {
     pub(crate) settings: ManualPricingSettings,
     #[serde(default)]
     pub(crate) bills: Vec<ManualPricingBill>,
+    #[serde(default)]
+    pub(crate) bill_tombstones: Vec<ManualPricingBillTombstone>,
+}
+
+impl ManualPricingWorkspace {
+    pub(crate) fn normalize(&mut self) {
+        self.settings.normalize();
+        for bill in &mut self.bills {
+            bill.normalize();
+        }
+        for tombstone in &mut self.bill_tombstones {
+            tombstone.normalize();
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1070,5 +1147,22 @@ mod tests {
         assert!(!settings.cutting_enabled);
         assert!(settings.discount_input.is_empty());
         assert_eq!(settings.rounding_mode, ManualRoundingMode::FiveCents);
+    }
+
+    #[test]
+    fn manual_pricing_bill_normalize_assigns_timestamp() {
+        let mut bill = ManualPricingBill::default();
+
+        bill.normalize();
+
+        assert!(bill.updated_at_millis > 0);
+    }
+
+    #[test]
+    fn manual_pricing_bill_tombstone_new_assigns_timestamp() {
+        let tombstone = ManualPricingBillTombstone::new("bill-1");
+
+        assert_eq!(tombstone.id, "bill-1");
+        assert!(tombstone.deleted_at_millis > 0);
     }
 }

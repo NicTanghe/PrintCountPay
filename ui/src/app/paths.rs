@@ -11,6 +11,7 @@ pub(crate) struct AppPaths {
     pub(crate) data_root: PathBuf,
     pub(crate) profiles_root: PathBuf,
     pub(crate) printers_file: PathBuf,
+    pub(crate) manual_bills_file: PathBuf,
     pub(crate) counter_oids_file: PathBuf,
     pub(crate) poll_export_file: PathBuf,
     pub(crate) status: Option<String>,
@@ -27,6 +28,7 @@ pub(crate) fn resolve_app_paths() -> AppPaths {
 
     let profiles_root = data_root.join("profiles");
     let printers_file = data_root.join("printers.ron");
+    let manual_bills_file = data_root.join("manual_bills.ron");
     let counter_oids_file = data_root.join("counter_oids.ron");
     let poll_export_file = data_root.join("polling_export.txt");
 
@@ -51,6 +53,7 @@ pub(crate) fn resolve_app_paths() -> AppPaths {
         data_root,
         profiles_root,
         printers_file,
+        manual_bills_file,
         counter_oids_file,
         poll_export_file,
         status: (!issues.is_empty()).then(|| issues.join(" | ")),
