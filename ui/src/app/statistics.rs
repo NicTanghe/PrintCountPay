@@ -11,11 +11,22 @@ use ron::ser::{PrettyConfig, to_string_pretty};
 use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, UtcOffset};
 
+use super::helpers::{
+    bw_cost_cents, bw_pricing_from_settings, color_cost_cents, color_price_from_settings,
+};
+use super::types::PricingSettings;
+
 pub(crate) const STATISTICS_POLL_TICK: Duration = Duration::from_secs(60);
 pub(crate) const STATISTICS_CLEANUP_TICK: Duration = Duration::from_millis(250);
 pub(crate) const STATISTICS_BUCKET_SECS: u64 = 15 * 60;
 pub(crate) const RECORDED_EUR_SERIES_KEY: &str = "series:recorded-eur";
 pub(crate) const RECORDED_EUR_SERIES_LABEL: &str = "Recorded EUR";
+pub(crate) const ESTIMATED_INCOME_SERIES_KEY: &str = "series:estimated-income";
+pub(crate) const ESTIMATED_INCOME_SERIES_LABEL: &str = "Estimated Income";
+pub(crate) const ESTIMATED_INCOME_BW_SERIES_KEY: &str = "series:estimated-income-bw";
+pub(crate) const ESTIMATED_INCOME_BW_SERIES_LABEL: &str = "Estimated Income B/W";
+pub(crate) const ESTIMATED_INCOME_COLOR_SERIES_KEY: &str = "series:estimated-income-color";
+pub(crate) const ESTIMATED_INCOME_COLOR_SERIES_LABEL: &str = "Estimated Income Color";
 
 const RECENT_RETENTION_SECS: u64 = 2 * 24 * 60 * 60;
 const BUSINESS_START_MINUTES: u16 = 10 * 60 + 45;
@@ -281,6 +292,7 @@ pub(crate) fn spawn_cleanup_worker(
 pub(crate) fn available_series(
     store: &StatisticsStore,
     selected_printers: &HashSet<PrinterId>,
+    pricing: &PricingSettings,
 ) -> Vec<StatisticsSeriesDefinition> {
     let mut seen = BTreeSet::new();
     let mut series = Vec::new();
@@ -292,10 +304,14 @@ pub(crate) fn available_series(
     {
         for sample in &entry.poll_samples {
             for metric in &sample.metrics {
+                let Some(label) = display_label_for_metric(metric) else {
+                    continue;
+                };
+
                 if seen.insert(metric.series_key.clone()) {
                     series.push(StatisticsSeriesDefinition {
                         key: metric.series_key.clone(),
-                        label: display_label_for_metric(metric),
+                        label,
                     });
                 }
             }
@@ -309,13 +325,45 @@ pub(crate) fn available_series(
         }
     }
 
-    series.sort_by(|left, right| left.label.cmp(&right.label).then_with(|| left.key.cmp(&right.key)));
+    let estimated_income = estimated_income_availability(store, selected_printers, pricing);
+    for (enabled, key, label) in [
+        (
+            estimated_income.bw,
+            ESTIMATED_INCOME_BW_SERIES_KEY,
+            ESTIMATED_INCOME_BW_SERIES_LABEL,
+        ),
+        (
+            estimated_income.color,
+            ESTIMATED_INCOME_COLOR_SERIES_KEY,
+            ESTIMATED_INCOME_COLOR_SERIES_LABEL,
+        ),
+        (
+            estimated_income.total,
+            ESTIMATED_INCOME_SERIES_KEY,
+            ESTIMATED_INCOME_SERIES_LABEL,
+        ),
+    ] {
+        if enabled && seen.insert(key.to_string()) {
+            series.push(StatisticsSeriesDefinition {
+                key: key.to_string(),
+                label: label.to_string(),
+            });
+        }
+    }
+
+    series.sort_by(|left, right| {
+        statistics_series_sort_order(&left.label)
+            .cmp(&statistics_series_sort_order(&right.label))
+            .then_with(|| left.label.cmp(&right.label))
+            .then_with(|| left.key.cmp(&right.key))
+    });
     series
 }
 
 pub(crate) fn aggregate_series_points(
     store: &StatisticsStore,
     selected_printers: &HashSet<PrinterId>,
+    pricing: &PricingSettings,
     series_key: &str,
     max_points: usize,
 ) -> Vec<(u64, u64)> {
@@ -335,6 +383,19 @@ pub(crate) fn aggregate_series_points(
                 });
                 point.timestamp = point.timestamp.max(sample.captured_at);
                 point.value = point.value.saturating_add(sample.total_cents);
+            }
+            continue;
+        }
+
+        if let Some(series_value) = estimated_income_value_for_entry(entry, series_key, pricing) {
+            for (captured_at, total_cents) in series_value {
+                let bucket = statistics_bucket(captured_at);
+                let point = buckets.entry(bucket).or_insert(AggregatedPoint {
+                    timestamp: captured_at,
+                    value: 0,
+                });
+                point.timestamp = point.timestamp.max(captured_at);
+                point.value = point.value.saturating_add(total_cents);
             }
             continue;
         }
@@ -370,6 +431,143 @@ pub(crate) fn aggregate_series_points(
             .collect::<Vec<_>>(),
         max_points,
     )
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct EstimatedIncomeAvailability {
+    bw: bool,
+    color: bool,
+    total: bool,
+}
+
+fn estimated_income_availability(
+    store: &StatisticsStore,
+    selected_printers: &HashSet<PrinterId>,
+    pricing: &PricingSettings,
+) -> EstimatedIncomeAvailability {
+    let bw_enabled = bw_pricing_from_settings(pricing).is_some();
+    let color_enabled = color_price_from_settings(pricing).is_some();
+    let mut has_bw = false;
+    let mut has_color = false;
+
+    for entry in store
+        .printers
+        .iter()
+        .filter(|entry| selected_printers.contains(&entry.printer_id))
+    {
+        for sample in &entry.poll_samples {
+            has_bw |= sample_total_bw_count(sample).is_some();
+            has_color |= sample_total_color_count(sample).is_some();
+            if has_bw && has_color {
+                break;
+            }
+        }
+    }
+
+    EstimatedIncomeAvailability {
+        bw: bw_enabled && has_bw,
+        color: color_enabled && has_color,
+        total: (bw_enabled && has_bw) || (color_enabled && has_color),
+    }
+}
+
+fn estimated_income_value_for_entry(
+    entry: &PrinterStatisticsEntry,
+    series_key: &str,
+    pricing: &PricingSettings,
+) -> Option<Vec<(u64, u64)>> {
+    if !matches!(
+        series_key,
+        ESTIMATED_INCOME_BW_SERIES_KEY
+            | ESTIMATED_INCOME_COLOR_SERIES_KEY
+            | ESTIMATED_INCOME_SERIES_KEY
+    ) {
+        return None;
+    }
+
+    let mut points = Vec::new();
+    let bw_pricing = bw_pricing_from_settings(pricing);
+    let color_price = color_price_from_settings(pricing);
+
+    for sample in &entry.poll_samples {
+        let bw_total = match sample_total_bw_count(sample) {
+            Some(count) => bw_pricing.map(|pricing| bw_cost_cents(count, pricing)),
+            None => None,
+        };
+        let color_total = match sample_total_color_count(sample) {
+            Some(count) => color_price.map(|price| color_cost_cents(count, price)),
+            None => None,
+        };
+
+        let total_cents = match series_key {
+            ESTIMATED_INCOME_BW_SERIES_KEY => bw_total,
+            ESTIMATED_INCOME_COLOR_SERIES_KEY => color_total,
+            ESTIMATED_INCOME_SERIES_KEY => sum_present_values([bw_total, color_total]),
+            _ => None,
+        };
+
+        if let Some(total_cents) = total_cents {
+            points.push((sample.captured_at, total_cents));
+        }
+    }
+
+    Some(points)
+}
+
+fn sample_total_bw_count(sample: &StatisticsPollSample) -> Option<u64> {
+    sum_metrics_for_label(sample, "Clicks: B/W").or_else(|| {
+        sum_present_values([
+            sum_metrics_for_label(sample, "Recording: Copies B/W"),
+            sum_metrics_for_label(sample, "Recording: Prints B/W"),
+        ])
+    })
+}
+
+fn sample_total_color_count(sample: &StatisticsPollSample) -> Option<u64> {
+    sum_metrics_for_label(sample, "Clicks: Color").or_else(|| {
+        sum_present_values([
+            sum_metrics_for_label(sample, "Recording: Copies Color"),
+            sum_metrics_for_label(sample, "Recording: Prints Color"),
+        ])
+    })
+}
+
+fn sum_metrics_for_label(sample: &StatisticsPollSample, label: &str) -> Option<u64> {
+    let mut total = 0u64;
+    let mut matched = false;
+    for metric in &sample.metrics {
+        if metric.label == label {
+            matched = true;
+            total = total.saturating_add(metric.value);
+        }
+    }
+    matched.then_some(total)
+}
+
+fn sum_present_values<const N: usize>(values: [Option<u64>; N]) -> Option<u64> {
+    let mut total = 0u64;
+    let mut matched = false;
+    for value in values.into_iter().flatten() {
+        matched = true;
+        total = total.saturating_add(value);
+    }
+    matched.then_some(total)
+}
+
+fn statistics_series_sort_order(label: &str) -> usize {
+    match label {
+        "Copies B/W" => 0,
+        "Prints B/W" => 1,
+        "Copies Color" => 2,
+        "Prints Color" => 3,
+        "Total B/W" => 4,
+        "Total Color" => 5,
+        ESTIMATED_INCOME_BW_SERIES_LABEL => 6,
+        ESTIMATED_INCOME_COLOR_SERIES_LABEL => 7,
+        ESTIMATED_INCOME_SERIES_LABEL => 8,
+        RECORDED_EUR_SERIES_LABEL => 9,
+        _ => usize::MAX,
+    }
 }
 
 pub(crate) fn normalize_statistics_store(store: &mut StatisticsStore) {
@@ -498,11 +696,19 @@ fn select_representative_euro_samples(
     selected
 }
 
-fn display_label_for_metric(metric: &StatisticsPollMetric) -> String {
-    if metric.label.trim().is_empty() {
-        metric.oid.clone()
-    } else {
-        metric.label.clone()
+fn display_label_for_metric(metric: &StatisticsPollMetric) -> Option<String> {
+    canonical_statistics_label(&metric.label).map(str::to_string)
+}
+
+fn canonical_statistics_label(label: &str) -> Option<&'static str> {
+    match label.trim() {
+        "Recording: Copies B/W" => Some("Copies B/W"),
+        "Recording: Prints B/W" => Some("Prints B/W"),
+        "Recording: Copies Color" => Some("Copies Color"),
+        "Recording: Prints Color" => Some("Prints Color"),
+        "Clicks: B/W" => Some("Total B/W"),
+        "Clicks: Color" => Some("Total Color"),
+        _ => None,
     }
 }
 
@@ -564,14 +770,16 @@ mod tests {
     #[test]
     fn available_series_collects_poll_metrics_and_recorded_eur() {
         let printer_id = printer_id("printer-a");
+        let pricing = PricingSettings::default();
         let store = StatisticsStore {
             printers: vec![PrinterStatisticsEntry {
                 printer_id: printer_id.clone(),
                 poll_samples: vec![StatisticsPollSample {
                     captured_at: 900,
                     metrics: vec![
-                        StatisticsPollMetric::new("1.2.3", "Clicks: Total", 100),
+                        StatisticsPollMetric::new("1.2.3", "Clicks: B/W", 100),
                         StatisticsPollMetric::new("1.2.4", "Recording: Prints B/W", 50),
+                        StatisticsPollMetric::new("1.2.5", "Toner: Black", 80),
                     ],
                     legacy_total: None,
                 }],
@@ -583,10 +791,12 @@ mod tests {
         };
         let selected = HashSet::from([printer_id]);
 
-        let series = available_series(&store, &selected);
-        assert_eq!(series.len(), 3);
-        assert!(series.iter().any(|entry| entry.label == "Clicks: Total"));
-        assert!(series.iter().any(|entry| entry.label == "Recording: Prints B/W"));
+        let series = available_series(&store, &selected, &pricing);
+        assert_eq!(series.len(), 5);
+        assert!(series.iter().any(|entry| entry.label == "Total B/W"));
+        assert!(series.iter().any(|entry| entry.label == "Prints B/W"));
+        assert!(series.iter().any(|entry| entry.label == ESTIMATED_INCOME_BW_SERIES_LABEL));
+        assert!(series.iter().any(|entry| entry.label == ESTIMATED_INCOME_SERIES_LABEL));
         assert!(series.iter().any(|entry| entry.label == RECORDED_EUR_SERIES_LABEL));
     }
 
@@ -595,6 +805,7 @@ mod tests {
         let printer_a = printer_id("printer-a");
         let printer_b = printer_id("printer-b");
         let metric_key = metric_series_key("1.2.3", "Clicks: Total");
+        let pricing = PricingSettings::default();
         let store = StatisticsStore {
             printers: vec![
                 PrinterStatisticsEntry {
@@ -619,8 +830,47 @@ mod tests {
         };
         let selected = HashSet::from([printer_a, printer_b]);
 
-        let points = aggregate_series_points(&store, &selected, &metric_key, 32);
+        let points = aggregate_series_points(&store, &selected, &pricing, &metric_key, 32);
         assert_eq!(points, vec![(901, 140)]);
+    }
+
+    #[test]
+    fn aggregate_series_points_supports_estimated_income() {
+        let printer_a = printer_id("printer-a");
+        let printer_b = printer_id("printer-b");
+        let pricing = PricingSettings::default();
+        let store = StatisticsStore {
+            printers: vec![
+                PrinterStatisticsEntry {
+                    printer_id: printer_a.clone(),
+                    poll_samples: vec![StatisticsPollSample {
+                        captured_at: 900,
+                        metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: B/W", 10)],
+                        legacy_total: None,
+                    }],
+                    euro_samples: Vec::new(),
+                },
+                PrinterStatisticsEntry {
+                    printer_id: printer_b.clone(),
+                    poll_samples: vec![StatisticsPollSample {
+                        captured_at: 901,
+                        metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: B/W", 5)],
+                        legacy_total: None,
+                    }],
+                    euro_samples: Vec::new(),
+                },
+            ],
+        };
+        let selected = HashSet::from([printer_a, printer_b]);
+
+        let points = aggregate_series_points(
+            &store,
+            &selected,
+            &pricing,
+            ESTIMATED_INCOME_BW_SERIES_KEY,
+            32,
+        );
+        assert_eq!(points, vec![(901, 300)]);
     }
 
     #[test]

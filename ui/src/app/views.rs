@@ -2109,6 +2109,7 @@ impl PrintCountApp {
         let available = available_series(
             &self.statistics_store,
             &self.statistics_selected_printers,
+            &self.pricing,
         );
         let aggregated_series = available
             .iter()
@@ -2120,6 +2121,7 @@ impl PrintCountApp {
                 points: aggregate_series_points(
                     &self.statistics_store,
                     &self.statistics_selected_printers,
+                    &self.pricing,
                     &definition.key,
                     96,
                 ),
@@ -2463,7 +2465,7 @@ impl PrintCountApp {
     }
 
     fn statistics_series_value_text(&self, series_key: &str, value: u64) -> String {
-        if series_key == RECORDED_EUR_SERIES_KEY {
+        if statistics_series_is_currency_key(series_key) {
             format_cents(value)
         } else {
             format_statistics_number(value)
@@ -2478,7 +2480,7 @@ impl PrintCountApp {
         if !visible_series.is_empty()
             && visible_series
                 .iter()
-                .all(|series| series.key == RECORDED_EUR_SERIES_KEY)
+                .all(|series| statistics_series_is_currency_key(&series.key))
         {
             format_cents(value)
         } else {
@@ -3580,6 +3582,15 @@ fn statistics_series_color(series_key: &str, index: usize) -> Color {
     if series_key == RECORDED_EUR_SERIES_KEY {
         return recording_active_color();
     }
+    if series_key == ESTIMATED_INCOME_SERIES_KEY {
+        return Color::from_rgb(0.25, 0.57, 0.29);
+    }
+    if series_key == ESTIMATED_INCOME_BW_SERIES_KEY {
+        return Color::from_rgb(0.47, 0.63, 0.20);
+    }
+    if series_key == ESTIMATED_INCOME_COLOR_SERIES_KEY {
+        return Color::from_rgb(0.81, 0.54, 0.17);
+    }
 
     const PALETTE: [Color; 6] = [
         Color::from_rgb(0.32, 0.69, 0.86),
@@ -3591,6 +3602,16 @@ fn statistics_series_color(series_key: &str, index: usize) -> Color {
     ];
 
     PALETTE[index % PALETTE.len()]
+}
+
+fn statistics_series_is_currency_key(series_key: &str) -> bool {
+    matches!(
+        series_key,
+        RECORDED_EUR_SERIES_KEY
+            | ESTIMATED_INCOME_SERIES_KEY
+            | ESTIMATED_INCOME_BW_SERIES_KEY
+            | ESTIMATED_INCOME_COLOR_SERIES_KEY
+    )
 }
 
 fn format_statistics_number(value: u64) -> String {

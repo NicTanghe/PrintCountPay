@@ -850,7 +850,11 @@ impl PrintCountApp {
     }
 
     fn sync_statistics_visible_series(&mut self) {
-        let available = available_series(&self.statistics_store, &self.statistics_selected_printers);
+        let available = available_series(
+            &self.statistics_store,
+            &self.statistics_selected_printers,
+            &self.pricing,
+        );
         let available_keys: HashSet<String> = available.iter().map(|series| series.key.clone()).collect();
         self.statistics_visible_series
             .retain(|series_key| available_keys.contains(series_key));
@@ -860,17 +864,26 @@ impl PrintCountApp {
         }
 
         let preferred_labels = [
-            "Clicks: Total",
-            "Recording: Prints B/W",
-            "Recording: Prints Color",
-            "Recording: Copies B/W",
-            "Recording: Copies Color",
+            ESTIMATED_INCOME_SERIES_LABEL,
             RECORDED_EUR_SERIES_LABEL,
+            "Total B/W",
+            "Total Color",
+            "Copies B/W",
+            "Prints B/W",
+            "Copies Color",
+            "Prints Color",
+            ESTIMATED_INCOME_BW_SERIES_LABEL,
+            ESTIMATED_INCOME_COLOR_SERIES_LABEL,
         ];
+        let mut inserted = 0usize;
 
         for preferred_label in preferred_labels {
             if let Some(series) = available.iter().find(|series| series.label == preferred_label) {
                 self.statistics_visible_series.insert(series.key.clone());
+                inserted += 1;
+            }
+            if inserted >= 4 {
+                break;
             }
         }
 
