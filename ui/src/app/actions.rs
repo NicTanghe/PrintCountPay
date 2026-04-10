@@ -341,6 +341,13 @@ impl PrintCountApp {
             .to_string()
     }
 
+    fn default_statistics_path(&self) -> String {
+        Path::new(&self.data_root)
+            .join("statistics.ron")
+            .to_string_lossy()
+            .to_string()
+    }
+
     fn load_printers_if_present(&mut self) {
         let path = self.printers_path.trim();
         if path.is_empty() || !Path::new(path).is_file() {
@@ -389,6 +396,29 @@ impl PrintCountApp {
                 path,
                 error
             ),
+        }
+    }
+
+    fn load_statistics_if_present(&mut self) {
+        let path = self.statistics_path.trim();
+        if path.is_empty() || !Path::new(path).is_file() {
+            self.statistics_path = self.default_statistics_path();
+            return;
+        }
+
+        match load_statistics_store(Path::new(path)) {
+            Ok(store) => {
+                self.statistics_store = store;
+                self.statistics_revision = self.statistics_revision.saturating_add(1);
+            }
+            Err(error) => {
+                tracing::warn!(
+                    target: targets::STORAGE,
+                    "Failed to load statistics store from {}: {}",
+                    path,
+                    error
+                );
+            }
         }
     }
 
@@ -487,6 +517,83 @@ impl PrintCountApp {
                 "Failed to persist manual bill store: {}",
                 error
             ),
+        }
+    }
+
+    fn persist_statistics_store(&self) -> Result<(), String> {
+        let path = self.statistics_path.trim().to_string();
+        if path.is_empty() {
+            return Err("statistics path is empty.".to_string());
+        }
+
+        write_statistics_store(Path::new(&path), &self.statistics_store)
+    }
+
+    fn persist_statistics_store_with_logging(&self) {
+        if let Err(error) = self.persist_statistics_store() {
+            tracing::warn!(
+                target: targets::STORAGE,
+                "Failed to persist statistics store to {}: {}",
+                self.statistics_path,
+                error
+            );
+        }
+    }
+
+    fn mark_statistics_changed(&mut self) {
+        self.statistics_revision = self.statistics_revision.saturating_add(1);
+        self.sync_statistics_visible_series();
+        self.persist_statistics_store_with_logging();
+        self.queue_statistics_cleanup();
+    }
+
+    fn queue_statistics_cleanup(&mut self) {
+        if self.statistics_store.is_empty() {
+            return;
+        }
+
+        if self.statistics_cleanup_in_flight {
+            self.statistics_cleanup_pending_revision = Some(self.statistics_revision);
+            return;
+        }
+
+        self.statistics_cleanup_receiver = Some(spawn_cleanup_worker(
+            self.statistics_store.clone(),
+            self.statistics_revision,
+            now_epoch_seconds(),
+        ));
+        self.statistics_cleanup_in_flight = true;
+        self.statistics_cleanup_pending_revision = None;
+    }
+
+    fn poll_statistics_cleanup(&mut self) {
+        let Some(receiver) = self.statistics_cleanup_receiver.as_ref() else {
+            return;
+        };
+
+        let result = match receiver.try_recv() {
+            Ok(result) => result,
+            Err(mpsc::TryRecvError::Empty) => return,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.statistics_cleanup_receiver = None;
+                self.statistics_cleanup_in_flight = false;
+                if self.statistics_cleanup_pending_revision.take().is_some() {
+                    self.queue_statistics_cleanup();
+                }
+                return;
+            }
+        };
+
+        self.statistics_cleanup_receiver = None;
+        self.statistics_cleanup_in_flight = false;
+
+        if result.revision == self.statistics_revision && result.store != self.statistics_store {
+            self.statistics_store = result.store;
+            self.persist_statistics_store_with_logging();
+        }
+
+        if self.statistics_cleanup_pending_revision.take().is_some() {
+            self.queue_statistics_cleanup();
         }
     }
 
@@ -714,6 +821,75 @@ impl PrintCountApp {
         self.manual_pricing_status = Some(format!("Deleted bill {deleted_id}."));
     }
 
+    fn ensure_statistics_selection(&mut self) {
+        self.statistics_selected_printers
+            .retain(|printer_id| self.printers.iter().any(|record| &record.id == printer_id));
+
+        if !self.statistics_selected_printers.is_empty() {
+            return;
+        }
+
+        let fallback = self
+            .selected_printer
+            .clone()
+            .filter(|printer_id| self.printers.iter().any(|record| &record.id == printer_id))
+            .or_else(|| self.printers.first().map(|record| record.id.clone()));
+
+        if let Some(printer_id) = fallback {
+            self.statistics_selected_printers.insert(printer_id);
+        }
+    }
+
+    fn toggle_statistics_printer(&mut self, printer_id: PrinterId) {
+        if !self.statistics_selected_printers.insert(printer_id.clone()) {
+            self.statistics_selected_printers.remove(&printer_id);
+        }
+        self.statistics_selected_printers
+            .retain(|candidate| self.printers.iter().any(|record| &record.id == candidate));
+        self.sync_statistics_visible_series();
+    }
+
+    fn sync_statistics_visible_series(&mut self) {
+        let available = available_series(&self.statistics_store, &self.statistics_selected_printers);
+        let available_keys: HashSet<String> = available.iter().map(|series| series.key.clone()).collect();
+        self.statistics_visible_series
+            .retain(|series_key| available_keys.contains(series_key));
+
+        if !self.statistics_visible_series.is_empty() || available.is_empty() {
+            return;
+        }
+
+        let preferred_labels = [
+            "Clicks: Total",
+            "Recording: Prints B/W",
+            "Recording: Prints Color",
+            "Recording: Copies B/W",
+            "Recording: Copies Color",
+            RECORDED_EUR_SERIES_LABEL,
+        ];
+
+        for preferred_label in preferred_labels {
+            if let Some(series) = available.iter().find(|series| series.label == preferred_label) {
+                self.statistics_visible_series.insert(series.key.clone());
+            }
+        }
+
+        if self.statistics_visible_series.is_empty() {
+            self.statistics_visible_series.extend(
+                available
+                    .iter()
+                    .take(3)
+                    .map(|series| series.key.clone()),
+            );
+        }
+    }
+
+    fn toggle_statistics_series(&mut self, series_key: String) {
+        if !self.statistics_visible_series.insert(series_key.clone()) {
+            self.statistics_visible_series.remove(&series_key);
+        }
+    }
+
     fn refresh_logs(&mut self) {
         let entries = self.log_store.snapshot();
         for entry in &entries {
@@ -930,15 +1106,61 @@ impl PrintCountApp {
     }
 
     fn start_printer_reorder_drag(&mut self, printer_id: PrinterId) {
-        let Some(source_index) = self.printers.iter().position(|record| record.id == printer_id)
+        self.pending_printer_drag = Some(PendingPrinterReorderDrag {
+            printer_id,
+            pressed_at: Instant::now(),
+        });
+        self.active_printer_drag = None;
+    }
+
+    fn activate_printer_reorder_drag_if_ready(&mut self) {
+        if self.active_printer_drag.is_some() {
+            return;
+        }
+
+        let Some(pending) = self.pending_printer_drag.clone() else {
+            return;
+        };
+
+        if pending.pressed_at.elapsed() < PRINTER_REORDER_HOLD_DURATION {
+            return;
+        }
+
+        let Some(source_index) = self
+            .printers
+            .iter()
+            .position(|record| record.id == pending.printer_id)
         else {
+            self.pending_printer_drag = None;
             return;
         };
 
         self.active_printer_drag = Some(PrinterReorderDrag {
-            printer_id,
+            printer_id: pending.printer_id,
             drop_index: source_index,
         });
+        self.pending_printer_drag = None;
+    }
+
+    fn complete_printer_card_press(&mut self, printer_id: PrinterId) -> Command<Message> {
+        if self.active_printer_drag.is_some() {
+            return Command::none();
+        }
+
+        let Some(pending) = self.pending_printer_drag.as_ref() else {
+            return Command::none();
+        };
+
+        if pending.printer_id != printer_id {
+            return Command::none();
+        }
+
+        self.pending_printer_drag = None;
+        self.manual_pricing_selected = false;
+        self.selected_manual_bill_id = None;
+        self.selected_printer = Some(printer_id.clone());
+        self.apply_profile_for_printer(&printer_id, None);
+        self.poll_selected_printer()
     }
 
     fn hover_printer_reorder_drop(&mut self, drop_index: usize) {
@@ -985,7 +1207,22 @@ impl PrintCountApp {
     }
 
     fn cancel_printer_reorder_drag(&mut self) {
+        self.pending_printer_drag = None;
         self.active_printer_drag = None;
+    }
+
+    fn cancel_pending_printer_reorder(&mut self, printer_id: &PrinterId) {
+        if self.active_printer_drag.is_some() {
+            return;
+        }
+
+        if self
+            .pending_printer_drag
+            .as_ref()
+            .is_some_and(|pending| &pending.printer_id == printer_id)
+        {
+            self.pending_printer_drag = None;
+        }
     }
 
     fn delete_selected_printer(&mut self) {
@@ -1006,14 +1243,18 @@ impl PrintCountApp {
         self.poll_states.remove(&selected);
         self.poll_in_flight.remove(&selected);
         self.recording_sessions.remove(&selected);
+        self.statistics_selected_printers.remove(&selected);
 
         if self.printers.is_empty() {
             self.selected_printer = None;
+            self.statistics_visible_series.clear();
             return;
         }
 
         let new_index = index.min(self.printers.len() - 1);
         self.selected_printer = Some(self.printers[new_index].id.clone());
+        self.ensure_statistics_selection();
+        self.sync_statistics_visible_series();
     }
 
     fn printer_matches_host(printer: &PrinterRecord, host: &str) -> bool {
@@ -1209,6 +1450,7 @@ impl PrintCountApp {
 
     fn replace_printers(&mut self, printers: Vec<PrinterRecord>) {
         let selected = self.selected_printer.clone();
+        self.pending_printer_drag = None;
         self.active_printer_drag = None;
         self.printers = printers;
         self.poll_states.clear();
@@ -1228,6 +1470,10 @@ impl PrintCountApp {
                 self.selected_printer = None;
             }
         }
+        self.statistics_selected_printers
+            .retain(|printer_id| self.printers.iter().any(|record| &record.id == printer_id));
+        self.ensure_statistics_selection();
+        self.sync_statistics_visible_series();
 
         if let Some(selected) = self.selected_printer.clone() {
             self.apply_profile_for_printer(&selected, None);
@@ -1296,6 +1542,7 @@ impl PrintCountApp {
 
         let printer_id_clone = printer_id.clone();
         self.poll_states.insert(printer_id, state);
+        self.sync_statistics_from_poll_state(&printer_id_clone);
         if self.selected_printer.as_ref() == Some(&printer_id_clone) {
             let needs_profile = self
                 .printers
@@ -1307,6 +1554,100 @@ impl PrintCountApp {
                 self.apply_profile_for_printer(&printer_id_clone, sys_descr.as_deref());
             }
         }
+    }
+
+    fn sync_statistics_from_poll_state(&mut self, printer_id: &PrinterId) {
+        let Some((received_at, metrics)) = self.statistics_poll_metrics_for_printer(printer_id) else {
+            return;
+        };
+
+        if append_poll_sample(&mut self.statistics_store, printer_id, received_at, metrics) {
+            self.mark_statistics_changed();
+        }
+    }
+
+    fn statistics_poll_metrics_for_printer(
+        &self,
+        printer_id: &PrinterId,
+    ) -> Option<(u64, Vec<StatisticsPollMetric>)> {
+        let SnmpPollStatus::Ok {
+            received_at,
+            varbinds,
+        } = self.poll_states.get(printer_id)?
+        else {
+            return None;
+        };
+
+        let (counter_oids, recording_settings, profile) = if self.selected_printer.as_ref() == Some(printer_id) {
+            (
+                self.counter_oids.clone(),
+                self.recording_oids.clone(),
+                self.active_profile.clone(),
+            )
+        } else if let Some(profile) = self.profile_for_poll(printer_id) {
+            (
+                profile.counters.clone(),
+                recording_settings_from_profile(&profile.recording),
+                Some(profile),
+            )
+        } else {
+            (
+                default_counter_oids(),
+                default_recording_oid_inputs(),
+                None,
+            )
+        };
+        let label_map = build_poll_label_map(&counter_oids, &recording_settings, profile.as_ref());
+        let metrics = varbinds
+            .iter()
+            .filter_map(|varbind| {
+                let value = varbind.value.as_u64()?;
+                let label = label_map
+                    .get(&varbind.oid)
+                    .cloned()
+                    .unwrap_or_else(|| varbind.oid.to_string());
+                Some(StatisticsPollMetric::new(
+                    varbind.oid.to_string(),
+                    label,
+                    value,
+                ))
+            })
+            .collect::<Vec<_>>();
+
+        (!metrics.is_empty()).then_some((*received_at, metrics))
+    }
+
+    fn schedule_statistics_polls(&mut self) -> Command<Message> {
+        if self.sync_role == SyncRole::Client {
+            return Command::none();
+        }
+
+        let now = now_epoch_seconds();
+        let due_printers: Vec<_> = self
+            .printers
+            .iter()
+            .filter(|record| !self.poll_in_flight.contains(&record.id))
+            .filter(|record| {
+                let last_sample_at = self
+                    .statistics_store
+                    .entry(&record.id)
+                    .and_then(|entry| entry.poll_samples.last())
+                    .map(|sample| sample.captured_at);
+                statistics_poll_due(last_sample_at, now)
+            })
+            .map(|record| record.id.clone())
+            .collect();
+
+        if due_printers.is_empty() {
+            return Command::none();
+        }
+
+        Command::batch(
+            due_printers
+                .into_iter()
+                .map(|printer_id| self.poll_printer(printer_id))
+                .collect::<Vec<_>>(),
+        )
     }
 
     fn poll_selected_printer(&mut self) -> Command<Message> {
@@ -1543,6 +1884,18 @@ impl PrintCountApp {
                 session.end = Some(snapshot.clone());
                 session.edits.apply_end_snapshot(&snapshot);
                 session.status = None;
+                let euro_sample = recording_session_total_cents(session, None, &self.pricing)
+                    .map(|total_cents| (snapshot.received_at, total_cents));
+                if let Some((captured_at, total_cents)) = euro_sample
+                    && append_euro_sample(
+                        &mut self.statistics_store,
+                        &printer_id,
+                        captured_at,
+                        total_cents,
+                    )
+                {
+                    self.mark_statistics_changed();
+                }
             }
             Err(error) => {
                 session.status = Some(format!("Stop failed: {error}"));
@@ -2080,6 +2433,8 @@ impl PrintCountApp {
     fn apply_shared_state(&mut self, snapshot: SharedState) {
         let selected = self.selected_printer.clone();
         let selected_manual_bill_id = self.selected_manual_bill_id.clone();
+        let pending_printer_drag = self.pending_printer_drag.clone();
+        let active_printer_drag = self.active_printer_drag.clone();
         let SharedState {
             revision,
             printers,
@@ -2091,7 +2446,6 @@ impl PrintCountApp {
             manual_bill_tombstones,
         } = snapshot;
 
-        self.active_printer_drag = None;
         self.printers = printers;
         self.pricing = pricing;
         if bill_sync_supported {
@@ -2112,6 +2466,14 @@ impl PrintCountApp {
         }
 
         let known_ids: HashSet<PrinterId> = self.printers.iter().map(|record| record.id.clone()).collect();
+        self.pending_printer_drag =
+            pending_printer_drag.filter(|pending| known_ids.contains(&pending.printer_id));
+        self.active_printer_drag = active_printer_drag
+            .filter(|drag| known_ids.contains(&drag.printer_id))
+            .map(|mut drag| {
+                drag.drop_index = drag.drop_index.min(self.printers.len());
+                drag
+            });
         self.recording_sessions = recording_sessions
             .into_iter()
             .filter(|entry| known_ids.contains(&entry.printer_id))
@@ -2127,12 +2489,19 @@ impl PrintCountApp {
             })
             .collect();
         self.poll_in_flight.retain(|printer_id| known_ids.contains(printer_id));
+        self.statistics_selected_printers
+            .retain(|printer_id| known_ids.contains(printer_id));
 
         self.selected_printer = selected.filter(|printer_id| known_ids.contains(printer_id));
         if bill_sync_supported {
             self.selected_manual_bill_id = selected_manual_bill_id;
             self.sync_selected_manual_bill();
         }
+        for printer_id in &known_ids {
+            self.sync_statistics_from_poll_state(printer_id);
+        }
+        self.ensure_statistics_selection();
+        self.sync_statistics_visible_series();
         if let Some(selected) = self.selected_printer.clone() {
             self.apply_profile_for_printer(&selected, None);
         } else {
@@ -2290,6 +2659,10 @@ mod tests {
         ]);
 
         app.start_printer_reorder_drag(printer_a.id.clone());
+        if let Some(pending) = app.pending_printer_drag.as_mut() {
+            pending.pressed_at = Instant::now() - PRINTER_REORDER_HOLD_DURATION;
+        }
+        app.activate_printer_reorder_drag_if_ready();
         app.hover_printer_reorder_drop(3);
 
         assert!(app.finish_printer_reorder_drag());
@@ -2300,6 +2673,86 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["printer-b", "printer-c", "printer-a"]
         );
+    }
+
+    #[test]
+    fn printer_reorder_requires_hold_before_drag_activates() {
+        let mut app = test_app();
+        let printer_a = printer_record_with_id("printer-a");
+
+        app.replace_printers(vec![printer_a.clone()]);
+        app.start_printer_reorder_drag(printer_a.id.clone());
+        app.activate_printer_reorder_drag_if_ready();
+
+        assert!(app.pending_printer_drag.is_some());
+        assert!(app.active_printer_drag.is_none());
+
+        if let Some(pending) = app.pending_printer_drag.as_mut() {
+            pending.pressed_at = Instant::now() - PRINTER_REORDER_HOLD_DURATION;
+        }
+        app.activate_printer_reorder_drag_if_ready();
+
+        assert!(app.pending_printer_drag.is_none());
+        assert_eq!(
+            app.active_printer_drag
+                .as_ref()
+                .map(|drag| drag.printer_id.to_string()),
+            Some("printer-a".to_string())
+        );
+    }
+
+    #[test]
+    fn complete_printer_card_press_selects_printer_when_hold_not_reached() {
+        let mut app = test_app();
+        let printer_a = printer_record_with_id("printer-a");
+
+        app.replace_printers(vec![printer_a.clone()]);
+        let _ = app.complete_printer_card_press(printer_a.id.clone());
+        assert!(app.selected_printer.is_none());
+
+        app.start_printer_reorder_drag(printer_a.id.clone());
+        let _ = app.complete_printer_card_press(printer_a.id.clone());
+
+        assert_eq!(app.selected_printer, Some(printer_a.id));
+        assert!(app.pending_printer_drag.is_none());
+        assert!(app.active_printer_drag.is_none());
+    }
+
+    #[test]
+    fn apply_shared_state_preserves_pending_drag_for_known_printer() {
+        let mut app = test_app();
+        let printer_a = printer_record_with_id("printer-a");
+        let printer_b = printer_record_with_id("printer-b");
+
+        app.replace_printers(vec![printer_a.clone(), printer_b.clone()]);
+        app.start_printer_reorder_drag(printer_a.id.clone());
+        app.apply_shared_state(sync::SharedState {
+            revision: 2,
+            printers: vec![printer_b.clone(), printer_a.clone()],
+            poll_states: vec![
+                sync::PollStateEntry {
+                    printer_id: printer_b.id.clone(),
+                    state: SnmpPollStatus::Idle,
+                },
+                sync::PollStateEntry {
+                    printer_id: printer_a.id.clone(),
+                    state: SnmpPollStatus::Idle,
+                },
+            ],
+            recording_sessions: Vec::new(),
+            pricing: app.pricing.clone(),
+            bill_sync_supported: false,
+            manual_bills: Vec::new(),
+            manual_bill_tombstones: Vec::new(),
+        });
+
+        assert_eq!(
+            app.pending_printer_drag
+                .as_ref()
+                .map(|pending| pending.printer_id.to_string()),
+            Some("printer-a".to_string())
+        );
+        assert!(app.active_printer_drag.is_none());
     }
 
     #[test]
@@ -2903,5 +3356,108 @@ mod tests {
         assert!(session.active);
         assert_eq!(session.start.as_ref().and_then(|snapshot| snapshot.bw_printer), Some(456));
         assert_eq!(session.edits.prints_bw.start_input, "456");
+    }
+
+    #[test]
+    fn sync_statistics_from_poll_state_stores_total_counter_once_per_bucket() {
+        let mut app = test_app();
+        let root = temp_test_dir("statistics-poll");
+        fs::create_dir_all(&root).expect("create temp root");
+        app.statistics_path = root.join("statistics.ron").to_string_lossy().to_string();
+
+        let record = printer_record(PrinterStatus::Online, Some(123));
+        let printer_id = record.id.clone();
+        let total_oid = Oid::from_slice(&PRT_MARKER_LIFECOUNT_3);
+        app.replace_printers(vec![record]);
+
+        app.poll_states.insert(
+            printer_id.clone(),
+            SnmpPollStatus::Ok {
+                received_at: 900,
+                varbinds: vec![SnmpVarBind {
+                    oid: total_oid.clone(),
+                    value: printcountpay_core::SnmpValue::Counter32(111),
+                }],
+            },
+        );
+        app.sync_statistics_from_poll_state(&printer_id);
+
+        app.poll_states.insert(
+            printer_id.clone(),
+            SnmpPollStatus::Ok {
+                received_at: 905,
+                varbinds: vec![SnmpVarBind {
+                    oid: total_oid,
+                    value: printcountpay_core::SnmpValue::Counter32(222),
+                }],
+            },
+        );
+        app.sync_statistics_from_poll_state(&printer_id);
+
+        let entry = app
+            .statistics_store
+            .entry(&printer_id)
+            .expect("statistics entry");
+        assert_eq!(entry.poll_samples.len(), 1);
+        assert_eq!(entry.poll_samples[0].metrics.len(), 1);
+        assert_eq!(entry.poll_samples[0].metrics[0].label, "Clicks: Total");
+        assert_eq!(entry.poll_samples[0].metrics[0].value, 111);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stop_recording_stores_euro_statistics_sample() {
+        let mut app = test_app();
+        let root = temp_test_dir("statistics-euro");
+        fs::create_dir_all(&root).expect("create temp root");
+        app.statistics_path = root.join("statistics.ron").to_string_lossy().to_string();
+
+        let record = printer_record(PrinterStatus::Online, Some(123));
+        let printer_id = record.id.clone();
+        app.replace_printers(vec![record]);
+        app.selected_printer = Some(printer_id.clone());
+        app.pricing.bw_first_input = "0.25".to_string();
+        app.pricing.bw_next_input = "0.10".to_string();
+        app.pricing.bw_rest_input = "0.06".to_string();
+        app.pricing.color_input = "0.50".to_string();
+        app.recording_sessions.insert(
+            printer_id.clone(),
+            RecordingSession {
+                active: true,
+                start: Some(RecordingSnapshot {
+                    received_at: 100,
+                    bw_printer: Some(100),
+                    bw_copier: None,
+                    color_printer: None,
+                    color_copier: None,
+                }),
+                end: None,
+                status: None,
+                end_fields_unlocked: false,
+                edits: RecordingEdits::default(),
+            },
+        );
+        app.poll_states.insert(
+            printer_id.clone(),
+            SnmpPollStatus::Ok {
+                received_at: 200,
+                varbinds: vec![SnmpVarBind {
+                    oid: Oid::from_slice(&RICOH_BW_PRINTER_COUNT_OID),
+                    value: printcountpay_core::SnmpValue::Counter32(110),
+                }],
+            },
+        );
+
+        app.stop_recording();
+
+        let entry = app
+            .statistics_store
+            .entry(&printer_id)
+            .expect("statistics entry");
+        assert_eq!(entry.euro_samples.len(), 1);
+        assert_eq!(entry.euro_samples[0].total_cents, 175);
+
+        let _ = fs::remove_dir_all(root);
     }
 }

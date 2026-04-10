@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::Path;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::mpsc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use iced::alignment::Horizontal;
 use iced::keyboard;
@@ -28,6 +29,7 @@ mod constants;
 mod helpers;
 mod paths;
 mod profiles;
+mod statistics;
 mod styles;
 mod types;
 
@@ -43,11 +45,12 @@ pub(crate) use types::{
     SnmpPollStatus,
 };
 
-use badge_overlay::BadgeOverlay;
+use badge_overlay::{BadgeOverlay, OverlayPosition};
 use constants::*;
 use helpers::*;
 use paths::*;
 use profiles::*;
+use statistics::*;
 use styles::*;
 use types::*;
 
@@ -62,6 +65,15 @@ fn merge_status_messages(primary: Option<String>, secondary: Option<String>) -> 
 
 fn display_path(path: &Path) -> String {
     path.to_string_lossy().to_string()
+}
+
+const PRINTER_REORDER_HOLD_TICK: Duration = Duration::from_millis(50);
+const PRINTER_REORDER_HOLD_DURATION: Duration = Duration::from_millis(700);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingPrinterReorderDrag {
+    printer_id: PrinterId,
+    pressed_at: Instant,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,9 +115,18 @@ pub struct PrintCountApp {
     last_manual_pricing_sync_id: Option<String>,
     printers_path: String,
     printers_status: Option<String>,
+    statistics_path: String,
+    statistics_store: StatisticsStore,
     printers: Vec<PrinterRecord>,
+    pending_printer_drag: Option<PendingPrinterReorderDrag>,
     active_printer_drag: Option<PrinterReorderDrag>,
     selected_printer: Option<PrinterId>,
+    statistics_selected_printers: HashSet<PrinterId>,
+    statistics_visible_series: HashSet<String>,
+    statistics_revision: u64,
+    statistics_cleanup_in_flight: bool,
+    statistics_cleanup_pending_revision: Option<u64>,
+    statistics_cleanup_receiver: Option<mpsc::Receiver<StatisticsCleanupResult>>,
     manual_pricing_selected: bool,
     selected_manual_bill_id: Option<String>,
     manual_pricing_tab: ManualPricingTab,
@@ -161,6 +182,7 @@ impl PrintCountApp {
             poll_export_file,
             status: path_status,
         } = resolve_app_paths();
+        let statistics_file = data_root.join("statistics.ron");
         let data_root = display_path(&data_root);
         let profiles_root = display_path(&profiles_root);
         let (profile_index, profile_status) = load_profile_index(Path::new(&profiles_root));
@@ -213,9 +235,18 @@ impl PrintCountApp {
             last_manual_pricing_sync_id: None,
             printers_path: display_path(&printers_file),
             printers_status: None,
+            statistics_path: display_path(&statistics_file),
+            statistics_store: StatisticsStore::default(),
             printers,
+            pending_printer_drag: None,
             active_printer_drag: None,
             selected_printer: None,
+            statistics_selected_printers: HashSet::new(),
+            statistics_visible_series: HashSet::new(),
+            statistics_revision: 0,
+            statistics_cleanup_in_flight: false,
+            statistics_cleanup_pending_revision: None,
+            statistics_cleanup_receiver: None,
             manual_pricing_selected: false,
             selected_manual_bill_id: None,
             manual_pricing_tab: ManualPricingTab::Calculator,
@@ -257,6 +288,10 @@ impl PrintCountApp {
         app.manual_pricing_path = app.default_manual_pricing_path();
         app.load_manual_pricing_if_present();
         app.load_manual_bill_store_if_present();
+        app.load_statistics_if_present();
+        app.ensure_statistics_selection();
+        app.sync_statistics_visible_series();
+        app.queue_statistics_cleanup();
         app.persist_manual_bill_store_if_dirty();
         app.last_shared_state = app.build_shared_state(app.last_shared_state.revision);
 
@@ -277,11 +312,18 @@ impl PrintCountApp {
                 self.flush_shared_state();
                 Command::none()
             }
+            Message::StatisticsPollTick => self.schedule_statistics_polls(),
+            Message::StatisticsCleanupTick => {
+                self.poll_statistics_cleanup();
+                Command::none()
+            }
             Message::SyncEvent(event) => self.handle_sync_event(event),
             Message::ToggleAdvancedMode => {
                 self.advanced_mode = !self.advanced_mode;
                 if !self.advanced_mode {
-                    self.active_tab = Tab::Printers;
+                    if self.active_tab == Tab::Debug {
+                        self.active_tab = Tab::Printers;
+                    }
                     if !matches!(
                         self.printer_tab,
                         PrinterTab::Recording | PrinterTab::Pricing
@@ -361,8 +403,12 @@ impl PrintCountApp {
             }
             Message::DiscoveryProbeFinished(result) => self.handle_discovery_result(result),
             Message::SelectTab(tab) => {
-                if self.advanced_mode || tab == Tab::Printers {
+                if self.advanced_mode || tab != Tab::Debug {
                     self.active_tab = tab;
+                    if tab == Tab::Statistics {
+                        self.ensure_statistics_selection();
+                        self.sync_statistics_visible_series();
+                    }
                 }
                 Command::none()
             }
@@ -396,9 +442,24 @@ impl PrintCountApp {
                 self.apply_profile_for_printer(&printer_id, None);
                 self.poll_selected_printer()
             }
+            Message::ToggleStatisticsPrinter(printer_id) => {
+                self.toggle_statistics_printer(printer_id);
+                Command::none()
+            }
+            Message::ToggleStatisticsSeries(series_key) => {
+                self.toggle_statistics_series(series_key);
+                Command::none()
+            }
             Message::StartPrinterReorderDrag(printer_id) => {
                 self.start_printer_reorder_drag(printer_id);
                 Command::none()
+            }
+            Message::PrinterReorderHoldTick => {
+                self.activate_printer_reorder_drag_if_ready();
+                Command::none()
+            }
+            Message::CompletePrinterCardPress(printer_id) => {
+                self.complete_printer_card_press(printer_id)
             }
             Message::HoverPrinterReorderDrop(drop_index) => {
                 self.hover_printer_reorder_drop(drop_index);
@@ -410,6 +471,10 @@ impl PrintCountApp {
             }
             Message::CancelPrinterReorderDrag => {
                 self.cancel_printer_reorder_drag();
+                Command::none()
+            }
+            Message::CancelPendingPrinterReorder(printer_id) => {
+                self.cancel_pending_printer_reorder(&printer_id);
                 Command::none()
             }
             Message::ProfileChoiceChanged(choice) => {
@@ -839,7 +904,13 @@ impl PrintCountApp {
         let log_tick = iced::time::every(Duration::from_millis(250)).map(|_| Message::LogTick);
         let poll_tick =
             iced::time::every(Duration::from_secs(5)).map(|_| Message::PollSelectedSnmp);
+        let statistics_poll_tick =
+            iced::time::every(STATISTICS_POLL_TICK).map(|_| Message::StatisticsPollTick);
+        let statistics_cleanup_tick =
+            iced::time::every(STATISTICS_CLEANUP_TICK).map(|_| Message::StatisticsCleanupTick);
         let sync_tick = iced::time::every(sync::SYNC_FLUSH_INTERVAL).map(|_| Message::SyncTick);
+        let reorder_hold_tick =
+            iced::time::every(PRINTER_REORDER_HOLD_TICK).map(|_| Message::PrinterReorderHoldTick);
         let sync_subscription = sync::subscription().map(Message::SyncEvent);
         let global_events = iced::event::listen_with(|event, _status, _window| match event {
             iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
@@ -857,7 +928,10 @@ impl PrintCountApp {
         Subscription::batch(vec![
             log_tick,
             poll_tick,
+            statistics_poll_tick,
+            statistics_cleanup_tick,
             sync_tick,
+            reorder_hold_tick,
             sync_subscription,
             global_events,
         ])
@@ -867,7 +941,9 @@ impl PrintCountApp {
         let sidebar = container(self.printer_list_view())
             .width(Length::Fixed(367.0))
             .height(Length::Fill);
-        let main_content = if self.advanced_mode && self.active_tab == Tab::Debug {
+        let main_content = if self.active_tab == Tab::Statistics {
+            self.statistics_view()
+        } else if self.advanced_mode && self.active_tab == Tab::Debug {
             self.debug_tab_view()
         } else if self.manual_pricing_selected {
             self.manual_pricing_panel_view()
@@ -890,11 +966,21 @@ impl PrintCountApp {
             .width(Length::Fill)
             .height(Length::Fill);
 
-        let shell = container(content)
+        let shell: Element<'_, Message> = container(content)
             .width(Length::Fill)
             .height(Length::Fill)
             .clip(true)
-            .style(theme::Container::Custom(window_shell_style()));
+            .style(theme::Container::Custom(window_shell_style()))
+            .into();
+
+        let shell = if self.statistics_cleanup_in_flight {
+            BadgeOverlay::new(shell, self.statistics_cleanup_indicator(), true)
+                .position(OverlayPosition::BottomLeft)
+                .margin(10.0)
+                .into()
+        } else {
+            shell
+        };
 
         container(shell)
             .padding(12)

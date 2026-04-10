@@ -1,0 +1,735 @@
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::fs;
+use std::path::Path;
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
+
+use printcountpay_core::PrinterId;
+use ron::de::from_str;
+use ron::ser::{PrettyConfig, to_string_pretty};
+use serde::{Deserialize, Serialize};
+use time::{OffsetDateTime, UtcOffset};
+
+pub(crate) const STATISTICS_POLL_TICK: Duration = Duration::from_secs(60);
+pub(crate) const STATISTICS_CLEANUP_TICK: Duration = Duration::from_millis(250);
+pub(crate) const STATISTICS_BUCKET_SECS: u64 = 15 * 60;
+pub(crate) const RECORDED_EUR_SERIES_KEY: &str = "series:recorded-eur";
+pub(crate) const RECORDED_EUR_SERIES_LABEL: &str = "Recorded EUR";
+
+const RECENT_RETENTION_SECS: u64 = 2 * 24 * 60 * 60;
+const BUSINESS_START_MINUTES: u16 = 10 * 60 + 45;
+const BUSINESS_END_MINUTES: u16 = 18 * 60 + 45;
+const RECORDING_POINTS_PER_DAY: usize = 4;
+const LEGACY_TOTAL_SERIES_LABEL: &str = "Clicks: Total";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct StatisticsPollMetric {
+    pub(crate) oid: String,
+    #[serde(default)]
+    pub(crate) series_key: String,
+    #[serde(default)]
+    pub(crate) label: String,
+    pub(crate) value: u64,
+}
+
+impl StatisticsPollMetric {
+    pub(crate) fn new(oid: impl Into<String>, label: impl Into<String>, value: u64) -> Self {
+        let oid = oid.into();
+        let label = label.into();
+        Self {
+            series_key: metric_series_key(&oid, &label),
+            oid,
+            label,
+            value,
+        }
+    }
+
+    fn normalize(&mut self) {
+        self.oid = self.oid.trim().to_string();
+        self.label = self.label.trim().to_string();
+        self.series_key = metric_series_key(&self.oid, &self.label);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct StatisticsPollSample {
+    pub(crate) captured_at: u64,
+    #[serde(default)]
+    pub(crate) metrics: Vec<StatisticsPollMetric>,
+    #[serde(default, rename = "total", skip_serializing_if = "Option::is_none")]
+    legacy_total: Option<u64>,
+}
+
+impl StatisticsPollSample {
+    fn normalize(&mut self) {
+        if self.metrics.is_empty() {
+            if let Some(total) = self.legacy_total.take() {
+                self.metrics.push(StatisticsPollMetric::new(
+                    "legacy-total",
+                    LEGACY_TOTAL_SERIES_LABEL,
+                    total,
+                ));
+            }
+        } else {
+            self.legacy_total = None;
+        }
+
+        for metric in &mut self.metrics {
+            metric.normalize();
+        }
+
+        self.metrics.sort_by(|left, right| {
+            left.series_key
+                .cmp(&right.series_key)
+                .then_with(|| left.oid.cmp(&right.oid))
+        });
+        self.metrics.dedup_by(|right, left| {
+            right.series_key == left.series_key && right.oid == left.oid && right.value == left.value
+        });
+        self.metrics.retain(|metric| !metric.oid.is_empty());
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct StatisticsEuroSample {
+    pub(crate) captured_at: u64,
+    pub(crate) total_cents: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct PrinterStatisticsEntry {
+    pub(crate) printer_id: PrinterId,
+    #[serde(default)]
+    pub(crate) poll_samples: Vec<StatisticsPollSample>,
+    #[serde(default)]
+    pub(crate) euro_samples: Vec<StatisticsEuroSample>,
+}
+
+impl Default for PrinterStatisticsEntry {
+    fn default() -> Self {
+        Self {
+            printer_id: PrinterId::new(""),
+            poll_samples: Vec::new(),
+            euro_samples: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct StatisticsStore {
+    #[serde(default)]
+    pub(crate) printers: Vec<PrinterStatisticsEntry>,
+}
+
+impl StatisticsStore {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.printers
+            .iter()
+            .all(|entry| entry.poll_samples.is_empty() && entry.euro_samples.is_empty())
+    }
+
+    pub(crate) fn entry(&self, printer_id: &PrinterId) -> Option<&PrinterStatisticsEntry> {
+        self.printers.iter().find(|entry| &entry.printer_id == printer_id)
+    }
+
+    fn entry_mut(&mut self, printer_id: &PrinterId) -> &mut PrinterStatisticsEntry {
+        if let Some(index) = self
+            .printers
+            .iter()
+            .position(|entry| &entry.printer_id == printer_id)
+        {
+            return &mut self.printers[index];
+        }
+
+        self.printers.push(PrinterStatisticsEntry {
+            printer_id: printer_id.clone(),
+            ..PrinterStatisticsEntry::default()
+        });
+        self.printers
+            .last_mut()
+            .expect("statistics entry should exist after insert")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StatisticsCleanupResult {
+    pub(crate) revision: u64,
+    pub(crate) store: StatisticsStore,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StatisticsSeriesDefinition {
+    pub(crate) key: String,
+    pub(crate) label: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct DayKey {
+    year: i32,
+    ordinal: u16,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AggregatedPoint {
+    timestamp: u64,
+    value: u64,
+}
+
+pub(crate) fn load_statistics_store(path: &Path) -> Result<StatisticsStore, String> {
+    let contents =
+        fs::read_to_string(path).map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+    let mut store =
+        from_str::<StatisticsStore>(&contents).map_err(|error| format!("Failed to parse {}: {error}", path.display()))?;
+    normalize_statistics_store(&mut store);
+    Ok(store)
+}
+
+pub(crate) fn write_statistics_store(path: &Path, store: &StatisticsStore) -> Result<(), String> {
+    let mut store = store.clone();
+    normalize_statistics_store(&mut store);
+
+    let contents = to_string_pretty(&store, PrettyConfig::new()).map_err(|error| error.to_string())?;
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Failed to prepare {}: {error}", parent.display()))?;
+    }
+
+    fs::write(path, contents).map_err(|error| format!("Failed to write {}: {error}", path.display()))
+}
+
+pub(crate) fn statistics_bucket(epoch_seconds: u64) -> u64 {
+    epoch_seconds / STATISTICS_BUCKET_SECS
+}
+
+pub(crate) fn statistics_poll_due(last_sample_at: Option<u64>, now: u64) -> bool {
+    last_sample_at
+        .map(|sample_at| statistics_bucket(sample_at) != statistics_bucket(now))
+        .unwrap_or(true)
+}
+
+pub(crate) fn metric_series_key(oid: &str, label: &str) -> String {
+    let label = label.trim();
+    if label.is_empty() {
+        format!("oid:{oid}")
+    } else {
+        format!("label:{label}")
+    }
+}
+
+pub(crate) fn append_poll_sample(
+    store: &mut StatisticsStore,
+    printer_id: &PrinterId,
+    captured_at: u64,
+    metrics: Vec<StatisticsPollMetric>,
+) -> bool {
+    let entry = store.entry_mut(printer_id);
+    if let Some(last) = entry.poll_samples.last() {
+        if statistics_bucket(last.captured_at) == statistics_bucket(captured_at) {
+            return false;
+        }
+    }
+
+    entry.poll_samples.push(StatisticsPollSample {
+        captured_at,
+        metrics,
+        legacy_total: None,
+    });
+    true
+}
+
+pub(crate) fn append_euro_sample(
+    store: &mut StatisticsStore,
+    printer_id: &PrinterId,
+    captured_at: u64,
+    total_cents: u64,
+) -> bool {
+    let entry = store.entry_mut(printer_id);
+    if entry
+        .euro_samples
+        .last()
+        .is_some_and(|last| last.captured_at == captured_at && last.total_cents == total_cents)
+    {
+        return false;
+    }
+
+    entry.euro_samples.push(StatisticsEuroSample {
+        captured_at,
+        total_cents,
+    });
+    true
+}
+
+pub(crate) fn spawn_cleanup_worker(
+    store: StatisticsStore,
+    revision: u64,
+    now: u64,
+) -> mpsc::Receiver<StatisticsCleanupResult> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let cleaned = clean_statistics_store(store, now);
+        let _ = sender.send(StatisticsCleanupResult {
+            revision,
+            store: cleaned,
+        });
+    });
+    receiver
+}
+
+pub(crate) fn available_series(
+    store: &StatisticsStore,
+    selected_printers: &HashSet<PrinterId>,
+) -> Vec<StatisticsSeriesDefinition> {
+    let mut seen = BTreeSet::new();
+    let mut series = Vec::new();
+
+    for entry in store
+        .printers
+        .iter()
+        .filter(|entry| selected_printers.contains(&entry.printer_id))
+    {
+        for sample in &entry.poll_samples {
+            for metric in &sample.metrics {
+                if seen.insert(metric.series_key.clone()) {
+                    series.push(StatisticsSeriesDefinition {
+                        key: metric.series_key.clone(),
+                        label: display_label_for_metric(metric),
+                    });
+                }
+            }
+        }
+
+        if !entry.euro_samples.is_empty() && seen.insert(RECORDED_EUR_SERIES_KEY.to_string()) {
+            series.push(StatisticsSeriesDefinition {
+                key: RECORDED_EUR_SERIES_KEY.to_string(),
+                label: RECORDED_EUR_SERIES_LABEL.to_string(),
+            });
+        }
+    }
+
+    series.sort_by(|left, right| left.label.cmp(&right.label).then_with(|| left.key.cmp(&right.key)));
+    series
+}
+
+pub(crate) fn aggregate_series_points(
+    store: &StatisticsStore,
+    selected_printers: &HashSet<PrinterId>,
+    series_key: &str,
+    max_points: usize,
+) -> Vec<(u64, u64)> {
+    let mut buckets = BTreeMap::<u64, AggregatedPoint>::new();
+
+    for entry in store
+        .printers
+        .iter()
+        .filter(|entry| selected_printers.contains(&entry.printer_id))
+    {
+        if series_key == RECORDED_EUR_SERIES_KEY {
+            for sample in &entry.euro_samples {
+                let bucket = statistics_bucket(sample.captured_at);
+                let point = buckets.entry(bucket).or_insert(AggregatedPoint {
+                    timestamp: sample.captured_at,
+                    value: 0,
+                });
+                point.timestamp = point.timestamp.max(sample.captured_at);
+                point.value = point.value.saturating_add(sample.total_cents);
+            }
+            continue;
+        }
+
+        for sample in &entry.poll_samples {
+            let mut sample_total = 0u64;
+            let mut matched = false;
+            for metric in &sample.metrics {
+                if metric.series_key == series_key {
+                    matched = true;
+                    sample_total = sample_total.saturating_add(metric.value);
+                }
+            }
+
+            if !matched {
+                continue;
+            }
+
+            let bucket = statistics_bucket(sample.captured_at);
+            let point = buckets.entry(bucket).or_insert(AggregatedPoint {
+                timestamp: sample.captured_at,
+                value: 0,
+            });
+            point.timestamp = point.timestamp.max(sample.captured_at);
+            point.value = point.value.saturating_add(sample_total);
+        }
+    }
+
+    compress_points(
+        buckets
+            .into_values()
+            .map(|point| (point.timestamp, point.value))
+            .collect::<Vec<_>>(),
+        max_points,
+    )
+}
+
+pub(crate) fn normalize_statistics_store(store: &mut StatisticsStore) {
+    for entry in &mut store.printers {
+        for sample in &mut entry.poll_samples {
+            sample.normalize();
+        }
+
+        entry
+            .poll_samples
+            .sort_by(|left, right| left.captured_at.cmp(&right.captured_at));
+        entry.poll_samples.retain(|sample| !sample.metrics.is_empty());
+
+        entry
+            .euro_samples
+            .sort_by(|left, right| left.captured_at.cmp(&right.captured_at));
+        entry.euro_samples.dedup_by(|right, left| {
+            right.captured_at == left.captured_at && right.total_cents == left.total_cents
+        });
+    }
+
+    store.printers.sort_by(|left, right| left.printer_id.0.cmp(&right.printer_id.0));
+    store.printers.retain(|entry| {
+        !(entry.printer_id.0.trim().is_empty()
+            || (entry.poll_samples.is_empty() && entry.euro_samples.is_empty()))
+    });
+}
+
+fn clean_statistics_store(mut store: StatisticsStore, now: u64) -> StatisticsStore {
+    let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
+    for entry in &mut store.printers {
+        clean_poll_samples(&mut entry.poll_samples, now, offset);
+        clean_euro_samples(&mut entry.euro_samples, now, offset);
+    }
+    normalize_statistics_store(&mut store);
+    store
+}
+
+fn clean_poll_samples(samples: &mut Vec<StatisticsPollSample>, now: u64, offset: UtcOffset) {
+    let cutoff = now.saturating_sub(RECENT_RETENTION_SECS);
+    samples.retain(|sample| {
+        sample.captured_at >= cutoff || within_business_hours(sample.captured_at, offset)
+    });
+}
+
+fn clean_euro_samples(samples: &mut Vec<StatisticsEuroSample>, now: u64, offset: UtcOffset) {
+    let cutoff = now.saturating_sub(RECENT_RETENTION_SECS);
+    let mut recent = Vec::new();
+    let mut older_by_day: BTreeMap<DayKey, Vec<StatisticsEuroSample>> = BTreeMap::new();
+
+    for sample in samples.drain(..) {
+        if sample.captured_at >= cutoff {
+            recent.push(sample);
+            continue;
+        }
+
+        if let Some(day_key) = day_key(sample.captured_at, offset) {
+            older_by_day.entry(day_key).or_default().push(sample);
+        }
+    }
+
+    for (_, day_samples) in &mut older_by_day {
+        day_samples.sort_by(|left, right| left.captured_at.cmp(&right.captured_at));
+    }
+
+    let mut cleaned = recent;
+    for (_, day_samples) in older_by_day {
+        cleaned.extend(select_representative_euro_samples(
+            &day_samples,
+            RECORDING_POINTS_PER_DAY,
+        ));
+    }
+
+    *samples = cleaned;
+}
+
+fn compress_points(points: Vec<(u64, u64)>, max_points: usize) -> Vec<(u64, u64)> {
+    if max_points == 0 || points.is_empty() {
+        return Vec::new();
+    }
+    if points.len() <= max_points {
+        return points;
+    }
+
+    let bucket_size = (points.len() + max_points - 1) / max_points;
+    let mut buckets = Vec::new();
+    for chunk in points.chunks(bucket_size) {
+        if let Some((timestamp, value)) = chunk.last().copied() {
+            buckets.push((timestamp, value));
+        }
+    }
+    buckets
+}
+
+fn select_representative_euro_samples(
+    samples: &[StatisticsEuroSample],
+    max_points: usize,
+) -> Vec<StatisticsEuroSample> {
+    if samples.len() <= max_points {
+        return samples.to_vec();
+    }
+    if max_points == 0 {
+        return Vec::new();
+    }
+    if max_points == 1 {
+        return samples
+            .first()
+            .cloned()
+            .into_iter()
+            .collect::<Vec<StatisticsEuroSample>>();
+    }
+
+    let last_index = samples.len() - 1;
+    let mut selected = Vec::new();
+    let mut last_pushed = None::<usize>;
+
+    for slot in 0..max_points {
+        let index = ((slot * last_index) + (max_points - 1) / 2) / (max_points - 1);
+        if last_pushed == Some(index) {
+            continue;
+        }
+        selected.push(samples[index].clone());
+        last_pushed = Some(index);
+    }
+
+    selected
+}
+
+fn display_label_for_metric(metric: &StatisticsPollMetric) -> String {
+    if metric.label.trim().is_empty() {
+        metric.oid.clone()
+    } else {
+        metric.label.clone()
+    }
+}
+
+fn within_business_hours(epoch_seconds: u64, offset: UtcOffset) -> bool {
+    let Some(minutes) = minutes_since_midnight(epoch_seconds, offset) else {
+        return false;
+    };
+    (BUSINESS_START_MINUTES..=BUSINESS_END_MINUTES).contains(&minutes)
+}
+
+fn minutes_since_midnight(epoch_seconds: u64, offset: UtcOffset) -> Option<u16> {
+    let datetime = local_datetime(epoch_seconds, offset)?;
+    let hour = u16::from(datetime.hour());
+    let minute = u16::from(datetime.minute());
+    Some(hour * 60 + minute)
+}
+
+fn day_key(epoch_seconds: u64, offset: UtcOffset) -> Option<DayKey> {
+    let datetime = local_datetime(epoch_seconds, offset)?;
+    Some(DayKey {
+        year: datetime.year(),
+        ordinal: datetime.ordinal(),
+    })
+}
+
+fn local_datetime(epoch_seconds: u64, offset: UtcOffset) -> Option<OffsetDateTime> {
+    if epoch_seconds > i64::MAX as u64 {
+        return None;
+    }
+
+    OffsetDateTime::from_unix_timestamp(epoch_seconds as i64)
+        .ok()
+        .map(|datetime| datetime.to_offset(offset))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn printer_id(value: &str) -> PrinterId {
+        PrinterId::new(value)
+    }
+
+    #[test]
+    fn poll_sample_only_saves_once_per_bucket() {
+        let mut store = StatisticsStore::default();
+        let printer_id = printer_id("printer-a");
+        let metrics = vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 100)];
+
+        assert!(append_poll_sample(&mut store, &printer_id, 900, metrics.clone()));
+        assert!(!append_poll_sample(&mut store, &printer_id, 905, metrics.clone()));
+        assert!(append_poll_sample(&mut store, &printer_id, 1_800, metrics));
+
+        let entry = store.entry(&printer_id).expect("statistics entry");
+        assert_eq!(entry.poll_samples.len(), 2);
+        assert_eq!(entry.poll_samples[0].metrics[0].value, 100);
+    }
+
+    #[test]
+    fn available_series_collects_poll_metrics_and_recorded_eur() {
+        let printer_id = printer_id("printer-a");
+        let store = StatisticsStore {
+            printers: vec![PrinterStatisticsEntry {
+                printer_id: printer_id.clone(),
+                poll_samples: vec![StatisticsPollSample {
+                    captured_at: 900,
+                    metrics: vec![
+                        StatisticsPollMetric::new("1.2.3", "Clicks: Total", 100),
+                        StatisticsPollMetric::new("1.2.4", "Recording: Prints B/W", 50),
+                    ],
+                    legacy_total: None,
+                }],
+                euro_samples: vec![StatisticsEuroSample {
+                    captured_at: 1_000,
+                    total_cents: 500,
+                }],
+            }],
+        };
+        let selected = HashSet::from([printer_id]);
+
+        let series = available_series(&store, &selected);
+        assert_eq!(series.len(), 3);
+        assert!(series.iter().any(|entry| entry.label == "Clicks: Total"));
+        assert!(series.iter().any(|entry| entry.label == "Recording: Prints B/W"));
+        assert!(series.iter().any(|entry| entry.label == RECORDED_EUR_SERIES_LABEL));
+    }
+
+    #[test]
+    fn aggregate_series_points_adds_matching_metrics_across_printers() {
+        let printer_a = printer_id("printer-a");
+        let printer_b = printer_id("printer-b");
+        let metric_key = metric_series_key("1.2.3", "Clicks: Total");
+        let store = StatisticsStore {
+            printers: vec![
+                PrinterStatisticsEntry {
+                    printer_id: printer_a.clone(),
+                    poll_samples: vec![StatisticsPollSample {
+                        captured_at: 900,
+                        metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 100)],
+                        legacy_total: None,
+                    }],
+                    euro_samples: Vec::new(),
+                },
+                PrinterStatisticsEntry {
+                    printer_id: printer_b.clone(),
+                    poll_samples: vec![StatisticsPollSample {
+                        captured_at: 901,
+                        metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 40)],
+                        legacy_total: None,
+                    }],
+                    euro_samples: Vec::new(),
+                },
+            ],
+        };
+        let selected = HashSet::from([printer_a, printer_b]);
+
+        let points = aggregate_series_points(&store, &selected, &metric_key, 32);
+        assert_eq!(points, vec![(901, 140)]);
+    }
+
+    #[test]
+    fn cleanup_keeps_recent_polls_and_discards_old_night_polls() {
+        let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
+        let base = OffsetDateTime::from_unix_timestamp(1_713_744_300)
+            .expect("base timestamp")
+            .to_offset(offset);
+        let day_start = base
+            .replace_hour(0)
+            .expect("hour")
+            .replace_minute(0)
+            .expect("minute")
+            .replace_second(0)
+            .expect("second")
+            .replace_nanosecond(0)
+            .expect("nanos");
+        let old_inside_window = day_start
+            .replace_hour(10)
+            .expect("hour")
+            .replace_minute(45)
+            .expect("minute")
+            .unix_timestamp() as u64;
+        let old_outside_window = day_start.unix_timestamp() as u64;
+        let now = old_inside_window + RECENT_RETENTION_SECS + 120;
+        let recent = now - 60;
+
+        let store = StatisticsStore {
+            printers: vec![PrinterStatisticsEntry {
+                printer_id: printer_id("printer-a"),
+                poll_samples: vec![
+                    StatisticsPollSample {
+                        captured_at: old_inside_window,
+                        metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 10)],
+                        legacy_total: None,
+                    },
+                    StatisticsPollSample {
+                        captured_at: old_outside_window,
+                        metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 5)],
+                        legacy_total: None,
+                    },
+                    StatisticsPollSample {
+                        captured_at: recent,
+                        metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 25)],
+                        legacy_total: None,
+                    },
+                ],
+                euro_samples: Vec::new(),
+            }],
+        };
+
+        let cleaned = clean_statistics_store(store, now);
+        let entry = cleaned
+            .entry(&printer_id("printer-a"))
+            .expect("statistics entry");
+
+        assert_eq!(entry.poll_samples.len(), 2);
+        assert!(entry
+            .poll_samples
+            .iter()
+            .flat_map(|sample| sample.metrics.iter())
+            .any(|metric| metric.value == 10));
+        assert!(entry
+            .poll_samples
+            .iter()
+            .flat_map(|sample| sample.metrics.iter())
+            .any(|metric| metric.value == 25));
+    }
+
+    #[test]
+    fn cleanup_reduces_old_recording_samples_to_four_points_per_day() {
+        let offset = UtcOffset::UTC;
+        let base = OffsetDateTime::from_unix_timestamp(1_713_744_300)
+            .expect("base timestamp")
+            .to_offset(offset);
+        let day_start = base
+            .replace_hour(0)
+            .expect("hour")
+            .replace_minute(0)
+            .expect("minute")
+            .replace_second(0)
+            .expect("second")
+            .replace_nanosecond(0)
+            .expect("nanos")
+            .unix_timestamp() as u64;
+        let now = day_start + 24 * 60 * 60 + RECENT_RETENTION_SECS + 60;
+
+        let samples = (0..8)
+            .map(|index| StatisticsEuroSample {
+                captured_at: day_start + index * 60 * 60,
+                total_cents: 100 + index,
+            })
+            .collect::<Vec<_>>();
+
+        let store = StatisticsStore {
+            printers: vec![PrinterStatisticsEntry {
+                printer_id: printer_id("printer-a"),
+                poll_samples: Vec::new(),
+                euro_samples: samples,
+            }],
+        };
+
+        let cleaned = clean_statistics_store(store, now);
+        let entry = cleaned
+            .entry(&printer_id("printer-a"))
+            .expect("statistics entry");
+
+        assert_eq!(entry.euro_samples.len(), 4);
+        assert_eq!(entry.euro_samples.first().map(|sample| sample.total_cents), Some(100));
+        assert_eq!(entry.euro_samples.last().map(|sample| sample.total_cents), Some(107));
+    }
+}

@@ -12,6 +12,7 @@ use crate::sync::SyncEvent;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Printers,
+    Statistics,
     Debug,
 }
 
@@ -724,6 +725,8 @@ impl ManualPricingWorkspace {
 pub(crate) enum Message {
     LogTick,
     SyncTick,
+    StatisticsPollTick,
+    StatisticsCleanupTick,
     SyncEvent(SyncEvent),
     ToggleAdvancedMode,
     DragWindow,
@@ -751,10 +754,15 @@ pub(crate) enum Message {
     SelectManualPricingTab(ManualPricingTab),
     SelectPrinterTab(PrinterTab),
     SelectPrinter(PrinterId),
+    ToggleStatisticsPrinter(PrinterId),
+    ToggleStatisticsSeries(String),
     StartPrinterReorderDrag(PrinterId),
+    PrinterReorderHoldTick,
+    CompletePrinterCardPress(PrinterId),
     HoverPrinterReorderDrop(usize),
     FinishPrinterReorderDrag,
     CancelPrinterReorderDrag,
+    CancelPendingPrinterReorder(PrinterId),
     ProfileChoiceChanged(ProfileChoice),
     DeleteSelectedPrinter,
     PollSelectedSnmp,

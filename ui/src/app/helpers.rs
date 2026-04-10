@@ -7,13 +7,14 @@ use printcountpay_core::{CounterOidSet, Oid, PrinterStatus, SnmpVarBind};
 use time::{OffsetDateTime, UtcOffset};
 
 use crate::app::constants::{
-    PRT_MARKER_LIFECOUNT_1, PRT_MARKER_LIFECOUNT_2, PRT_MARKER_LIFECOUNT_3,
+    PRT_GENERAL_PRINTER_NAME_OID, PRT_MARKER_LIFECOUNT_1, PRT_MARKER_LIFECOUNT_2,
+    PRT_MARKER_LIFECOUNT_3, RICOH_COUNTER_TABLE,
     RICOH_BW_COPIER_COUNT_OID, RICOH_BW_PRINTER_COUNT_OID, RICOH_COLOR_COPIER_COUNT_OID,
     RICOH_COLOR_PRINTER_COUNT_OID, RICOH_COUNTER_VALUE_ROOT, RICOH_TONER_BLACK_OID,
     RICOH_TONER_CYAN_OID, RICOH_TONER_MAGENTA_OID, RICOH_TONER_YELLOW_OID, SYS_DESCR_OID,
     SYS_NAME_OID, SYS_OBJECT_ID_OID, SYS_UPTIME_OID,
 };
-use crate::app::profiles::{RecordingOidProfile, TonerOidProfile};
+use crate::app::profiles::{ManufacturerProfile, RecordingOidProfile, TonerOidProfile};
 use crate::app::types::{
     BwPricing, ManualBwTier, ManualColorTier, ManualFinisherLineItem, ManualFinisherType,
     ManualPricingLineItem, ManualPricingSettings, ManualPrintMode, ManualPrintSize,
@@ -317,6 +318,79 @@ pub(crate) fn recording_profile_from_settings_lossy(
     }
 }
 
+pub(crate) fn build_poll_label_map(
+    counter_oids: &CounterOidSet,
+    recording_settings: &RecordingOidSettings,
+    profile: Option<&ManufacturerProfile>,
+) -> std::collections::HashMap<Oid, String> {
+    let mut map = std::collections::HashMap::new();
+    let recording_oids = recording_profile_from_settings_lossy(recording_settings);
+    let mut insert_label = |oid: Oid, label: &str| {
+        map.entry(oid).or_insert_with(|| label.to_string());
+    };
+
+    insert_label(Oid::from_slice(&SYS_DESCR_OID), "System: Description");
+    insert_label(Oid::from_slice(&SYS_OBJECT_ID_OID), "System: Object ID");
+    insert_label(Oid::from_slice(&SYS_NAME_OID), "System: Name");
+    insert_label(Oid::from_slice(&SYS_UPTIME_OID), "System: Uptime");
+    insert_label(
+        Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID),
+        "Printer: Name",
+    );
+
+    if profile.and_then(|profile| profile.counter_table.as_deref()) == Some("ricoh-m184") {
+        for entry in &RICOH_COUNTER_TABLE {
+            insert_label(ricoh_counter_oid(entry.type_id), entry.label);
+        }
+    }
+
+    for oid in &recording_oids.copies_bw {
+        insert_label(oid.clone(), "Recording: Copies B/W");
+    }
+    for oid in &recording_oids.copies_color {
+        insert_label(oid.clone(), "Recording: Copies Color");
+    }
+    for oid in &recording_oids.prints_bw {
+        insert_label(oid.clone(), "Recording: Prints B/W");
+    }
+    for oid in &recording_oids.prints_color {
+        insert_label(oid.clone(), "Recording: Prints Color");
+    }
+
+    for oid in &counter_oids.bw {
+        insert_label(oid.clone(), "Clicks: B/W");
+    }
+    for oid in &counter_oids.color {
+        insert_label(oid.clone(), "Clicks: Color");
+    }
+    for oid in &counter_oids.total {
+        insert_label(oid.clone(), "Clicks: Total");
+    }
+
+    let default_toner = default_toner_oids();
+    let toner = profile.map(|profile| &profile.toner).unwrap_or(&default_toner);
+    if let Some(oid) = toner.black.as_ref() {
+        insert_label(oid.clone(), "Toner: Black");
+    }
+    if let Some(oid) = toner.cyan.as_ref() {
+        insert_label(oid.clone(), "Toner: Cyan");
+    }
+    if let Some(oid) = toner.magenta.as_ref() {
+        insert_label(oid.clone(), "Toner: Magenta");
+    }
+    if let Some(oid) = toner.yellow.as_ref() {
+        insert_label(oid.clone(), "Toner: Yellow");
+    }
+
+    if let Some(profile) = profile {
+        for entry in &profile.extra_poll_labels {
+            map.insert(entry.oid.clone(), entry.label.clone());
+        }
+    }
+
+    map
+}
+
 pub(crate) fn format_oid_list(oids: &[Oid]) -> String {
     oids.iter()
         .map(|oid| oid.to_string())
@@ -434,6 +508,62 @@ pub(crate) fn bw_pricing_from_settings(settings: &PricingSettings) -> Option<BwP
 
 pub(crate) fn color_price_from_settings(settings: &PricingSettings) -> Option<u64> {
     parse_price_input(&settings.color_input).ok().flatten()
+}
+
+pub(crate) fn recording_session_total_cents(
+    session: &RecordingSession,
+    live_snapshot: Option<&RecordingSnapshot>,
+    pricing: &PricingSettings,
+) -> Option<u64> {
+    let copies_bw_delta = delta_value(
+        category_start_value(session, RecordingCategory::CopiesBw),
+        category_end_value(session, RecordingCategory::CopiesBw, live_snapshot),
+    );
+    let copies_color_delta = delta_value(
+        category_start_value(session, RecordingCategory::CopiesColor),
+        category_end_value(session, RecordingCategory::CopiesColor, live_snapshot),
+    );
+    let prints_bw_delta = delta_value(
+        category_start_value(session, RecordingCategory::PrintsBw),
+        category_end_value(session, RecordingCategory::PrintsBw, live_snapshot),
+    );
+    let prints_color_delta = delta_value(
+        category_start_value(session, RecordingCategory::PrintsColor),
+        category_end_value(session, RecordingCategory::PrintsColor, live_snapshot),
+    );
+
+    let bw_delta = sum_optional_included([
+        (session.edits.copies_bw.include_in_price, copies_bw_delta),
+        (session.edits.prints_bw.include_in_price, prints_bw_delta),
+    ]);
+    let color_delta = sum_optional_included([
+        (session.edits.copies_color.include_in_price, copies_color_delta),
+        (session.edits.prints_color.include_in_price, prints_color_delta),
+    ]);
+
+    let bw_total = match bw_delta {
+        Some(0) => Some(0),
+        Some(count) => bw_pricing_from_settings(pricing).map(|value| bw_cost_cents(count, value)),
+        None => None,
+    }
+    .map(|value| {
+        if pricing.round_to_five_cents {
+            round_to_nearest_5_cents(value)
+        } else {
+            value
+        }
+    });
+
+    let color_total = match color_delta {
+        Some(0) => Some(0),
+        Some(count) => color_price_from_settings(pricing).map(|value| color_cost_cents(count, value)),
+        None => None,
+    };
+
+    match (bw_total, color_total) {
+        (Some(bw_total), Some(color_total)) => Some(bw_total.saturating_add(color_total)),
+        _ => None,
+    }
 }
 
 pub(crate) const MANUAL_CUTTING_CENTS: u64 = 300;

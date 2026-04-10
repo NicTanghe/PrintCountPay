@@ -499,6 +499,108 @@ pub(crate) fn printer_drop_indicator_style() -> impl Fn(&Theme) -> container::St
     }
 }
 
+pub(crate) fn printer_card_container_style(
+    selected: bool,
+    base_color: Color,
+    dragging: bool,
+) -> impl Fn(&Theme) -> container::Style {
+    move |_theme| {
+        let background = if selected {
+            let selected_color = sampled_brand_color(SIDEBAR_BRAND_SAMPLE);
+            Background::Color(if dragging {
+                shift_color(selected_color, -0.03)
+            } else {
+                selected_color
+            })
+        } else {
+            let color = if dragging {
+                Color {
+                    r: (base_color.r + 0.01).min(1.0),
+                    g: (base_color.g + 0.01).min(1.0),
+                    b: (base_color.b + 0.01).min(1.0),
+                    a: 0.99,
+                }
+            } else {
+                Color {
+                    a: 0.96,
+                    ..base_color
+                }
+            };
+            Background::Color(color)
+        };
+
+        container::Style {
+            text_color: Some(if selected {
+                Color::WHITE
+            } else {
+                Color::from_rgb8(0x18, 0x23, 0x33)
+            }),
+            background: Some(background),
+            border: Border {
+                color: if selected {
+                    Color::TRANSPARENT
+                } else {
+                    Color::from_rgb8(0xc5, 0xc6, 0xd0)
+                },
+                width: if selected { 0.0 } else { 1.0 },
+                radius: 6.0.into(),
+            },
+            shadow: Shadow {
+                color: if selected {
+                    Color::from_rgba8(0x2d, 0x4c, 0xb2, 0.14)
+                } else {
+                    Color::from_rgba8(0x10, 0x19, 0x2b, 0.02)
+                },
+                offset: Vector::new(0.0, if selected { 4.0 } else { 1.0 }),
+                blur_radius: if selected { 10.0 } else { 4.0 },
+            },
+            ..container::Style::default()
+        }
+    }
+}
+
+pub(crate) fn statistics_indicator_style() -> impl Fn(&Theme) -> container::Style {
+    move |_theme| container::Style {
+        text_color: Some(Color::WHITE),
+        background: Some(Background::Color(Color::from_rgba8(0x1c, 0x27, 0x39, 0.92))),
+        border: Border {
+            color: Color::from_rgba8(0xff, 0xff, 0xff, 0.16),
+            width: 1.0,
+            radius: 8.0.into(),
+        },
+        shadow: Shadow {
+            color: Color::from_rgba8(0x10, 0x19, 0x2b, 0.18),
+            offset: Vector::new(0.0, 4.0),
+            blur_radius: 12.0,
+        },
+        ..container::Style::default()
+    }
+}
+
+pub(crate) fn statistics_chart_track_style() -> impl Fn(&Theme) -> container::Style {
+    move |_theme| container::Style {
+        background: Some(Background::Color(Color::from_rgb8(0xee, 0xf1, 0xf5))),
+        border: Border {
+            color: Color::from_rgb8(0xdb, 0xe2, 0xea),
+            width: 1.0,
+            radius: 8.0.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
+pub(crate) fn statistics_tab_icon_style(color: Color) -> impl Fn(&Theme) -> container::Style {
+    move |_theme| container::Style {
+        background: Some(Background::Color(color)),
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 3.0.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
 pub(crate) fn printer_card_style(
     selected: bool,
     base_color: Color,

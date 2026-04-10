@@ -16,6 +16,13 @@ where
     badge: Element<'a, Message, Theme, Renderer>,
     show_badge: bool,
     margin: f32,
+    position: OverlayPosition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OverlayPosition {
+    TopRight,
+    BottomLeft,
 }
 
 impl<'a, Message, Theme, Renderer> BadgeOverlay<'a, Message, Theme, Renderer>
@@ -34,11 +41,17 @@ where
             badge: badge.into(),
             show_badge,
             margin: Self::DEFAULT_MARGIN,
+            position: OverlayPosition::TopRight,
         }
     }
 
     pub(crate) fn margin(mut self, margin: impl Into<Pixels>) -> Self {
         self.margin = margin.into().0;
+        self
+    }
+
+    pub(crate) fn position(mut self, position: OverlayPosition) -> Self {
+        self.position = position;
         self
     }
 }
@@ -159,11 +172,12 @@ where
 
         let badge = if self.show_badge {
             Some(overlay::Element::new(Box::new(BadgeOverlayLayer {
-                position: layout.position() + translation,
+                anchor: layout.position() + translation,
                 content_bounds: layout.bounds(),
                 badge: &mut self.badge,
                 state: children.next().unwrap(),
                 margin: self.margin,
+                overlay_position: self.position,
             })))
         } else {
             None
@@ -197,11 +211,12 @@ struct BadgeOverlayLayer<'a, 'b, Message, Theme, Renderer>
 where
     Renderer: iced::advanced::Renderer,
 {
-    position: Point,
+    anchor: Point,
     content_bounds: Rectangle,
     badge: &'b mut Element<'a, Message, Theme, Renderer>,
     state: &'b mut widget::Tree,
     margin: f32,
+    overlay_position: OverlayPosition,
 }
 
 impl<'a, 'b, Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer>
@@ -217,15 +232,22 @@ where
         );
 
         let badge_bounds = badge_layout.bounds();
-        let mut x =
-            self.position.x + (self.content_bounds.width - badge_bounds.width) - self.margin;
-        let mut y = self.position.y + self.margin;
+        let (mut x, mut y) = match self.overlay_position {
+            OverlayPosition::TopRight => (
+                self.anchor.x + (self.content_bounds.width - badge_bounds.width) - self.margin,
+                self.anchor.y + self.margin,
+            ),
+            OverlayPosition::BottomLeft => (
+                self.anchor.x + self.margin,
+                self.anchor.y + (self.content_bounds.height - badge_bounds.height) - self.margin,
+            ),
+        };
 
-        if x < self.position.x {
-            x = self.position.x;
+        if x < self.anchor.x {
+            x = self.anchor.x;
         }
-        if y < self.position.y {
-            y = self.position.y;
+        if y < self.anchor.y {
+            y = self.anchor.y;
         }
 
         layout::Node::with_children(badge_bounds.size(), vec![badge_layout])

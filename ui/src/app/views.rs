@@ -1,10 +1,11 @@
-const PRINTER_DRAG_HANDLE_WIDTH: f32 = 46.0;
-const PRINTER_ROW_SPACING: f32 = 10.0;
 const PRINTER_DROP_SPLIT_Y: f32 = 32.0;
 
 impl PrintCountApp {
     fn tab_bar(&self) -> Element<'_, Message> {
-        let mut left_tabs = row![self.tab_button(Tab::Printers, "Printers")]
+        let mut left_tabs = row![
+            self.tab_button(Tab::Printers, "Printers"),
+            self.statistics_tab_button()
+        ]
             .spacing(8)
             .align_items(Alignment::Center);
 
@@ -40,6 +41,40 @@ impl PrintCountApp {
         };
 
         self.top_bar_button(label, style, Message::SelectTab(tab))
+    }
+
+    fn statistics_tab_button(&self) -> Element<'_, Message> {
+        let active = self.active_tab == Tab::Statistics;
+        let style: Box<
+            dyn Fn(&Theme, iced::widget::button::Status) -> iced::widget::button::Style,
+        > = if active {
+            Box::new(solid_brand_button_style(SIDEBAR_BRAND_SAMPLE))
+        } else {
+            Box::new(theme::Button::custom(top_controls_button_style()))
+        };
+
+        let icon_color = if active {
+            Color::WHITE
+        } else {
+            Color::from_rgb8(0x2f, 0x36, 0x42)
+        };
+        let icon = row![
+            self.statistics_tab_bar(6.0, 10.0, icon_color),
+            self.statistics_tab_bar(6.0, 7.0, icon_color),
+            self.statistics_tab_bar(6.0, 13.0, icon_color),
+        ]
+        .spacing(2)
+        .align_items(Alignment::End);
+        let content = row![
+            icon,
+            text("Statistics")
+                .size(12)
+                .style(theme::Text::Color(icon_color)),
+        ]
+        .spacing(6)
+        .align_items(Alignment::Center);
+
+        self.top_bar_content_button(content.into(), style, Message::SelectTab(Tab::Statistics))
     }
 
     fn advanced_toggle_button(&self) -> Element<'_, Message> {
@@ -78,10 +113,32 @@ impl PrintCountApp {
             .align_x(iced::alignment::Horizontal::Center)
             .align_y(iced::alignment::Vertical::Center);
 
-        button(label)
+        self.top_bar_content_button(label.into(), style, message)
+    }
+
+    fn top_bar_content_button<'a>(
+        &self,
+        content: Element<'a, Message>,
+        style: impl Fn(&Theme, iced::widget::button::Status) -> iced::widget::button::Style + 'static,
+        message: Message,
+    ) -> Element<'a, Message> {
+        button(content)
             .style(style)
             .padding([4, 8])
             .on_press(message)
+            .into()
+    }
+
+    fn statistics_tab_bar(
+        &self,
+        width: f32,
+        height: f32,
+        color: Color,
+    ) -> Element<'_, Message> {
+        container(Space::new().width(Length::Fixed(width)).height(Length::Fixed(height)))
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(height))
+            .style(theme::Container::Custom(statistics_tab_icon_style(color)))
             .into()
     }
 
@@ -1852,10 +1909,13 @@ impl PrintCountApp {
     }
 
     fn printer_list_view(&self) -> Element<'_, Message> {
-        let mut list_items = column![self.manual_pricing_row()].spacing(10);
+        let mut list_items = column![].spacing(10);
 
-        for bill in &self.manual_bills {
-            list_items = list_items.push(self.manual_pricing_bill_row(bill));
+        if self.active_tab != Tab::Statistics {
+            list_items = list_items.push(self.manual_pricing_row());
+            for bill in &self.manual_bills {
+                list_items = list_items.push(self.manual_pricing_bill_row(bill));
+            }
         }
 
         if self.printers.is_empty() {
@@ -1903,7 +1963,11 @@ impl PrintCountApp {
             .width(Length::Fill);
         let mut content = column![
             self.tab_bar(),
-            text("Printers")
+            text(if self.active_tab == Tab::Statistics {
+                "Statistics"
+            } else {
+                "Printers"
+            })
                 .size(28)
                 .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
         ]
@@ -1925,54 +1989,28 @@ impl PrintCountApp {
     }
 
     fn printer_drop_indicator(&self) -> Element<'_, Message> {
-        row![
-            Space::new().width(Length::Fixed(PRINTER_DRAG_HANDLE_WIDTH)),
-            container(Space::new().height(Length::Fixed(4.0)))
-                .width(Length::Fill)
-                .height(Length::Fixed(4.0))
-                .style(theme::Container::Custom(printer_drop_indicator_style())),
-        ]
-        .spacing(PRINTER_ROW_SPACING)
-        .width(Length::Fill)
-        .align_items(Alignment::Center)
-        .into()
-    }
-
-    fn printer_drag_handle(&self, printer_id: &PrinterId) -> Element<'_, Message> {
-        let is_active = self
-            .active_printer_drag
-            .as_ref()
-            .is_some_and(|drag| drag.printer_id == *printer_id);
-        let label_color = if is_active {
-            sampled_brand_color(CONTENT_BRAND_SAMPLE)
-        } else {
-            Color::from_rgb8(0x5a, 0x66, 0x78)
-        };
-        let interaction = if is_active {
-            iced::mouse::Interaction::Grabbing
-        } else {
-            iced::mouse::Interaction::Grab
-        };
-
-        let handle = container(
-            text("drag")
-                .size(11)
-                .style(theme::Text::Color(label_color)),
-        )
-        .width(Length::Fixed(PRINTER_DRAG_HANDLE_WIDTH))
-        .padding([12, 8])
-        .align_x(iced::alignment::Horizontal::Center)
-        .style(theme::Container::Box);
-
-        mouse_area(handle)
-            .on_press(Message::StartPrinterReorderDrag(printer_id.clone()))
-            .interaction(interaction)
+        container(Space::new().height(Length::Fixed(4.0)))
+            .width(Length::Fill)
+            .height(Length::Fixed(4.0))
+            .style(theme::Container::Custom(printer_drop_indicator_style()))
             .into()
     }
 
     fn printer_row(&self, record: &PrinterRecord, index: usize, total: usize) -> Element<'_, Message> {
-        let is_selected =
-            !self.manual_pricing_selected && self.selected_printer.as_ref() == Some(&record.id);
+        let statistics_mode = self.active_tab == Tab::Statistics;
+        let is_selected = if statistics_mode {
+            self.statistics_selected_printers.contains(&record.id)
+        } else {
+            !self.manual_pricing_selected && self.selected_printer.as_ref() == Some(&record.id)
+        };
+        let is_pending_drag = self
+            .pending_printer_drag
+            .as_ref()
+            .is_some_and(|pending| pending.printer_id == record.id);
+        let is_active_drag = self
+            .active_printer_drag
+            .as_ref()
+            .is_some_and(|drag| drag.printer_id == record.id);
         let is_recording = self
             .recording_sessions
             .get(&record.id)
@@ -2030,24 +2068,26 @@ impl PrintCountApp {
         ]
         .spacing(6);
 
-        let base = button(content)
-            .style(theme::Button::custom(printer_card_style(
-                is_selected,
-                base_color,
-            )))
+        let base = container(content)
             .width(Length::Fill)
             .padding([14, 16])
-            .clip(true)
-            .on_press(Message::SelectPrinter(record.id.clone()));
+            .style(theme::Container::Custom(printer_card_container_style(
+                is_selected,
+                base_color,
+                is_pending_drag || is_active_drag,
+            )));
 
         let card = BadgeOverlay::new(base, self.recording_badge(is_recording), is_recording)
             .margin(6.0);
-        let row = row![self.printer_drag_handle(&record.id), card]
-            .spacing(PRINTER_ROW_SPACING)
-            .width(Length::Fill)
-            .align_items(Alignment::Center);
-
-        mouse_area(row)
+        if statistics_mode {
+            return mouse_area(card)
+                .interaction(iced::mouse::Interaction::Pointer)
+                .on_press(Message::ToggleStatisticsPrinter(record.id.clone()))
+                .into();
+        }
+        mouse_area(card)
+            .on_press(Message::StartPrinterReorderDrag(record.id.clone()))
+            .on_release(Message::CompletePrinterCardPress(record.id.clone()))
             .on_move(move |point| {
                 let drop_index = if point.y < PRINTER_DROP_SPLIT_Y {
                     index
@@ -2056,7 +2096,405 @@ impl PrintCountApp {
                 };
                 Message::HoverPrinterReorderDrop(drop_index)
             })
+            .on_exit(Message::CancelPendingPrinterReorder(record.id.clone()))
             .into()
+    }
+
+    fn statistics_view(&self) -> Element<'_, Message> {
+        let selected_printers: Vec<_> = self
+            .printers
+            .iter()
+            .filter(|record| self.statistics_selected_printers.contains(&record.id))
+            .collect();
+        let available = available_series(
+            &self.statistics_store,
+            &self.statistics_selected_printers,
+        );
+        let aggregated_series = available
+            .iter()
+            .enumerate()
+            .map(|(index, definition)| StatisticsChartSeries {
+                key: definition.key.clone(),
+                label: definition.label.clone(),
+                color: statistics_series_color(&definition.key, index),
+                points: aggregate_series_points(
+                    &self.statistics_store,
+                    &self.statistics_selected_printers,
+                    &definition.key,
+                    96,
+                ),
+            })
+            .collect::<Vec<_>>();
+        let visible_series = aggregated_series
+            .iter()
+            .filter(|series| {
+                self.statistics_visible_series.contains(&series.key) && !series.points.is_empty()
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let bounds = statistics_chart_bounds(&visible_series);
+
+        let header = column![
+            text("Statistics")
+                .size(20)
+                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+            text("Select one or more printers on the left. Poll snapshots are stored every 15 minutes even when no recording is active, and each checked series is summed across the current selection.")
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+        ]
+        .spacing(4);
+
+        let body: Element<'_, Message> = if selected_printers.is_empty() {
+            self.empty_printer_tab_view("Select one or more printers to display statistics.")
+        } else {
+            let content = column![
+                self.statistics_chart_card(
+                    &selected_printers,
+                    &aggregated_series,
+                    &visible_series,
+                    bounds,
+                ),
+                self.statistics_series_controls(&aggregated_series),
+            ]
+            .spacing(12)
+            .width(Length::Fill);
+            self.printer_tab_scroll_view(content, 16.0)
+        };
+
+        container(column![header, body].spacing(12))
+            .padding(12)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(theme::Container::Custom(right_content_panel_style()))
+            .into()
+    }
+
+    fn statistics_chart_card(
+        &self,
+        selected_printers: &[&PrinterRecord],
+        aggregated_series: &[StatisticsChartSeries],
+        visible_series: &[StatisticsChartSeries],
+        bounds: Option<StatisticsChartBounds>,
+    ) -> Element<'_, Message> {
+        let selected_label = self.statistics_selection_summary(selected_printers);
+        let graph_min = bounds
+            .map(|bounds| self.statistics_axis_value_text(visible_series, bounds.min_value))
+            .unwrap_or_else(|| "n/a".to_string());
+        let graph_max = bounds
+            .map(|bounds| self.statistics_axis_value_text(visible_series, bounds.max_value))
+            .unwrap_or_else(|| "n/a".to_string());
+        let chart_body: Element<'_, Message> = if aggregated_series.is_empty() {
+            self.statistics_chart_empty_state(
+                "Waiting for the first stored statistics sample. Poll snapshots are saved every 15 minutes, and recorded EUR is added whenever a recording stops.",
+            )
+        } else if visible_series.is_empty() {
+            self.statistics_chart_empty_state(
+                "All series are hidden. Enable at least one toggle below to draw the graph.",
+            )
+        } else {
+            self.statistics_line_chart(visible_series, bounds.expect("bounds should exist"))
+        };
+
+        container(
+            column![
+                row![
+                    column![
+                        text("Combined graph")
+                            .size(16)
+                            .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+                        text(selected_label)
+                            .size(12)
+                            .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                    ]
+                    .spacing(4),
+                    horizontal_space(),
+                    text(format!(
+                        "{} visible / {} stored",
+                        visible_series.len(),
+                        aggregated_series.len()
+                    ))
+                    .size(11)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                ]
+                .spacing(12)
+                .align_items(Alignment::Center),
+                row![
+                    self.statistics_summary_tile(
+                        "Printers",
+                        selected_printers.len().to_string(),
+                    ),
+                    self.statistics_summary_tile(
+                        "Graph Min",
+                        graph_min,
+                    ),
+                    self.statistics_summary_tile(
+                        "Graph Max",
+                        graph_max,
+                    ),
+                ]
+                .spacing(10),
+                chart_body,
+                if let Some(bounds) = bounds {
+                    self.statistics_axis(bounds)
+                } else {
+                    Space::new()
+                        .width(Length::Shrink)
+                        .height(Length::Shrink)
+                        .into()
+                },
+            ]
+            .spacing(12),
+        )
+        .padding(12)
+        .width(Length::Fill)
+        .style(theme::Container::Box)
+        .into()
+    }
+
+    fn statistics_series_controls(
+        &self,
+        aggregated_series: &[StatisticsChartSeries],
+    ) -> Element<'_, Message> {
+        let body: Element<'_, Message> = if aggregated_series.is_empty() {
+            container(
+                text("No stored series are available yet.")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            )
+            .width(Length::Fill)
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center)
+            .into()
+        } else {
+            let mut series_rows = column![].spacing(10);
+            for series in aggregated_series {
+                series_rows = series_rows.push(self.statistics_series_toggle_row(series));
+            }
+            series_rows.into()
+        };
+
+        container(
+            column![
+                text("Series")
+                    .size(16)
+                    .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+                text("Toggle the lines you want to compare. Matching metrics from multiple selected printers are added together into one line.")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                body,
+            ]
+            .spacing(8),
+        )
+        .padding(12)
+        .width(Length::Fill)
+        .style(theme::Container::Box)
+        .into()
+    }
+
+    fn statistics_series_toggle_row(
+        &self,
+        series: &StatisticsChartSeries,
+    ) -> Element<'_, Message> {
+        let series_key = series.key.clone();
+        let checked = self.statistics_visible_series.contains(&series.key);
+        let toggle = checkbox(checked)
+            .label(series.label.clone())
+            .text_size(13)
+            .on_toggle(move |_| Message::ToggleStatisticsSeries(series_key.clone()))
+            .style(theme::Checkbox::custom(brand_checkbox_style(
+                CONTENT_BRAND_SAMPLE,
+            )));
+        let summary = self.statistics_series_summary(series);
+        let dot = container(
+            Space::new()
+                .width(Length::Fixed(10.0))
+                .height(Length::Fixed(10.0)),
+        )
+        .width(Length::Fixed(10.0))
+        .height(Length::Fixed(10.0))
+        .style(theme::Container::Custom(statistics_tab_icon_style(
+            series.color,
+        )));
+
+        container(
+            row![
+                dot,
+                column![
+                    toggle,
+                    text(summary)
+                        .size(11)
+                        .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                ]
+                .spacing(4),
+            ]
+            .spacing(10)
+            .align_items(Alignment::Center),
+        )
+        .padding([8, 10])
+        .width(Length::Fill)
+        .style(theme::Container::Custom(statistics_chart_track_style()))
+        .into()
+    }
+
+    fn statistics_line_chart(
+        &self,
+        visible_series: &[StatisticsChartSeries],
+        bounds: StatisticsChartBounds,
+    ) -> Element<'_, Message> {
+        let svg_markup = statistics_line_chart_svg(visible_series, bounds);
+        let chart = iced::widget::svg(iced::widget::svg::Handle::from_memory(
+            svg_markup.into_bytes(),
+        ))
+        .width(Length::Fill)
+        .height(Length::Fixed(220.0))
+        .style(|_theme, _status| iced::widget::svg::Style { color: None });
+
+        container(chart)
+            .padding(iced::Padding {
+                top: 8.0,
+                right: 12.0,
+                bottom: 8.0,
+                left: 12.0,
+            })
+            .width(Length::Fill)
+            .height(Length::Fixed(236.0))
+            .style(theme::Container::Custom(statistics_chart_track_style()))
+            .into()
+    }
+
+    fn statistics_chart_empty_state(&self, label: &str) -> Element<'_, Message> {
+        container(
+            text(label.to_string())
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+        )
+        .height(Length::Fixed(236.0))
+        .width(Length::Fill)
+        .align_x(iced::alignment::Horizontal::Center)
+        .align_y(iced::alignment::Vertical::Center)
+        .style(theme::Container::Custom(statistics_chart_track_style()))
+        .into()
+    }
+
+    fn statistics_axis(&self, bounds: StatisticsChartBounds) -> Element<'_, Message> {
+        let first = format_clock_hms(bounds.min_timestamp);
+        let last = format_clock_hms(bounds.max_timestamp);
+
+        row![
+            text(first)
+                .size(11)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            horizontal_space(),
+            text(last)
+                .size(11)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+        ]
+        .spacing(8)
+        .align_items(Alignment::Center)
+        .into()
+    }
+
+    fn statistics_summary_tile(
+        &self,
+        label: &str,
+        value: String,
+    ) -> Element<'_, Message> {
+        container(
+            column![
+                text(label.to_string())
+                    .size(11)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                text(value)
+                    .size(14)
+                    .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+            ]
+            .spacing(4),
+        )
+        .padding([8, 10])
+        .width(Length::FillPortion(1))
+        .style(theme::Container::Custom(statistics_chart_track_style()))
+        .into()
+    }
+
+    fn statistics_selection_summary(&self, selected_printers: &[&PrinterRecord]) -> String {
+        if selected_printers.is_empty() {
+            return "No printers selected.".to_string();
+        }
+
+        let labels = selected_printers
+            .iter()
+            .map(|record| {
+                record
+                    .model
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+                    .map(|value| value.to_string())
+                    .or_else(|| record.ip_or_hostname.clone())
+                    .unwrap_or_else(|| record.id.to_string())
+            })
+            .collect::<Vec<_>>();
+        if labels.len() <= 3 {
+            format!("Selected printers: {}", labels.join(", "))
+        } else {
+            format!(
+                "Selected printers: {}, {} and {} more",
+                labels[0],
+                labels[1],
+                labels.len().saturating_sub(2)
+            )
+        }
+    }
+
+    fn statistics_series_summary(&self, series: &StatisticsChartSeries) -> String {
+        let Some((captured_at, latest)) = series.points.last().copied() else {
+            return "No stored points yet.".to_string();
+        };
+        let min = series.points.iter().map(|(_, value)| *value).min().unwrap_or(latest);
+        let max = series.points.iter().map(|(_, value)| *value).max().unwrap_or(latest);
+
+        format!(
+            "{} points | latest {} at {} | min {} | max {}",
+            series.points.len(),
+            self.statistics_series_value_text(&series.key, latest),
+            format_clock_hms(captured_at),
+            self.statistics_series_value_text(&series.key, min),
+            self.statistics_series_value_text(&series.key, max),
+        )
+    }
+
+    fn statistics_series_value_text(&self, series_key: &str, value: u64) -> String {
+        if series_key == RECORDED_EUR_SERIES_KEY {
+            format_cents(value)
+        } else {
+            format_statistics_number(value)
+        }
+    }
+
+    fn statistics_axis_value_text(
+        &self,
+        visible_series: &[StatisticsChartSeries],
+        value: u64,
+    ) -> String {
+        if !visible_series.is_empty()
+            && visible_series
+                .iter()
+                .all(|series| series.key == RECORDED_EUR_SERIES_KEY)
+        {
+            format_cents(value)
+        } else {
+            format_statistics_number(value)
+        }
+    }
+
+    fn statistics_cleanup_indicator(&self) -> Element<'_, Message> {
+        container(
+            text("Cleaning statistics history...")
+                .size(12)
+                .style(theme::Text::Color(Color::WHITE)),
+        )
+        .padding([6, 10])
+        .style(theme::Container::Custom(statistics_indicator_style()))
+        .into()
     }
 
     fn printer_details_view(&self) -> Element<'_, Message> {
@@ -2497,81 +2935,11 @@ impl PrintCountApp {
     }
 
     fn poll_label_map(&self) -> std::collections::HashMap<Oid, String> {
-        let mut map = std::collections::HashMap::new();
-        let recording_oids = recording_profile_from_settings_lossy(&self.recording_oids);
-        let mut insert_label = |oid: Oid, label: &str| {
-            map.entry(oid).or_insert_with(|| label.to_string());
-        };
-
-        insert_label(Oid::from_slice(&SYS_DESCR_OID), "System: Description");
-        insert_label(Oid::from_slice(&SYS_OBJECT_ID_OID), "System: Object ID");
-        insert_label(Oid::from_slice(&SYS_NAME_OID), "System: Name");
-        insert_label(Oid::from_slice(&SYS_UPTIME_OID), "System: Uptime");
-        insert_label(
-            Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID),
-            "Printer: Name",
-        );
-
-        if self
-            .active_profile
-            .as_ref()
-            .and_then(|profile| profile.counter_table.as_deref())
-            == Some("ricoh-m184")
-        {
-            for entry in &RICOH_COUNTER_TABLE {
-                insert_label(ricoh_counter_oid(entry.type_id), entry.label);
-            }
-        }
-
-        for oid in &recording_oids.copies_bw {
-            insert_label(oid.clone(), "Recording: Copies B/W");
-        }
-        for oid in &recording_oids.copies_color {
-            insert_label(oid.clone(), "Recording: Copies Color");
-        }
-        for oid in &recording_oids.prints_bw {
-            insert_label(oid.clone(), "Recording: Prints B/W");
-        }
-        for oid in &recording_oids.prints_color {
-            insert_label(oid.clone(), "Recording: Prints Color");
-        }
-
-        for oid in &self.counter_oids.bw {
-            insert_label(oid.clone(), "Clicks: B/W");
-        }
-        for oid in &self.counter_oids.color {
-            insert_label(oid.clone(), "Clicks: Color");
-        }
-        for oid in &self.counter_oids.total {
-            insert_label(oid.clone(), "Clicks: Total");
-        }
-
-        let default_toner = default_toner_oids();
-        let toner = self
-            .active_profile
-            .as_ref()
-            .map(|profile| &profile.toner)
-            .unwrap_or(&default_toner);
-        if let Some(oid) = toner.black.as_ref() {
-            insert_label(oid.clone(), "Toner: Black");
-        }
-        if let Some(oid) = toner.cyan.as_ref() {
-            insert_label(oid.clone(), "Toner: Cyan");
-        }
-        if let Some(oid) = toner.magenta.as_ref() {
-            insert_label(oid.clone(), "Toner: Magenta");
-        }
-        if let Some(oid) = toner.yellow.as_ref() {
-            insert_label(oid.clone(), "Toner: Yellow");
-        }
-
-        if let Some(profile) = self.active_profile.as_ref() {
-            for entry in &profile.extra_poll_labels {
-                map.insert(entry.oid.clone(), entry.label.clone());
-            }
-        }
-
-        map
+        build_poll_label_map(
+            &self.counter_oids,
+            &self.recording_oids,
+            self.active_profile.as_ref(),
+        )
     }
 
     fn counters_view(&self, state: &SnmpPollStatus, in_flight: bool) -> Element<'_, Message> {
@@ -3152,4 +3520,186 @@ impl PrintCountApp {
             .into()
     }
 
+}
+
+#[derive(Debug, Clone)]
+struct StatisticsChartSeries {
+    key: String,
+    label: String,
+    color: Color,
+    points: Vec<(u64, u64)>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StatisticsChartBounds {
+    min_timestamp: u64,
+    max_timestamp: u64,
+    min_value: u64,
+    max_value: u64,
+}
+
+fn statistics_chart_bounds(series: &[StatisticsChartSeries]) -> Option<StatisticsChartBounds> {
+    let mut timestamps = series
+        .iter()
+        .flat_map(|series| series.points.iter().map(|(timestamp, _)| *timestamp));
+    let mut values = series
+        .iter()
+        .flat_map(|series| series.points.iter().map(|(_, value)| *value));
+    let min_timestamp = timestamps.next()?;
+    let min_value = values.next()?;
+    let max_timestamp = series
+        .iter()
+        .flat_map(|series| series.points.iter().map(|(timestamp, _)| *timestamp))
+        .max()
+        .unwrap_or(min_timestamp);
+    let max_value = series
+        .iter()
+        .flat_map(|series| series.points.iter().map(|(_, value)| *value))
+        .max()
+        .unwrap_or(min_value);
+    let min_timestamp = series
+        .iter()
+        .flat_map(|series| series.points.iter().map(|(timestamp, _)| *timestamp))
+        .min()
+        .unwrap_or(min_timestamp);
+    let min_value = series
+        .iter()
+        .flat_map(|series| series.points.iter().map(|(_, value)| *value))
+        .min()
+        .unwrap_or(min_value);
+
+    Some(StatisticsChartBounds {
+        min_timestamp,
+        max_timestamp,
+        min_value,
+        max_value,
+    })
+}
+
+fn statistics_series_color(series_key: &str, index: usize) -> Color {
+    if series_key == RECORDED_EUR_SERIES_KEY {
+        return recording_active_color();
+    }
+
+    const PALETTE: [Color; 6] = [
+        Color::from_rgb(0.32, 0.69, 0.86),
+        Color::from_rgb(0.17, 0.55, 0.49),
+        Color::from_rgb(0.83, 0.47, 0.19),
+        Color::from_rgb(0.33, 0.47, 0.77),
+        Color::from_rgb(0.53, 0.63, 0.21),
+        Color::from_rgb(0.16, 0.64, 0.78),
+    ];
+
+    PALETTE[index % PALETTE.len()]
+}
+
+fn format_statistics_number(value: u64) -> String {
+    let digits = value.to_string();
+    let mut formatted = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().rev().enumerate() {
+        if index != 0 && index % 3 == 0 {
+            formatted.push(',');
+        }
+        formatted.push(digit);
+    }
+    formatted.chars().rev().collect()
+}
+
+fn statistics_line_chart_svg(
+    series: &[StatisticsChartSeries],
+    bounds: StatisticsChartBounds,
+) -> String {
+    use std::fmt::Write as _;
+
+    const WIDTH: f32 = 1000.0;
+    const HEIGHT: f32 = 220.0;
+    const PAD_LEFT: f32 = 18.0;
+    const PAD_RIGHT: f32 = 10.0;
+    const PAD_TOP: f32 = 12.0;
+    const PAD_BOTTOM: f32 = 12.0;
+
+    let plot_width = WIDTH - PAD_LEFT - PAD_RIGHT;
+    let plot_height = HEIGHT - PAD_TOP - PAD_BOTTOM;
+    let mut svg = String::new();
+    let _ = write!(
+        svg,
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {WIDTH} {HEIGHT}" fill="none">"#
+    );
+
+    for line in 0..=4 {
+        let y = PAD_TOP + (plot_height / 4.0) * line as f32;
+        let _ = write!(
+            svg,
+            r##"<line x1="{PAD_LEFT}" y1="{y:.2}" x2="{x2}" y2="{y:.2}" stroke="#D7DEE6" stroke-width="1"/>"##,
+            x2 = WIDTH - PAD_RIGHT,
+        );
+    }
+
+    for series in series {
+        let mut polyline = String::new();
+        for (index, (timestamp, value)) in series.points.iter().copied().enumerate() {
+            let x = statistics_chart_x(bounds, timestamp, plot_width, PAD_LEFT);
+            let y = statistics_chart_y(bounds, value, plot_height, PAD_TOP);
+            if index > 0 {
+                polyline.push(' ');
+            }
+            let _ = write!(polyline, "{x:.2},{y:.2}");
+        }
+
+        let color = statistics_color_hex(series.color);
+        if series.points.len() >= 2 {
+            let _ = write!(
+                svg,
+                r#"<polyline points="{polyline}" stroke="{color}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" fill="none"/>"#
+            );
+        }
+
+        for (timestamp, value) in &series.points {
+            let x = statistics_chart_x(bounds, *timestamp, plot_width, PAD_LEFT);
+            let y = statistics_chart_y(bounds, *value, plot_height, PAD_TOP);
+            let _ = write!(
+                svg,
+                r#"<circle cx="{x:.2}" cy="{y:.2}" r="3.2" fill="{color}" stroke="white" stroke-width="1.5"/>"#
+            );
+        }
+    }
+
+    svg.push_str("</svg>");
+    svg
+}
+
+fn statistics_chart_x(
+    bounds: StatisticsChartBounds,
+    timestamp: u64,
+    plot_width: f32,
+    left_padding: f32,
+) -> f32 {
+    let span = bounds.max_timestamp.saturating_sub(bounds.min_timestamp);
+    if span == 0 {
+        return left_padding + plot_width * 0.5;
+    }
+
+    left_padding + ((timestamp.saturating_sub(bounds.min_timestamp)) as f32 / span as f32) * plot_width
+}
+
+fn statistics_chart_y(
+    bounds: StatisticsChartBounds,
+    value: u64,
+    plot_height: f32,
+    top_padding: f32,
+) -> f32 {
+    let span = bounds.max_value.saturating_sub(bounds.min_value);
+    if span == 0 {
+        return top_padding + plot_height * 0.5;
+    }
+
+    let normalized = value.saturating_sub(bounds.min_value) as f32 / span as f32;
+    top_padding + plot_height - normalized * plot_height
+}
+
+fn statistics_color_hex(color: Color) -> String {
+    let red = (color.r.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let green = (color.g.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let blue = (color.b.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!("#{red:02X}{green:02X}{blue:02X}")
 }
