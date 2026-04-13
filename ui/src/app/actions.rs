@@ -2618,6 +2618,24 @@ mod tests {
     }
 
     #[test]
+    fn statistics_tab_requires_advanced_mode() {
+        let mut app = test_app();
+
+        let _ = app.update(Message::SelectTab(Tab::Statistics));
+        assert_eq!(app.active_tab, Tab::Printers);
+
+        let _ = app.update(Message::ToggleAdvancedMode);
+        assert!(app.advanced_mode);
+
+        let _ = app.update(Message::SelectTab(Tab::Statistics));
+        assert_eq!(app.active_tab, Tab::Statistics);
+
+        let _ = app.update(Message::ToggleAdvancedMode);
+        assert!(!app.advanced_mode);
+        assert_eq!(app.active_tab, Tab::Printers);
+    }
+
+    #[test]
     fn discovery_uses_saved_snmp_port_for_known_host() {
         let mut app = test_app();
         let mut record = printer_record(PrinterStatus::Online, Some(123));

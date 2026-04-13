@@ -325,7 +325,7 @@ impl PrintCountApp {
             Message::ToggleAdvancedMode => {
                 self.advanced_mode = !self.advanced_mode;
                 if !self.advanced_mode {
-                    if self.active_tab == Tab::Debug {
+                    if matches!(self.active_tab, Tab::Statistics | Tab::Debug) {
                         self.active_tab = Tab::Printers;
                     }
                     if !matches!(
@@ -407,7 +407,7 @@ impl PrintCountApp {
             }
             Message::DiscoveryProbeFinished(result) => self.handle_discovery_result(result),
             Message::SelectTab(tab) => {
-                if self.advanced_mode || tab != Tab::Debug {
+                if self.advanced_mode || !matches!(tab, Tab::Statistics | Tab::Debug) {
                     self.active_tab = tab;
                     if tab == Tab::Statistics {
                         self.ensure_statistics_selection();
@@ -958,7 +958,7 @@ impl PrintCountApp {
         let sidebar = container(self.printer_list_view())
             .width(Length::Fixed(367.0))
             .height(Length::Fill);
-        let main_content = if self.active_tab == Tab::Statistics {
+        let main_content = if self.advanced_mode && self.active_tab == Tab::Statistics {
             self.statistics_view()
         } else if self.advanced_mode && self.active_tab == Tab::Debug {
             self.debug_tab_view()

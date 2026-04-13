@@ -2,14 +2,12 @@ const PRINTER_DROP_SPLIT_Y: f32 = 32.0;
 
 impl PrintCountApp {
     fn tab_bar(&self) -> Element<'_, Message> {
-        let mut left_tabs = row![
-            self.tab_button(Tab::Printers, "Printers"),
-            self.statistics_tab_button()
-        ]
+        let mut left_tabs = row![self.tab_button(Tab::Printers, "Printers")]
             .spacing(8)
             .align_items(Alignment::Center);
 
         if self.advanced_mode {
+            left_tabs = left_tabs.push(self.statistics_tab_button());
             left_tabs = left_tabs.push(self.tab_button(Tab::Debug, "Debug"));
         }
 
