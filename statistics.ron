@@ -1,28 +1,75 @@
 (
     printers: [
         (
+            printer_id: ("snmp-192.168.129.151"),
+            poll_samples: [
+                (
+                    captured_at: 1776066240,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 0,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
+                            series_key: "label:Observed counter 72",
+                            label: "Observed counter 72",
+                            value: 0,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Print B/W counter",
+                            label: "Print B/W counter",
+                            value: 2738420,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Print color counter",
+                            label: "Print color counter",
+                            value: 2834556,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 193819,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 96136,
+                        ),
+                    ],
+                ),
+            ],
+            euro_samples: [],
+        ),
+        (
             printer_id: ("snmp-192.168.129.155"),
             poll_samples: [
                 (
-                    captured_at: 1775804173,
+                    captured_at: 1776066234,
                     metrics: [
                         (
                             oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
                             series_key: "label:Observed counter 3",
                             label: "Observed counter 3",
-                            value: 5961332,
+                            value: 5961333,
                         ),
                         (
                             oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
                             series_key: "label:Observed counter 5",
                             label: "Observed counter 5",
-                            value: 1732005,
+                            value: 1734037,
                         ),
                         (
                             oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
                             series_key: "label:Observed counter 71",
                             label: "Observed counter 71",
-                            value: 384307,
+                            value: 384897,
                         ),
                         (
                             oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
@@ -35,6 +82,53 @@
                             series_key: "label:Observed counter 9",
                             label: "Observed counter 9",
                             value: 0,
+                        ),
+                    ],
+                ),
+            ],
+            euro_samples: [],
+        ),
+        (
+            printer_id: ("snmp-192.168.129.20"),
+            poll_samples: [
+                (
+                    captured_at: 1776066235,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Observed counter 3",
+                            label: "Observed counter 3",
+                            value: 807399,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Observed counter 5",
+                            label: "Observed counter 5",
+                            value: 8967372,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 13468,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
+                            series_key: "label:Observed counter 72",
+                            label: "Observed counter 72",
+                            value: 0,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Observed counter 9",
+                            label: "Observed counter 9",
+                            value: 0,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 9774771,
                         ),
                     ],
                 ),
@@ -112,6 +206,17 @@
                 ),
                 (
                     captured_at: 1775835000,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.2.1.43.10.2.1.4.1.1",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1675993,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1776066241,
                     metrics: [
                         (
                             oid: "1.3.6.1.2.1.43.10.2.1.4.1.1",
@@ -853,6 +958,361 @@
                             series_key: "label:Print B/W counter",
                             label: "Print B/W counter",
                             value: 328604,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Print color counter",
+                            label: "Print color counter",
+                            value: 286083,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.1",
+                            series_key: "label:Toner: Black",
+                            label: "Toner: Black",
+                            value: 60,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.3",
+                            series_key: "label:Toner: Magenta",
+                            label: "Toner: Magenta",
+                            value: 70,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1776066691,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.22",
+                            series_key: "label:Clicks: B/W",
+                            label: "Clicks: B/W",
+                            value: 613107,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.21",
+                            series_key: "label:Clicks: Color",
+                            label: "Clicks: Color",
+                            value: 302368,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.59",
+                            series_key: "label:Clicks: Total",
+                            label: "Clicks: Total",
+                            value: 915475,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Copy B/W counter",
+                            label: "Copy B/W counter",
+                            value: 280206,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Copy color counter",
+                            label: "Copy color counter",
+                            value: 16153,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed transmission counter 71",
+                            label: "Observed transmission counter 71",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
+                            series_key: "label:Observed transmission counter 72",
+                            label: "Observed transmission counter 72",
+                            value: 97025,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Print B/W counter",
+                            label: "Print B/W counter",
+                            value: 328660,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Print color counter",
+                            label: "Print color counter",
+                            value: 286083,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.1",
+                            series_key: "label:Toner: Black",
+                            label: "Toner: Black",
+                            value: 60,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.3",
+                            series_key: "label:Toner: Magenta",
+                            label: "Toner: Magenta",
+                            value: 70,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1776067201,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.22",
+                            series_key: "label:Clicks: B/W",
+                            label: "Clicks: B/W",
+                            value: 613107,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.21",
+                            series_key: "label:Clicks: Color",
+                            label: "Clicks: Color",
+                            value: 302368,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.59",
+                            series_key: "label:Clicks: Total",
+                            label: "Clicks: Total",
+                            value: 915475,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Copy B/W counter",
+                            label: "Copy B/W counter",
+                            value: 280206,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Copy color counter",
+                            label: "Copy color counter",
+                            value: 16153,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed transmission counter 71",
+                            label: "Observed transmission counter 71",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
+                            series_key: "label:Observed transmission counter 72",
+                            label: "Observed transmission counter 72",
+                            value: 97025,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Print B/W counter",
+                            label: "Print B/W counter",
+                            value: 328660,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Print color counter",
+                            label: "Print color counter",
+                            value: 286083,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.1",
+                            series_key: "label:Toner: Black",
+                            label: "Toner: Black",
+                            value: 60,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.3",
+                            series_key: "label:Toner: Magenta",
+                            label: "Toner: Magenta",
+                            value: 70,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1776068101,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.22",
+                            series_key: "label:Clicks: B/W",
+                            label: "Clicks: B/W",
+                            value: 613107,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.21",
+                            series_key: "label:Clicks: Color",
+                            label: "Clicks: Color",
+                            value: 302368,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.59",
+                            series_key: "label:Clicks: Total",
+                            label: "Clicks: Total",
+                            value: 915475,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Copy B/W counter",
+                            label: "Copy B/W counter",
+                            value: 280206,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Copy color counter",
+                            label: "Copy color counter",
+                            value: 16153,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed transmission counter 71",
+                            label: "Observed transmission counter 71",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
+                            series_key: "label:Observed transmission counter 72",
+                            label: "Observed transmission counter 72",
+                            value: 97025,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Print B/W counter",
+                            label: "Print B/W counter",
+                            value: 328660,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Print color counter",
+                            label: "Print color counter",
+                            value: 286083,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.1",
+                            series_key: "label:Toner: Black",
+                            label: "Toner: Black",
+                            value: 60,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.3",
+                            series_key: "label:Toner: Magenta",
+                            label: "Toner: Magenta",
+                            value: 70,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1776069001,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.22",
+                            series_key: "label:Clicks: B/W",
+                            label: "Clicks: B/W",
+                            value: 613107,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.21",
+                            series_key: "label:Clicks: Color",
+                            label: "Clicks: Color",
+                            value: 302368,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.59",
+                            series_key: "label:Clicks: Total",
+                            label: "Clicks: Total",
+                            value: 915475,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Copy B/W counter",
+                            label: "Copy B/W counter",
+                            value: 280206,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Copy color counter",
+                            label: "Copy color counter",
+                            value: 16153,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed transmission counter 71",
+                            label: "Observed transmission counter 71",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
+                            series_key: "label:Observed transmission counter 72",
+                            label: "Observed transmission counter 72",
+                            value: 97025,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Print B/W counter",
+                            label: "Print B/W counter",
+                            value: 328660,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Print color counter",
+                            label: "Print color counter",
+                            value: 286083,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.1",
+                            series_key: "label:Toner: Black",
+                            label: "Toner: Black",
+                            value: 60,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.3",
+                            series_key: "label:Toner: Magenta",
+                            label: "Toner: Magenta",
+                            value: 70,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1776070511,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.22",
+                            series_key: "label:Clicks: B/W",
+                            label: "Clicks: B/W",
+                            value: 613107,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.21",
+                            series_key: "label:Clicks: Color",
+                            label: "Clicks: Color",
+                            value: 302368,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.59",
+                            series_key: "label:Clicks: Total",
+                            label: "Clicks: Total",
+                            value: 915475,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Copy B/W counter",
+                            label: "Copy B/W counter",
+                            value: 280206,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Copy color counter",
+                            label: "Copy color counter",
+                            value: 16153,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed transmission counter 71",
+                            label: "Observed transmission counter 71",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
+                            series_key: "label:Observed transmission counter 72",
+                            label: "Observed transmission counter 72",
+                            value: 97025,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Print B/W counter",
+                            label: "Print B/W counter",
+                            value: 328660,
                         ),
                         (
                             oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",

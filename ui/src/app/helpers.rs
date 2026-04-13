@@ -586,6 +586,41 @@ pub(crate) enum ManualLineState {
     Ready(ManualLineBreakdown),
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct ManualPrintCounters {
+    bw_tiered_sides: u64,
+    color_tiered_sides: u64,
+}
+
+impl ManualPrintCounters {
+    fn tiered_sides_for(self, mode: ManualPrintMode) -> u64 {
+        match mode {
+            ManualPrintMode::Bw => self.bw_tiered_sides,
+            ManualPrintMode::Color => self.color_tiered_sides,
+        }
+    }
+
+    fn add_tiered_sides(&mut self, mode: Option<ManualPrintMode>, count: u64) {
+        match mode {
+            Some(ManualPrintMode::Bw) => {
+                self.bw_tiered_sides = self.bw_tiered_sides.saturating_add(count);
+            }
+            Some(ManualPrintMode::Color) => {
+                self.color_tiered_sides = self.color_tiered_sides.saturating_add(count);
+            }
+            None => {}
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ManualPrintPricing {
+    total_cents: u64,
+    label: String,
+    counter_mode: Option<ManualPrintMode>,
+    counter_increment: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ManualFinisherBreakdown {
     pub(crate) amount: u64,
@@ -629,24 +664,41 @@ pub(crate) fn manual_round_total_cents(total_cents: u64, mode: ManualRoundingMod
 
 fn tiered_total_cents(
     count: u64,
+    already_counted: u64,
     first_cents: u64,
     next_cents: Option<u64>,
     rest_cents: u64,
 ) -> u64 {
-    let first_count = count.min(5);
-    let next_count = count.saturating_sub(5).min(5);
-    let rest_count = count.saturating_sub(10);
+    fn overlap_count(start: u64, count: u64, tier_start: u64, tier_end: Option<u64>) -> u64 {
+        let end = start.saturating_add(count);
+        let overlap_start = start.max(tier_start);
+        let overlap_end = tier_end.map_or(end, |tier_end| end.min(tier_end));
+
+        overlap_end.saturating_sub(overlap_start)
+    }
+
+    let first_count = overlap_count(already_counted, count, 0, Some(5));
+    let next_count = next_cents
+        .map(|_| overlap_count(already_counted, count, 5, Some(10)))
+        .unwrap_or(0);
+    let rest_count = overlap_count(
+        already_counted,
+        count,
+        if next_cents.is_some() { 10 } else { 5 },
+        None,
+    );
 
     first_count.saturating_mul(first_cents)
-        + next_count.saturating_mul(next_cents.unwrap_or(rest_cents))
+        + next_count.saturating_mul(next_cents.unwrap_or(0))
         + rest_count.saturating_mul(rest_cents)
 }
 
-fn manual_print_total_cents(
+fn manual_print_pricing(
     settings: &ManualPricingSettings,
     line_item: &ManualPricingLineItem,
     sides: u64,
-) -> Option<(u64, String)> {
+    counters: ManualPrintCounters,
+) -> Option<ManualPrintPricing> {
     match line_item.size {
         ManualPrintSize::A3 | ManualPrintSize::A4 => match line_item.print_mode {
             ManualPrintMode::Bw => {
@@ -665,15 +717,23 @@ fn manual_print_total_cents(
                         .ok()
                         .flatten()?;
 
-                Some((
-                    tiered_total_cents(sides, first, Some(next), rest),
-                    format!(
+                Some(ManualPrintPricing {
+                    total_cents: tiered_total_cents(
+                        sides,
+                        counters.tiered_sides_for(ManualPrintMode::Bw),
+                        first,
+                        Some(next),
+                        rest,
+                    ),
+                    label: format!(
                         "B/W tiers: 1-5 {}, 6-10 {}, 11+ {}",
                         format_cents(first),
                         format_cents(next),
                         format_cents(rest)
                     ),
-                ))
+                    counter_mode: Some(ManualPrintMode::Bw),
+                    counter_increment: sides,
+                })
             }
             ManualPrintMode::Color => {
                 let first = parse_price_input(
@@ -687,36 +747,46 @@ fn manual_print_total_cents(
                 .ok()
                 .flatten()?;
 
-                Some((
-                    sides.min(5).saturating_mul(first)
-                        + sides.saturating_sub(5).saturating_mul(rest),
-                    format!(
+                Some(ManualPrintPricing {
+                    total_cents: tiered_total_cents(
+                        sides,
+                        counters.tiered_sides_for(ManualPrintMode::Color),
+                        first,
+                        None,
+                        rest,
+                    ),
+                    label: format!(
                         "Color tiers: 1-5 {}, 6+ {}",
                         format_cents(first),
                         format_cents(rest)
                     ),
-                ))
+                    counter_mode: Some(ManualPrintMode::Color),
+                    counter_increment: sides,
+                })
             }
         },
         _ => {
             let price_cents = parse_price_input(settings.size_price_input(line_item.size))
                 .ok()
                 .flatten()?;
-            Some((
-                sides.saturating_mul(price_cents),
-                format!(
+            Some(ManualPrintPricing {
+                total_cents: sides.saturating_mul(price_cents),
+                label: format!(
                     "Flat {} {}",
                     line_item.print_mode,
                     format_cents(price_cents)
                 ),
-            ))
+                counter_mode: None,
+                counter_increment: 0,
+            })
         }
     }
 }
 
-pub(crate) fn manual_line_state(
+fn manual_line_state_with_counters(
     settings: &ManualPricingSettings,
     line_item: &ManualPricingLineItem,
+    counters: &mut ManualPrintCounters,
 ) -> ManualLineState {
     let sheets_trimmed = line_item.sheets_input.trim();
     let sides_trimmed = line_item.sides_input.trim();
@@ -730,8 +800,7 @@ pub(crate) fn manual_line_state(
     let Some(sides) = parse_count_input(&line_item.sides_input).ok().flatten() else {
         return ManualLineState::Invalid;
     };
-    let Some((print_total_cents, print_pricing_label)) =
-        manual_print_total_cents(settings, line_item, sides)
+    let Some(print_pricing) = manual_print_pricing(settings, line_item, sides, *counters)
     else {
         return ManualLineState::Invalid;
     };
@@ -756,15 +825,16 @@ pub(crate) fn manual_line_state(
     };
 
     let paper_total_cents = sheets.saturating_mul(paper_price_cents);
+    counters.add_tiered_sides(print_pricing.counter_mode, print_pricing.counter_increment);
 
     ManualLineState::Ready(ManualLineBreakdown {
         sheets,
         sides,
-        print_pricing_label,
+        print_pricing_label: print_pricing.label,
         paper_price_cents,
-        print_total_cents,
+        print_total_cents: print_pricing.total_cents,
         paper_total_cents,
-        total_cents: print_total_cents.saturating_add(paper_total_cents),
+        total_cents: print_pricing.total_cents.saturating_add(paper_total_cents),
     })
 }
 
@@ -836,10 +906,11 @@ pub(crate) fn manual_finisher_state(
 }
 
 pub(crate) fn manual_pricing_totals(settings: &ManualPricingSettings) -> ManualPricingTotals {
+    let mut print_counters = ManualPrintCounters::default();
     let line_states: Vec<_> = settings
         .line_items
         .iter()
-        .map(|line_item| manual_line_state(settings, line_item))
+        .map(|line_item| manual_line_state_with_counters(settings, line_item, &mut print_counters))
         .collect();
     let finisher_states: Vec<_> = settings
         .finisher_items
@@ -1094,6 +1165,7 @@ mod tests {
         category_end_display, category_end_value, category_start_display, category_start_value,
         default_recording_oid_inputs, default_toner_oids, delta_value,
         format_clock_hms_with_offset, format_elapsed_hms, manual_pricing_totals,
+        ManualLineState,
         manual_round_total_cents, missing_recording_snapshot_categories,
         recording_profile_from_settings_lossy, round_to_nearest_5_cents, snmp_oids,
         sum_optional_included, sum_two,
@@ -1351,6 +1423,98 @@ mod tests {
         let totals = manual_pricing_totals(&settings);
 
         assert_eq!(totals.subtotal_cents, Some(310));
+    }
+
+    #[test]
+    fn manual_pricing_shares_color_counter_across_sizes_and_preserves_modifier_prices() {
+        let settings = ManualPricingSettings {
+            a3_color_first_input: "1.50".to_string(),
+            a3_color_rest_input: "1.00".to_string(),
+            a4_color_first_input: "0.75".to_string(),
+            a4_color_rest_input: "0.50".to_string(),
+            modifiers: vec![
+                ManualPaperModifier {
+                    name_input: "300G".to_string(),
+                    a3_price_input: "0.20".to_string(),
+                    ..ManualPaperModifier::default()
+                },
+                ManualPaperModifier {
+                    name_input: "200G".to_string(),
+                    a4_price_input: "0.10".to_string(),
+                    ..ManualPaperModifier::default()
+                },
+            ],
+            line_items: vec![
+                ManualPricingLineItem {
+                    size: ManualPrintSize::A3,
+                    print_mode: ManualPrintMode::Color,
+                    modifier_index: Some(0),
+                    sides_input: "10".to_string(),
+                    ..ManualPricingLineItem::default()
+                },
+                ManualPricingLineItem {
+                    size: ManualPrintSize::A4,
+                    print_mode: ManualPrintMode::Color,
+                    modifier_index: Some(1),
+                    sides_input: "10".to_string(),
+                    ..ManualPricingLineItem::default()
+                },
+            ],
+            ..ManualPricingSettings::default()
+        };
+
+        let totals = manual_pricing_totals(&settings);
+
+        assert_eq!(totals.subtotal_cents, Some(2_050));
+        assert!(matches!(
+            totals.line_states.as_slice(),
+            [
+                ManualLineState::Ready(first),
+                ManualLineState::Ready(second)
+            ] if first.print_total_cents == 1_250
+                && first.paper_total_cents == 200
+                && second.print_total_cents == 500
+                && second.paper_total_cents == 100
+        ));
+    }
+
+    #[test]
+    fn manual_pricing_shares_bw_counter_across_a3_and_a4_lines() {
+        let settings = ManualPricingSettings {
+            a3_bw_first_input: "0.35".to_string(),
+            a3_bw_next_input: "0.20".to_string(),
+            a3_bw_rest_input: "0.12".to_string(),
+            a4_bw_first_input: "0.25".to_string(),
+            a4_bw_next_input: "0.10".to_string(),
+            a4_bw_rest_input: "0.06".to_string(),
+            line_items: vec![
+                ManualPricingLineItem {
+                    size: ManualPrintSize::A3,
+                    print_mode: ManualPrintMode::Bw,
+                    sides_input: "20".to_string(),
+                    ..ManualPricingLineItem::default()
+                },
+                ManualPricingLineItem {
+                    size: ManualPrintSize::A4,
+                    print_mode: ManualPrintMode::Bw,
+                    sides_input: "20".to_string(),
+                    ..ManualPricingLineItem::default()
+                },
+            ],
+            ..ManualPricingSettings::default()
+        };
+
+        let totals = manual_pricing_totals(&settings);
+
+        assert_eq!(totals.subtotal_cents, Some(515));
+        assert!(matches!(
+            totals.line_states.as_slice(),
+            [
+                ManualLineState::Ready(first),
+                ManualLineState::Ready(second)
+            ] if first.print_total_cents == 395
+                && second.print_total_cents == 120
+        ));
     }
 
     #[test]
