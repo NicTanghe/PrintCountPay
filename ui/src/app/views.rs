@@ -2134,7 +2134,8 @@ impl PrintCountApp {
             })
             .cloned()
             .collect::<Vec<_>>();
-        let bounds = statistics_chart_bounds(&visible_series);
+        let auto_bounds = statistics_chart_bounds(&visible_series);
+        let bounds = self.statistics_effective_chart_bounds(auto_bounds, &visible_series);
 
         let header = column![
             text("Statistics")
@@ -2154,6 +2155,7 @@ impl PrintCountApp {
                     &selected_printers,
                     &aggregated_series,
                     &visible_series,
+                    auto_bounds,
                     bounds,
                 ),
                 self.statistics_series_controls(&aggregated_series),
@@ -2176,6 +2178,7 @@ impl PrintCountApp {
         selected_printers: &[&PrinterRecord],
         aggregated_series: &[StatisticsChartSeries],
         visible_series: &[StatisticsChartSeries],
+        auto_bounds: Option<StatisticsChartBounds>,
         bounds: Option<StatisticsChartBounds>,
     ) -> Element<'_, Message> {
         let selected_label = self.statistics_selection_summary(selected_printers);
@@ -2207,6 +2210,9 @@ impl PrintCountApp {
                         text(selected_label)
                             .size(12)
                             .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                        text("Aggregation: checked categories are added together across the selected printers.")
+                            .size(11)
+                            .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
                     ]
                     .spacing(4),
                     horizontal_space(),
@@ -2235,6 +2241,7 @@ impl PrintCountApp {
                     ),
                 ]
                 .spacing(10),
+                self.statistics_axis_controls(auto_bounds, visible_series),
                 chart_body,
                 if let Some(bounds) = bounds {
                     self.statistics_axis(bounds)
@@ -2486,6 +2493,111 @@ impl PrintCountApp {
         } else {
             format_statistics_number(value)
         }
+    }
+
+    fn statistics_effective_chart_bounds(
+        &self,
+        auto_bounds: Option<StatisticsChartBounds>,
+        visible_series: &[StatisticsChartSeries],
+    ) -> Option<StatisticsChartBounds> {
+        let mut bounds = auto_bounds?;
+        let currency_only = statistics_series_are_currency_only(visible_series);
+        let manual_min = parse_statistics_axis_bound(&self.statistics_axis_min_input, currency_only);
+        let manual_max = parse_statistics_axis_bound(&self.statistics_axis_max_input, currency_only);
+
+        if let Some(min_value) = manual_min {
+            bounds.min_value = min_value;
+        }
+        if let Some(max_value) = manual_max {
+            bounds.max_value = max_value;
+        }
+
+        if bounds.max_value <= bounds.min_value {
+            return auto_bounds;
+        }
+
+        Some(bounds)
+    }
+
+    fn statistics_axis_controls(
+        &self,
+        auto_bounds: Option<StatisticsChartBounds>,
+        visible_series: &[StatisticsChartSeries],
+    ) -> Element<'_, Message> {
+        let currency_only = statistics_series_are_currency_only(visible_series);
+        let unit_label = if visible_series.is_empty() {
+            "Auto range will appear once a visible series has data.".to_string()
+        } else if currency_only {
+            "Axis bounds use EUR values for the visible series.".to_string()
+        } else if visible_series
+            .iter()
+            .any(|series| statistics_series_is_currency_key(&series.key))
+        {
+            "Axis bounds use raw graph values because counter and EUR lines are mixed.".to_string()
+        } else {
+            "Axis bounds use raw counter values.".to_string()
+        };
+        let auto_min = auto_bounds
+            .map(|bounds| self.statistics_axis_value_text(visible_series, bounds.min_value))
+            .unwrap_or_else(|| "auto".to_string());
+        let auto_max = auto_bounds
+            .map(|bounds| self.statistics_axis_value_text(visible_series, bounds.max_value))
+            .unwrap_or_else(|| "auto".to_string());
+        let invalid_range = auto_bounds.is_some()
+            && !self.statistics_axis_min_input.trim().is_empty()
+            && !self.statistics_axis_max_input.trim().is_empty()
+            && self
+                .statistics_effective_chart_bounds(auto_bounds, visible_series)
+                == auto_bounds;
+        let invalid_note: Element<'_, Message> = if invalid_range {
+            text("Manual range ignored because min is not smaller than max.")
+                .size(11)
+                .style(theme::Text::Color(recording_active_color()))
+                .into()
+        } else {
+            Space::new()
+                .width(Length::Shrink)
+                .height(Length::Fixed(0.0))
+                .into()
+        };
+
+        container(
+            column![
+                row![
+                    self.manual_input(
+                        "Y Min",
+                        &auto_min,
+                        &self.statistics_axis_min_input,
+                        Message::StatisticsAxisMinChanged,
+                    ),
+                    self.manual_input(
+                        "Y Max",
+                        &auto_max,
+                        &self.statistics_axis_max_input,
+                        Message::StatisticsAxisMaxChanged,
+                    ),
+                    container(
+                        button("Auto")
+                            .padding([6, 10])
+                            .style(theme::Button::custom(muted_content_button_style()))
+                            .on_press(Message::ResetStatisticsAxisBounds),
+                    )
+                    .align_y(iced::alignment::Vertical::Bottom)
+                    .width(Length::Shrink),
+                ]
+                .spacing(10)
+                .align_items(Alignment::End),
+                text(unit_label)
+                    .size(11)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                invalid_note,
+            ]
+            .spacing(6),
+        )
+        .padding([8, 10])
+        .width(Length::Fill)
+        .style(theme::Container::Custom(statistics_chart_track_style()))
+        .into()
     }
 
     fn statistics_cleanup_indicator(&self) -> Element<'_, Message> {
@@ -3532,7 +3644,7 @@ struct StatisticsChartSeries {
     points: Vec<(u64, u64)>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct StatisticsChartBounds {
     min_timestamp: u64,
     max_timestamp: u64,
@@ -3614,6 +3726,13 @@ fn statistics_series_is_currency_key(series_key: &str) -> bool {
     )
 }
 
+fn statistics_series_are_currency_only(series: &[StatisticsChartSeries]) -> bool {
+    !series.is_empty()
+        && series
+            .iter()
+            .all(|series| statistics_series_is_currency_key(&series.key))
+}
+
 fn format_statistics_number(value: u64) -> String {
     let digits = value.to_string();
     let mut formatted = String::with_capacity(digits.len() + digits.len() / 3);
@@ -3624,6 +3743,24 @@ fn format_statistics_number(value: u64) -> String {
         formatted.push(digit);
     }
     formatted.chars().rev().collect()
+}
+
+fn parse_statistics_axis_bound(value: &str, currency_only: bool) -> Option<u64> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if currency_only {
+        let normalized = trimmed.replace(',', ".");
+        let parsed = normalized.parse::<f64>().ok()?;
+        if parsed.is_sign_negative() {
+            return None;
+        }
+        Some((parsed * 100.0).round() as u64)
+    } else {
+        trimmed.replace(',', "").parse::<u64>().ok()
+    }
 }
 
 fn statistics_line_chart_svg(

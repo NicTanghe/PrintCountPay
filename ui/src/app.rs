@@ -127,6 +127,8 @@ pub struct PrintCountApp {
     statistics_cleanup_in_flight: bool,
     statistics_cleanup_pending_revision: Option<u64>,
     statistics_cleanup_receiver: Option<mpsc::Receiver<StatisticsCleanupResult>>,
+    statistics_axis_min_input: String,
+    statistics_axis_max_input: String,
     manual_pricing_selected: bool,
     selected_manual_bill_id: Option<String>,
     manual_pricing_tab: ManualPricingTab,
@@ -247,6 +249,8 @@ impl PrintCountApp {
             statistics_cleanup_in_flight: false,
             statistics_cleanup_pending_revision: None,
             statistics_cleanup_receiver: None,
+            statistics_axis_min_input: String::new(),
+            statistics_axis_max_input: String::new(),
             manual_pricing_selected: false,
             selected_manual_bill_id: None,
             manual_pricing_tab: ManualPricingTab::Calculator,
@@ -448,6 +452,19 @@ impl PrintCountApp {
             }
             Message::ToggleStatisticsSeries(series_key) => {
                 self.toggle_statistics_series(series_key);
+                Command::none()
+            }
+            Message::StatisticsAxisMinChanged(value) => {
+                self.statistics_axis_min_input = value;
+                Command::none()
+            }
+            Message::StatisticsAxisMaxChanged(value) => {
+                self.statistics_axis_max_input = value;
+                Command::none()
+            }
+            Message::ResetStatisticsAxisBounds => {
+                self.statistics_axis_min_input.clear();
+                self.statistics_axis_max_input.clear();
                 Command::none()
             }
             Message::StartPrinterReorderDrag(printer_id) => {
