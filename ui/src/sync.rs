@@ -18,7 +18,7 @@ use tokio::time::{MissedTickBehavior, sleep, timeout};
 
 use crate::app::{
     ManualPricingBill, ManualPricingBillTombstone, ManualPricingWorkspace, PricingSettings,
-    RecordingSession, SnmpPollStatus,
+    RecordingSession, SnmpPollStatus, StatisticsStore,
 };
 
 pub const SYNC_PORT: u16 = 32_161;
@@ -83,6 +83,12 @@ pub(crate) struct PricingSyncPayload {
     pub(crate) workspace: ManualPricingWorkspace,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct StatisticsSyncPayload {
+    pub(crate) latest_data_at: u64,
+    pub(crate) store: StatisticsStore,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SyncRole {
     Searching,
@@ -101,6 +107,7 @@ pub(crate) enum SyncCommand {
     SetSnapshot(SharedState),
     RequestPoll(PrinterId),
     SyncPrices(PricingSyncPayload),
+    SyncStatistics(StatisticsSyncPayload),
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +117,7 @@ pub(crate) enum SyncEvent {
     SnapshotReceived(SharedState),
     PollRequested(PrinterId),
     PricingSyncReceived(PricingSyncPayload),
+    StatisticsSyncReceived(StatisticsSyncPayload),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,6 +125,7 @@ enum WireMessage {
     Snapshot(SharedState),
     PollRequest(PrinterId),
     PricingSync(PricingSyncPayload),
+    StatisticsSync(StatisticsSyncPayload),
     Heartbeat,
 }
 
@@ -142,6 +151,7 @@ fn sync_worker() -> impl iced::futures::Stream<Item = SyncEvent> {
         let (command_tx, mut command_rx) = mpsc::unbounded_channel::<SyncCommand>();
         let mut latest_snapshot = None::<SharedState>;
         let mut latest_pricing_sync = None::<PricingSyncPayload>;
+        let mut latest_statistics_sync = None::<StatisticsSyncPayload>;
         let mut last_status = None::<SyncStatus>;
 
         let _ = output.send(SyncEvent::Ready(command_tx)).await;
@@ -173,6 +183,7 @@ fn sync_worker() -> impl iced::futures::Stream<Item = SyncEvent> {
                         &mut command_rx,
                         &mut latest_snapshot,
                         &mut latest_pricing_sync,
+                        &mut latest_statistics_sync,
                         &mut last_status,
                     )
                     .await
@@ -195,6 +206,7 @@ fn sync_worker() -> impl iced::futures::Stream<Item = SyncEvent> {
                             &mut command_rx,
                             &mut latest_snapshot,
                             &mut latest_pricing_sync,
+                            &mut latest_statistics_sync,
                             &mut last_status,
                         )
                         .await
@@ -231,6 +243,7 @@ async fn run_as_master(
     command_rx: &mut mpsc::UnboundedReceiver<SyncCommand>,
     latest_snapshot: &mut Option<SharedState>,
     latest_pricing_sync: &mut Option<PricingSyncPayload>,
+    latest_statistics_sync: &mut Option<StatisticsSyncPayload>,
     last_status: &mut Option<SyncStatus>,
 ) -> Result<(), ()> {
     emit_status(
@@ -276,6 +289,12 @@ async fn run_as_master(
                         *latest_pricing_sync = Some(payload.clone());
                         broadcast(&mut clients, &WireMessage::PricingSync(payload));
                     }
+                    SyncCommand::SyncStatistics(payload) => {
+                        if statistics_payload_is_newer(&payload, latest_statistics_sync.as_ref()) {
+                            *latest_statistics_sync = Some(payload.clone());
+                        }
+                        broadcast(&mut clients, &WireMessage::StatisticsSync(payload));
+                    }
                 }
             }
             event = event_rx.recv() => {
@@ -294,6 +313,9 @@ async fn run_as_master(
                         }
                         if let Some(payload) = latest_pricing_sync.clone() {
                             let _ = sender.send(WireMessage::PricingSync(payload));
+                        }
+                        if let Some(payload) = latest_statistics_sync.clone() {
+                            let _ = sender.send(WireMessage::StatisticsSync(payload));
                         }
                     }
                     MasterEvent::ClientMessage(client_id, message) => {
@@ -319,6 +341,15 @@ async fn run_as_master(
                                 }
                                 broadcast(&mut clients, &WireMessage::PricingSync(payload));
                             }
+                            WireMessage::StatisticsSync(payload) => {
+                                if statistics_payload_is_newer(&payload, latest_statistics_sync.as_ref()) {
+                                    *latest_statistics_sync = Some(payload.clone());
+                                }
+                                if output.send(SyncEvent::StatisticsSyncReceived(payload.clone())).await.is_err() {
+                                    return Err(());
+                                }
+                                broadcast(&mut clients, &WireMessage::StatisticsSync(payload));
+                            }
                             WireMessage::Heartbeat => {}
                         }
                         clients.retain(|id, sender| *id != client_id || !sender.is_closed());
@@ -341,6 +372,7 @@ async fn run_as_client(
     command_rx: &mut mpsc::UnboundedReceiver<SyncCommand>,
     latest_snapshot: &mut Option<SharedState>,
     latest_pricing_sync: &mut Option<PricingSyncPayload>,
+    latest_statistics_sync: &mut Option<StatisticsSyncPayload>,
     last_status: &mut Option<SyncStatus>,
 ) -> Result<(), ()> {
     emit_status(
@@ -396,6 +428,14 @@ async fn run_as_client(
                             return Err(());
                         }
                     }
+                    SyncCommand::SyncStatistics(payload) => {
+                        if statistics_payload_is_newer(&payload, latest_statistics_sync.as_ref()) {
+                            *latest_statistics_sync = Some(payload.clone());
+                        }
+                        if write_frame(&mut writer, &WireMessage::StatisticsSync(payload)).await.is_err() {
+                            return Err(());
+                        }
+                    }
                 }
             }
             event = event_rx.recv() => {
@@ -414,6 +454,14 @@ async fn run_as_client(
                         WireMessage::PricingSync(payload) => {
                             *latest_pricing_sync = Some(payload.clone());
                             if output.send(SyncEvent::PricingSyncReceived(payload)).await.is_err() {
+                                return Err(());
+                            }
+                        }
+                        WireMessage::StatisticsSync(payload) => {
+                            if statistics_payload_is_newer(&payload, latest_statistics_sync.as_ref()) {
+                                *latest_statistics_sync = Some(payload.clone());
+                            }
+                            if output.send(SyncEvent::StatisticsSyncReceived(payload)).await.is_err() {
                                 return Err(());
                             }
                         }
@@ -583,6 +631,15 @@ fn broadcast(clients: &mut HashMap<u64, UnboundedSender<WireMessage>>, message: 
 fn is_newer(candidate: &SharedState, current: Option<&SharedState>) -> bool {
     current
         .map(|current| candidate.revision > current.revision)
+        .unwrap_or(true)
+}
+
+fn statistics_payload_is_newer(
+    candidate: &StatisticsSyncPayload,
+    current: Option<&StatisticsSyncPayload>,
+) -> bool {
+    current
+        .map(|current| candidate.latest_data_at > current.latest_data_at)
         .unwrap_or(true)
 }
 

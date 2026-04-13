@@ -5,6 +5,7 @@ use printcountpay_core::{
     SnmpVarBind,
 };
 use serde::{Deserialize, Serialize};
+use time::Month;
 
 use crate::logging::{LogLevel, LogStore, ReloadHandle};
 use crate::sync::SyncEvent;
@@ -23,6 +24,35 @@ pub enum PrinterTab {
     Pricing,
     Oids,
     AddPrinters,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatisticsRangePreset {
+    Day,
+    Week,
+    Month,
+    ThreeMonths,
+    Year,
+    Custom,
+}
+
+impl std::fmt::Display for StatisticsRangePreset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Day => write!(f, "1 day"),
+            Self::Week => write!(f, "1 week"),
+            Self::Month => write!(f, "1 month"),
+            Self::ThreeMonths => write!(f, "3 months"),
+            Self::Year => write!(f, "1 year"),
+            Self::Custom => write!(f, "Custom"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatisticsDateTarget {
+    Start,
+    End,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -756,6 +786,11 @@ pub(crate) enum Message {
     SelectPrinter(PrinterId),
     ToggleStatisticsPrinter(PrinterId),
     ToggleStatisticsSeries(String),
+    SelectStatisticsRangePreset(StatisticsRangePreset),
+    StatisticsDateYearSelected(StatisticsDateTarget, i32),
+    StatisticsDateMonthSelected(StatisticsDateTarget, Month),
+    StatisticsDateDaySelected(StatisticsDateTarget, u8),
+    StatisticsDateSetToday(StatisticsDateTarget),
     StatisticsAxisMinChanged(String),
     StatisticsAxisMaxChanged(String),
     ResetStatisticsAxisBounds,

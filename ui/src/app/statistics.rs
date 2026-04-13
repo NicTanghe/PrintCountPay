@@ -9,12 +9,12 @@ use printcountpay_core::PrinterId;
 use ron::de::from_str;
 use ron::ser::{PrettyConfig, to_string_pretty};
 use serde::{Deserialize, Serialize};
-use time::{OffsetDateTime, UtcOffset};
+use time::{Date, Duration as TimeDuration, Month, OffsetDateTime, UtcOffset};
 
 use super::helpers::{
     bw_cost_cents, bw_pricing_from_settings, color_cost_cents, color_price_from_settings,
 };
-use super::types::PricingSettings;
+use super::types::{PricingSettings, StatisticsRangePreset};
 
 pub(crate) const STATISTICS_POLL_TICK: Duration = Duration::from_secs(60);
 pub(crate) const STATISTICS_CLEANUP_TICK: Duration = Duration::from_millis(250);
@@ -27,6 +27,20 @@ pub(crate) const ESTIMATED_INCOME_BW_SERIES_KEY: &str = "series:estimated-income
 pub(crate) const ESTIMATED_INCOME_BW_SERIES_LABEL: &str = "Estimated Income B/W";
 pub(crate) const ESTIMATED_INCOME_COLOR_SERIES_KEY: &str = "series:estimated-income-color";
 pub(crate) const ESTIMATED_INCOME_COLOR_SERIES_LABEL: &str = "Estimated Income Color";
+pub(crate) const STATISTICS_MONTHS: [Month; 12] = [
+    Month::January,
+    Month::February,
+    Month::March,
+    Month::April,
+    Month::May,
+    Month::June,
+    Month::July,
+    Month::August,
+    Month::September,
+    Month::October,
+    Month::November,
+    Month::December,
+];
 
 const RECENT_RETENTION_SECS: u64 = 2 * 24 * 60 * 60;
 const BUSINESS_START_MINUTES: u16 = 10 * 60 + 45;
@@ -170,6 +184,12 @@ pub(crate) struct StatisticsCleanupResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StatisticsMergeResult {
+    pub(crate) changed: bool,
+    pub(crate) differs_from_incoming: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StatisticsSeriesDefinition {
     pub(crate) key: String,
     pub(crate) label: String,
@@ -185,6 +205,120 @@ struct DayKey {
 struct AggregatedPoint {
     timestamp: u64,
     value: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct StatisticsTimeWindow {
+    pub(crate) start_inclusive: u64,
+    pub(crate) end_exclusive: u64,
+}
+
+impl StatisticsTimeWindow {
+    pub(crate) fn contains(self, epoch_seconds: u64) -> bool {
+        epoch_seconds >= self.start_inclusive && epoch_seconds < self.end_exclusive
+    }
+}
+
+pub(crate) fn statistics_current_local_offset() -> UtcOffset {
+    UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC)
+}
+
+pub(crate) fn statistics_today_date(now: u64) -> Date {
+    local_datetime(now, statistics_current_local_offset())
+        .map(|datetime| datetime.date())
+        .unwrap_or_else(statistics_epoch_date)
+}
+
+pub(crate) fn statistics_local_date(epoch_seconds: u64) -> Option<Date> {
+    local_datetime(epoch_seconds, statistics_current_local_offset()).map(|datetime| datetime.date())
+}
+
+pub(crate) fn statistics_clamp_date(date: Date, max_date: Date) -> Date {
+    date.min(max_date)
+}
+
+pub(crate) fn statistics_day_options(year: i32, month: Month, max_date: Date) -> Vec<u8> {
+    let last_day = if year == max_date.year() && month == max_date.month() {
+        max_date.day()
+    } else {
+        month.length(year)
+    };
+
+    (1..=last_day).collect()
+}
+
+pub(crate) fn statistics_date_from_components(year: i32, month: Month, day: u8) -> Date {
+    let day = day.min(month.length(year));
+    Date::from_calendar_date(year, month, day).unwrap_or_else(|_| statistics_epoch_date())
+}
+
+pub(crate) fn statistics_date_for_preset(preset: StatisticsRangePreset, today: Date) -> (Date, Date) {
+    match preset {
+        StatisticsRangePreset::Day => (today, today),
+        StatisticsRangePreset::Week => (
+            today.checked_sub(TimeDuration::days(6)).unwrap_or(Date::MIN),
+            today,
+        ),
+        StatisticsRangePreset::Month => (shift_date_back_months(today, 1), today),
+        StatisticsRangePreset::ThreeMonths => (shift_date_back_months(today, 3), today),
+        StatisticsRangePreset::Year => (shift_date_back_years(today, 1), today),
+        StatisticsRangePreset::Custom => (today, today),
+    }
+}
+
+pub(crate) fn statistics_time_window_for_dates(
+    start_date: Date,
+    end_date: Date,
+    now: u64,
+) -> StatisticsTimeWindow {
+    let offset = statistics_current_local_offset();
+    let today = statistics_today_date(now);
+    let end_date = statistics_clamp_date(end_date, today);
+    let start_date = statistics_clamp_date(start_date.min(end_date), today);
+    let start_inclusive = local_date_start_epoch(start_date, offset);
+    let end_exclusive = if end_date == today {
+        now.saturating_add(1)
+    } else {
+        end_date
+            .checked_add(TimeDuration::days(1))
+            .map(|next_day| local_date_start_epoch(next_day, offset))
+            .unwrap_or_else(|| now.saturating_add(1))
+    };
+
+    StatisticsTimeWindow {
+        start_inclusive,
+        end_exclusive: end_exclusive.max(start_inclusive.saturating_add(1)),
+    }
+}
+
+fn shift_date_back_months(date: Date, months: u8) -> Date {
+    let total_months = date.year() * 12 + i32::from(date.month() as u8 - 1);
+    let shifted = total_months - i32::from(months);
+    let year = shifted.div_euclid(12);
+    let month_index = shifted.rem_euclid(12) as usize;
+    let month = STATISTICS_MONTHS[month_index];
+    let day = date.day().min(month.length(year));
+
+    Date::from_calendar_date(year, month, day).unwrap_or(Date::MIN)
+}
+
+fn shift_date_back_years(date: Date, years: i32) -> Date {
+    let year = date.year().saturating_sub(years);
+    let month = date.month();
+    let day = date.day().min(month.length(year));
+
+    Date::from_calendar_date(year, month, day).unwrap_or(Date::MIN)
+}
+
+fn local_date_start_epoch(date: Date, offset: UtcOffset) -> u64 {
+    date.midnight()
+        .assume_offset(offset)
+        .unix_timestamp()
+        .max(0) as u64
+}
+
+fn statistics_epoch_date() -> Date {
+    Date::from_calendar_date(1970, Month::January, 1).expect("unix epoch date")
 }
 
 pub(crate) fn load_statistics_store(path: &Path) -> Result<StatisticsStore, String> {
@@ -209,6 +343,36 @@ pub(crate) fn write_statistics_store(path: &Path, store: &StatisticsStore) -> Re
     }
 
     fs::write(path, contents).map_err(|error| format!("Failed to write {}: {error}", path.display()))
+}
+
+pub(crate) fn statistics_store_latest_timestamp(store: &StatisticsStore) -> u64 {
+    store
+        .printers
+        .iter()
+        .flat_map(|entry| {
+            entry.poll_samples.iter().map(|sample| sample.captured_at).chain(
+                entry.euro_samples
+                    .iter()
+                    .map(|sample| sample.captured_at),
+            )
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+pub(crate) fn merge_statistics_store(
+    store: &mut StatisticsStore,
+    incoming: &StatisticsStore,
+    prefer_incoming: bool,
+) -> StatisticsMergeResult {
+    let merged = merged_statistics_store(store, incoming, prefer_incoming);
+    let changed = merged != *store;
+    let differs_from_incoming = merged != *incoming;
+    *store = merged;
+    StatisticsMergeResult {
+        changed,
+        differs_from_incoming,
+    }
 }
 
 pub(crate) fn statistics_bucket(epoch_seconds: u64) -> u64 {
@@ -293,6 +457,7 @@ pub(crate) fn available_series(
     store: &StatisticsStore,
     selected_printers: &HashSet<PrinterId>,
     pricing: &PricingSettings,
+    time_window: Option<StatisticsTimeWindow>,
 ) -> Vec<StatisticsSeriesDefinition> {
     let mut seen = BTreeSet::new();
     let mut series = Vec::new();
@@ -303,6 +468,9 @@ pub(crate) fn available_series(
         .filter(|entry| selected_printers.contains(&entry.printer_id))
     {
         for sample in &entry.poll_samples {
+            if !timestamp_matches_window(sample.captured_at, time_window) {
+                continue;
+            }
             for metric in &sample.metrics {
                 let Some(label) = display_label_for_metric(metric) else {
                     continue;
@@ -317,7 +485,12 @@ pub(crate) fn available_series(
             }
         }
 
-        if !entry.euro_samples.is_empty() && seen.insert(RECORDED_EUR_SERIES_KEY.to_string()) {
+        if entry
+            .euro_samples
+            .iter()
+            .any(|sample| timestamp_matches_window(sample.captured_at, time_window))
+            && seen.insert(RECORDED_EUR_SERIES_KEY.to_string())
+        {
             series.push(StatisticsSeriesDefinition {
                 key: RECORDED_EUR_SERIES_KEY.to_string(),
                 label: RECORDED_EUR_SERIES_LABEL.to_string(),
@@ -325,7 +498,8 @@ pub(crate) fn available_series(
         }
     }
 
-    let estimated_income = estimated_income_availability(store, selected_printers, pricing);
+    let estimated_income =
+        estimated_income_availability(store, selected_printers, pricing, time_window);
     for (enabled, key, label) in [
         (
             estimated_income.bw,
@@ -366,6 +540,7 @@ pub(crate) fn aggregate_series_points(
     pricing: &PricingSettings,
     series_key: &str,
     max_points: usize,
+    time_window: Option<StatisticsTimeWindow>,
 ) -> Vec<(u64, u64)> {
     let mut buckets = BTreeMap::<u64, AggregatedPoint>::new();
 
@@ -376,6 +551,9 @@ pub(crate) fn aggregate_series_points(
     {
         if series_key == RECORDED_EUR_SERIES_KEY {
             for sample in &entry.euro_samples {
+                if !timestamp_matches_window(sample.captured_at, time_window) {
+                    continue;
+                }
                 let bucket = statistics_bucket(sample.captured_at);
                 let point = buckets.entry(bucket).or_insert(AggregatedPoint {
                     timestamp: sample.captured_at,
@@ -387,7 +565,9 @@ pub(crate) fn aggregate_series_points(
             continue;
         }
 
-        if let Some(series_value) = estimated_income_value_for_entry(entry, series_key, pricing) {
+        if let Some(series_value) =
+            estimated_income_value_for_entry(entry, series_key, pricing, time_window)
+        {
             for (captured_at, total_cents) in series_value {
                 let bucket = statistics_bucket(captured_at);
                 let point = buckets.entry(bucket).or_insert(AggregatedPoint {
@@ -401,6 +581,9 @@ pub(crate) fn aggregate_series_points(
         }
 
         for sample in &entry.poll_samples {
+            if !timestamp_matches_window(sample.captured_at, time_window) {
+                continue;
+            }
             let mut sample_total = 0u64;
             let mut matched = false;
             for metric in &sample.metrics {
@@ -444,6 +627,7 @@ fn estimated_income_availability(
     store: &StatisticsStore,
     selected_printers: &HashSet<PrinterId>,
     pricing: &PricingSettings,
+    time_window: Option<StatisticsTimeWindow>,
 ) -> EstimatedIncomeAvailability {
     let bw_enabled = bw_pricing_from_settings(pricing).is_some();
     let color_enabled = color_price_from_settings(pricing).is_some();
@@ -456,6 +640,9 @@ fn estimated_income_availability(
         .filter(|entry| selected_printers.contains(&entry.printer_id))
     {
         for sample in &entry.poll_samples {
+            if !timestamp_matches_window(sample.captured_at, time_window) {
+                continue;
+            }
             has_bw |= sample_total_bw_count(sample).is_some();
             has_color |= sample_total_color_count(sample).is_some();
             if has_bw && has_color {
@@ -475,6 +662,7 @@ fn estimated_income_value_for_entry(
     entry: &PrinterStatisticsEntry,
     series_key: &str,
     pricing: &PricingSettings,
+    time_window: Option<StatisticsTimeWindow>,
 ) -> Option<Vec<(u64, u64)>> {
     if !matches!(
         series_key,
@@ -490,6 +678,9 @@ fn estimated_income_value_for_entry(
     let color_price = color_price_from_settings(pricing);
 
     for sample in &entry.poll_samples {
+        if !timestamp_matches_window(sample.captured_at, time_window) {
+            continue;
+        }
         let bw_total = match sample_total_bw_count(sample) {
             Some(count) => bw_pricing.map(|pricing| bw_cost_cents(count, pricing)),
             None => None,
@@ -512,6 +703,15 @@ fn estimated_income_value_for_entry(
     }
 
     Some(points)
+}
+
+fn timestamp_matches_window(
+    captured_at: u64,
+    time_window: Option<StatisticsTimeWindow>,
+) -> bool {
+    time_window
+        .map(|time_window| time_window.contains(captured_at))
+        .unwrap_or(true)
 }
 
 fn sample_total_bw_count(sample: &StatisticsPollSample) -> Option<u64> {
@@ -579,6 +779,7 @@ pub(crate) fn normalize_statistics_store(store: &mut StatisticsStore) {
         entry
             .poll_samples
             .sort_by(|left, right| left.captured_at.cmp(&right.captured_at));
+        collapse_poll_samples_by_bucket(&mut entry.poll_samples);
         entry.poll_samples.retain(|sample| !sample.metrics.is_empty());
 
         entry
@@ -642,6 +843,176 @@ fn clean_euro_samples(samples: &mut Vec<StatisticsEuroSample>, now: u64, offset:
     }
 
     *samples = cleaned;
+}
+
+fn merged_statistics_store(
+    local: &StatisticsStore,
+    incoming: &StatisticsStore,
+    prefer_incoming: bool,
+) -> StatisticsStore {
+    let mut merged_entries = BTreeMap::<String, PrinterStatisticsEntry>::new();
+
+    for entry in &local.printers {
+        merged_entries.insert(entry.printer_id.0.clone(), entry.clone());
+    }
+
+    for incoming_entry in &incoming.printers {
+        merged_entries
+            .entry(incoming_entry.printer_id.0.clone())
+            .and_modify(|local_entry| {
+                *local_entry = merge_printer_statistics_entry(
+                    local_entry,
+                    incoming_entry,
+                    prefer_incoming,
+                );
+            })
+            .or_insert_with(|| incoming_entry.clone());
+    }
+
+    let mut merged = StatisticsStore {
+        printers: merged_entries.into_values().collect(),
+    };
+    normalize_statistics_store(&mut merged);
+    merged
+}
+
+fn merge_printer_statistics_entry(
+    local: &PrinterStatisticsEntry,
+    incoming: &PrinterStatisticsEntry,
+    prefer_incoming: bool,
+) -> PrinterStatisticsEntry {
+    PrinterStatisticsEntry {
+        printer_id: if local.printer_id.0.trim().is_empty() {
+            incoming.printer_id.clone()
+        } else {
+            local.printer_id.clone()
+        },
+        poll_samples: merge_poll_samples(
+            &local.poll_samples,
+            &incoming.poll_samples,
+            prefer_incoming,
+        ),
+        euro_samples: merge_euro_samples(
+            &local.euro_samples,
+            &incoming.euro_samples,
+            prefer_incoming,
+        ),
+    }
+}
+
+fn merge_poll_samples(
+    local: &[StatisticsPollSample],
+    incoming: &[StatisticsPollSample],
+    prefer_incoming: bool,
+) -> Vec<StatisticsPollSample> {
+    let mut merged = BTreeMap::<u64, StatisticsPollSample>::new();
+
+    for sample in local {
+        upsert_poll_sample(&mut merged, sample, false, prefer_incoming);
+    }
+    for sample in incoming {
+        upsert_poll_sample(&mut merged, sample, true, prefer_incoming);
+    }
+
+    merged.into_values().collect()
+}
+
+fn upsert_poll_sample(
+    merged: &mut BTreeMap<u64, StatisticsPollSample>,
+    sample: &StatisticsPollSample,
+    incoming_source: bool,
+    prefer_incoming: bool,
+) {
+    let bucket = statistics_bucket(sample.captured_at);
+    if let Some(current) = merged.get_mut(&bucket) {
+        let prefer_candidate = prefer_poll_sample(current, sample, incoming_source, prefer_incoming);
+        *current = merge_poll_sample(current, sample, prefer_candidate);
+    } else {
+        merged.insert(bucket, sample.clone());
+    }
+}
+
+fn prefer_poll_sample(
+    current: &StatisticsPollSample,
+    candidate: &StatisticsPollSample,
+    incoming_source: bool,
+    prefer_incoming: bool,
+) -> bool {
+    if candidate.captured_at != current.captured_at {
+        return candidate.captured_at > current.captured_at;
+    }
+    if candidate.metrics.len() != current.metrics.len() {
+        return candidate.metrics.len() > current.metrics.len();
+    }
+
+    incoming_source && prefer_incoming
+}
+
+fn merge_poll_sample(
+    current: &StatisticsPollSample,
+    candidate: &StatisticsPollSample,
+    prefer_candidate: bool,
+) -> StatisticsPollSample {
+    let (preferred, secondary) = if prefer_candidate {
+        (candidate, current)
+    } else {
+        (current, candidate)
+    };
+
+    let mut merged = preferred.clone();
+    merged.captured_at = preferred.captured_at.max(secondary.captured_at);
+
+    let mut metrics = BTreeMap::<(String, String), StatisticsPollMetric>::new();
+    for metric in &secondary.metrics {
+        metrics.insert((metric.series_key.clone(), metric.oid.clone()), metric.clone());
+    }
+    for metric in &preferred.metrics {
+        metrics.insert((metric.series_key.clone(), metric.oid.clone()), metric.clone());
+    }
+    merged.metrics = metrics.into_values().collect();
+    merged.normalize();
+    merged
+}
+
+fn collapse_poll_samples_by_bucket(samples: &mut Vec<StatisticsPollSample>) {
+    let mut collapsed = Vec::<StatisticsPollSample>::with_capacity(samples.len());
+    for sample in samples.drain(..) {
+        if let Some(current) = collapsed.last_mut()
+            && statistics_bucket(current.captured_at) == statistics_bucket(sample.captured_at)
+        {
+            let prefer_candidate = sample.captured_at > current.captured_at
+                || (sample.captured_at == current.captured_at
+                    && sample.metrics.len() >= current.metrics.len());
+            *current = merge_poll_sample(current, &sample, prefer_candidate);
+        } else {
+            collapsed.push(sample);
+        }
+    }
+    *samples = collapsed;
+}
+
+fn merge_euro_samples(
+    local: &[StatisticsEuroSample],
+    incoming: &[StatisticsEuroSample],
+    prefer_incoming: bool,
+) -> Vec<StatisticsEuroSample> {
+    let mut merged = BTreeMap::<u64, StatisticsEuroSample>::new();
+
+    for sample in local {
+        merged.insert(sample.captured_at, sample.clone());
+    }
+    for sample in incoming {
+        merged
+            .entry(sample.captured_at)
+            .and_modify(|current| {
+                if prefer_incoming && current.total_cents != sample.total_cents {
+                    *current = sample.clone();
+                }
+            })
+            .or_insert_with(|| sample.clone());
+    }
+
+    merged.into_values().collect()
 }
 
 fn compress_points(points: Vec<(u64, u64)>, max_points: usize) -> Vec<(u64, u64)> {
@@ -791,7 +1162,7 @@ mod tests {
         };
         let selected = HashSet::from([printer_id]);
 
-        let series = available_series(&store, &selected, &pricing);
+        let series = available_series(&store, &selected, &pricing, None);
         assert_eq!(series.len(), 5);
         assert!(series.iter().any(|entry| entry.label == "Total B/W"));
         assert!(series.iter().any(|entry| entry.label == "Prints B/W"));
@@ -830,7 +1201,7 @@ mod tests {
         };
         let selected = HashSet::from([printer_a, printer_b]);
 
-        let points = aggregate_series_points(&store, &selected, &pricing, &metric_key, 32);
+        let points = aggregate_series_points(&store, &selected, &pricing, &metric_key, 32, None);
         assert_eq!(points, vec![(901, 140)]);
     }
 
@@ -869,8 +1240,91 @@ mod tests {
             &pricing,
             ESTIMATED_INCOME_BW_SERIES_KEY,
             32,
+            None,
         );
         assert_eq!(points, vec![(901, 300)]);
+    }
+
+    #[test]
+    fn available_series_ignores_samples_outside_time_window() {
+        let printer_id = printer_id("printer-a");
+        let pricing = PricingSettings::default();
+        let store = StatisticsStore {
+            printers: vec![PrinterStatisticsEntry {
+                printer_id: printer_id.clone(),
+                poll_samples: vec![
+                    StatisticsPollSample {
+                        captured_at: 100,
+                        metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: B/W", 10)],
+                        legacy_total: None,
+                    },
+                    StatisticsPollSample {
+                        captured_at: 900,
+                        metrics: vec![StatisticsPollMetric::new("1.2.4", "Recording: Prints B/W", 5)],
+                        legacy_total: None,
+                    },
+                ],
+                euro_samples: vec![StatisticsEuroSample {
+                    captured_at: 120,
+                    total_cents: 500,
+                }],
+            }],
+        };
+        let selected = HashSet::from([printer_id]);
+        let window = StatisticsTimeWindow {
+            start_inclusive: 800,
+            end_exclusive: 1_000,
+        };
+
+        let series = available_series(&store, &selected, &pricing, Some(window));
+
+        assert_eq!(series.len(), 3);
+        assert!(series.iter().any(|entry| entry.label == "Prints B/W"));
+        assert!(series.iter().any(|entry| entry.label == ESTIMATED_INCOME_BW_SERIES_LABEL));
+        assert!(series.iter().any(|entry| entry.label == ESTIMATED_INCOME_SERIES_LABEL));
+        assert!(!series.iter().any(|entry| entry.label == "Total B/W"));
+        assert!(!series.iter().any(|entry| entry.label == RECORDED_EUR_SERIES_LABEL));
+    }
+
+    #[test]
+    fn aggregate_series_points_respects_time_window() {
+        let printer_id = printer_id("printer-a");
+        let metric_key = metric_series_key("1.2.3", "Clicks: Total");
+        let pricing = PricingSettings::default();
+        let store = StatisticsStore {
+            printers: vec![PrinterStatisticsEntry {
+                printer_id: printer_id.clone(),
+                poll_samples: vec![
+                    StatisticsPollSample {
+                        captured_at: 100,
+                        metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 10)],
+                        legacy_total: None,
+                    },
+                    StatisticsPollSample {
+                        captured_at: 900,
+                        metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 25)],
+                        legacy_total: None,
+                    },
+                ],
+                euro_samples: Vec::new(),
+            }],
+        };
+        let selected = HashSet::from([printer_id]);
+        let window = StatisticsTimeWindow {
+            start_inclusive: 800,
+            end_exclusive: 1_000,
+        };
+
+        let points = aggregate_series_points(
+            &store,
+            &selected,
+            &pricing,
+            &metric_key,
+            32,
+            Some(window),
+        );
+
+        assert_eq!(points, vec![(900, 25)]);
     }
 
     #[test]
@@ -981,5 +1435,144 @@ mod tests {
         assert_eq!(entry.euro_samples.len(), 4);
         assert_eq!(entry.euro_samples.first().map(|sample| sample.total_cents), Some(100));
         assert_eq!(entry.euro_samples.last().map(|sample| sample.total_cents), Some(107));
+    }
+
+    #[test]
+    fn merge_statistics_store_prefers_newer_bucket_sample_and_keeps_history() {
+        let printer_id = printer_id("printer-a");
+        let mut local = StatisticsStore {
+            printers: vec![PrinterStatisticsEntry {
+                printer_id: printer_id.clone(),
+                poll_samples: vec![
+                    StatisticsPollSample {
+                        captured_at: 900,
+                        metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 10)],
+                        legacy_total: None,
+                    },
+                    StatisticsPollSample {
+                        captured_at: 3_600,
+                        metrics: vec![StatisticsPollMetric::new("1.2.4", "Clicks: Total", 20)],
+                        legacy_total: None,
+                    },
+                ],
+                euro_samples: vec![StatisticsEuroSample {
+                    captured_at: 10_000,
+                    total_cents: 150,
+                }],
+            }],
+        };
+        let incoming = StatisticsStore {
+            printers: vec![PrinterStatisticsEntry {
+                printer_id: printer_id.clone(),
+                poll_samples: vec![
+                    StatisticsPollSample {
+                        captured_at: 901,
+                        metrics: vec![
+                            StatisticsPollMetric::new("1.2.3", "Clicks: Total", 11),
+                            StatisticsPollMetric::new("1.2.5", "Toner: Black", 70),
+                        ],
+                        legacy_total: None,
+                    },
+                    StatisticsPollSample {
+                        captured_at: 7_200,
+                        metrics: vec![StatisticsPollMetric::new("1.2.6", "Clicks: Total", 30)],
+                        legacy_total: None,
+                    },
+                ],
+                euro_samples: vec![
+                    StatisticsEuroSample {
+                        captured_at: 10_000,
+                        total_cents: 175,
+                    },
+                    StatisticsEuroSample {
+                        captured_at: 11_000,
+                        total_cents: 200,
+                    },
+                ],
+            }],
+        };
+
+        let result = merge_statistics_store(&mut local, &incoming, true);
+        let entry = local.entry(&printer_id).expect("statistics entry");
+
+        assert!(result.changed);
+        assert_eq!(entry.poll_samples.len(), 3);
+        assert_eq!(entry.poll_samples[0].captured_at, 901);
+        assert_eq!(entry.poll_samples[0].metrics.len(), 2);
+        assert_eq!(entry.poll_samples[1].captured_at, 3_600);
+        assert_eq!(entry.poll_samples[2].captured_at, 7_200);
+        assert_eq!(entry.euro_samples.len(), 2);
+        assert_eq!(entry.euro_samples[0].total_cents, 175);
+        assert_eq!(entry.euro_samples[1].total_cents, 200);
+    }
+
+    #[test]
+    fn merge_statistics_store_keeps_local_sample_when_it_is_newer() {
+        let printer_id = printer_id("printer-a");
+        let mut local = StatisticsStore {
+            printers: vec![PrinterStatisticsEntry {
+                printer_id: printer_id.clone(),
+                poll_samples: vec![StatisticsPollSample {
+                    captured_at: 905,
+                    metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 12)],
+                    legacy_total: None,
+                }],
+                euro_samples: vec![StatisticsEuroSample {
+                    captured_at: 10_000,
+                    total_cents: 190,
+                }],
+            }],
+        };
+        let incoming = StatisticsStore {
+            printers: vec![PrinterStatisticsEntry {
+                printer_id: printer_id.clone(),
+                poll_samples: vec![StatisticsPollSample {
+                    captured_at: 900,
+                    metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 10)],
+                    legacy_total: None,
+                }],
+                euro_samples: vec![StatisticsEuroSample {
+                    captured_at: 10_000,
+                    total_cents: 150,
+                }],
+            }],
+        };
+
+        let result = merge_statistics_store(&mut local, &incoming, false);
+        let entry = local.entry(&printer_id).expect("statistics entry");
+
+        assert!(result.differs_from_incoming);
+        assert_eq!(entry.poll_samples.len(), 1);
+        assert_eq!(entry.poll_samples[0].captured_at, 905);
+        assert_eq!(entry.poll_samples[0].metrics[0].value, 12);
+        assert_eq!(entry.euro_samples.len(), 1);
+        assert_eq!(entry.euro_samples[0].total_cents, 190);
+    }
+
+    #[test]
+    fn statistics_store_latest_timestamp_tracks_newest_poll_or_euro_sample() {
+        let store = StatisticsStore {
+            printers: vec![
+                PrinterStatisticsEntry {
+                    printer_id: printer_id("printer-a"),
+                    poll_samples: vec![StatisticsPollSample {
+                        captured_at: 900,
+                        metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 10)],
+                        legacy_total: None,
+                    }],
+                    euro_samples: Vec::new(),
+                },
+                PrinterStatisticsEntry {
+                    printer_id: printer_id("printer-b"),
+                    poll_samples: Vec::new(),
+                    euro_samples: vec![StatisticsEuroSample {
+                        captured_at: 1_200,
+                        total_cents: 250,
+                    }],
+                },
+            ],
+        };
+
+        assert_eq!(statistics_store_latest_timestamp(&store), 1_200);
     }
 }

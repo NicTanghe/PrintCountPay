@@ -2099,6 +2099,8 @@ impl PrintCountApp {
     }
 
     fn statistics_view(&self) -> Element<'_, Message> {
+        let time_window = self.statistics_time_window();
+        let (range_start, range_end) = self.statistics_selected_date_range();
         let selected_printers: Vec<_> = self
             .printers
             .iter()
@@ -2108,6 +2110,7 @@ impl PrintCountApp {
             &self.statistics_store,
             &self.statistics_selected_printers,
             &self.pricing,
+            Some(time_window),
         );
         let aggregated_series = available
             .iter()
@@ -2122,6 +2125,7 @@ impl PrintCountApp {
                     &self.pricing,
                     &definition.key,
                     96,
+                    Some(time_window),
                 ),
             })
             .collect::<Vec<_>>();
@@ -2155,6 +2159,8 @@ impl PrintCountApp {
                     &visible_series,
                     auto_bounds,
                     bounds,
+                    range_start,
+                    range_end,
                 ),
                 self.statistics_series_controls(&aggregated_series),
             ]
@@ -2178,14 +2184,11 @@ impl PrintCountApp {
         visible_series: &[StatisticsChartSeries],
         auto_bounds: Option<StatisticsChartBounds>,
         bounds: Option<StatisticsChartBounds>,
+        range_start: Date,
+        range_end: Date,
     ) -> Element<'_, Message> {
         let selected_label = self.statistics_selection_summary(selected_printers);
-        let graph_min = bounds
-            .map(|bounds| self.statistics_axis_value_text(visible_series, bounds.min_value))
-            .unwrap_or_else(|| "n/a".to_string());
-        let graph_max = bounds
-            .map(|bounds| self.statistics_axis_value_text(visible_series, bounds.max_value))
-            .unwrap_or_else(|| "n/a".to_string());
+        let range_label = self.statistics_date_range_summary(range_start, range_end);
         let chart_body: Element<'_, Message> = if aggregated_series.is_empty() {
             self.statistics_chart_empty_state(
                 "Waiting for the first stored statistics sample. Poll snapshots are saved every 15 minutes, and recorded EUR is added whenever a recording stops.",
@@ -2230,15 +2233,20 @@ impl PrintCountApp {
                         selected_printers.len().to_string(),
                     ),
                     self.statistics_summary_tile(
-                        "Graph Min",
-                        graph_min,
+                        "Range",
+                        range_label,
                     ),
                     self.statistics_summary_tile(
-                        "Graph Max",
-                        graph_max,
+                        "From",
+                        format_calendar_date(range_start),
+                    ),
+                    self.statistics_summary_tile(
+                        "To",
+                        format_calendar_date(range_end),
                     ),
                 ]
                 .spacing(10),
+                self.statistics_range_controls(range_start, range_end),
                 self.statistics_axis_controls(auto_bounds, visible_series),
                 chart_body,
                 if let Some(bounds) = bounds {
@@ -2384,8 +2392,8 @@ impl PrintCountApp {
     }
 
     fn statistics_axis(&self, bounds: StatisticsChartBounds) -> Element<'_, Message> {
-        let first = format_clock_hms(bounds.min_timestamp);
-        let last = format_clock_hms(bounds.max_timestamp);
+        let first = self.statistics_timestamp_text(bounds.min_timestamp);
+        let last = self.statistics_timestamp_text(bounds.max_timestamp);
 
         row![
             text(first)
@@ -2463,10 +2471,195 @@ impl PrintCountApp {
             "{} points | latest {} at {} | min {} | max {}",
             series.points.len(),
             self.statistics_series_value_text(&series.key, latest),
-            format_clock_hms(captured_at),
+            self.statistics_timestamp_text(captured_at),
             self.statistics_series_value_text(&series.key, min),
             self.statistics_series_value_text(&series.key, max),
         )
+    }
+
+    fn statistics_range_controls(&self, range_start: Date, range_end: Date) -> Element<'_, Message> {
+        let today = self.statistics_today();
+        let preset_rows = column![
+            row![
+                self.statistics_range_preset_button(StatisticsRangePreset::Day),
+                self.statistics_range_preset_button(StatisticsRangePreset::Week),
+                self.statistics_range_preset_button(StatisticsRangePreset::Month),
+            ]
+            .spacing(6),
+            row![
+                self.statistics_range_preset_button(StatisticsRangePreset::ThreeMonths),
+                self.statistics_range_preset_button(StatisticsRangePreset::Year),
+                self.statistics_range_preset_button(StatisticsRangePreset::Custom),
+            ]
+            .spacing(6),
+        ]
+        .spacing(6);
+
+        let range_note = if self.statistics_range_preset == StatisticsRangePreset::Custom {
+            format!(
+                "Custom window from {} through {}. End date can stay on today or be set manually.",
+                format_calendar_date(range_start),
+                format_calendar_date(range_end),
+            )
+        } else {
+            format!(
+                "Showing {} ending on today ({}).",
+                self.statistics_range_preset,
+                format_calendar_date(today),
+            )
+        };
+
+        let custom_controls: Element<'_, Message> =
+            if self.statistics_range_preset == StatisticsRangePreset::Custom {
+                row![
+                    self.statistics_date_picker("Start date", StatisticsDateTarget::Start, range_start),
+                    self.statistics_date_picker("End date", StatisticsDateTarget::End, range_end),
+                    container(
+                        button("Today")
+                            .padding([6, 10])
+                            .style(theme::Button::custom(muted_content_button_style()))
+                            .on_press(Message::StatisticsDateSetToday(StatisticsDateTarget::End)),
+                    )
+                    .align_y(iced::alignment::Vertical::Bottom)
+                    .width(Length::Shrink),
+                ]
+                .spacing(10)
+                .into()
+            } else {
+                Space::new()
+                    .width(Length::Shrink)
+                    .height(Length::Fixed(0.0))
+                    .into()
+            };
+
+        container(
+            column![
+                text("Time range")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                preset_rows,
+                custom_controls,
+                text(range_note)
+                    .size(11)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            ]
+            .spacing(8),
+        )
+        .padding([8, 10])
+        .width(Length::Fill)
+        .style(theme::Container::Custom(statistics_chart_track_style()))
+        .into()
+    }
+
+    fn statistics_range_preset_button(&self, preset: StatisticsRangePreset) -> Element<'_, Message> {
+        let style: Box<
+            dyn Fn(&Theme, iced::widget::button::Status) -> iced::widget::button::Style,
+        > = if self.statistics_range_preset == preset {
+            Box::new(solid_brand_button_style(CONTENT_BRAND_SAMPLE))
+        } else {
+            Box::new(theme::Button::custom(muted_content_button_style()))
+        };
+
+        button(text(preset.to_string()).size(11))
+            .padding([6, 10])
+            .width(Length::Fill)
+            .style(style)
+            .on_press(Message::SelectStatisticsRangePreset(preset))
+            .into()
+    }
+
+    fn statistics_date_picker(
+        &self,
+        label: &str,
+        target: StatisticsDateTarget,
+        date: Date,
+    ) -> Element<'_, Message> {
+        let today = self.statistics_today();
+        let year_options = self.statistics_year_options();
+        let day_options = statistics_day_options(date.year(), date.month(), today);
+        let year_picker = pick_list(year_options, Some(date.year()), move |year| {
+            Message::StatisticsDateYearSelected(target, year)
+        })
+        .text_size(11)
+        .width(Length::Fixed(84.0))
+        .style(profile_pick_list_style())
+        .menu_style(profile_pick_list_menu_style());
+        let month_picker = pick_list(&STATISTICS_MONTHS[..], Some(date.month()), move |month| {
+            Message::StatisticsDateMonthSelected(target, month)
+        })
+        .text_size(11)
+        .width(Length::Fixed(110.0))
+        .style(profile_pick_list_style())
+        .menu_style(profile_pick_list_menu_style());
+        let day_picker = pick_list(day_options, Some(date.day()), move |day| {
+            Message::StatisticsDateDaySelected(target, day)
+        })
+        .text_size(11)
+        .width(Length::Fixed(72.0))
+        .style(profile_pick_list_style())
+        .menu_style(profile_pick_list_menu_style());
+
+        column![
+            text(label.to_string())
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+            row![year_picker, month_picker, day_picker]
+                .spacing(6)
+                .align_items(Alignment::Center),
+        ]
+        .spacing(4)
+        .width(Length::Fill)
+        .into()
+    }
+
+    fn statistics_date_range_summary(&self, range_start: Date, range_end: Date) -> String {
+        match self.statistics_range_preset {
+            StatisticsRangePreset::Custom => {
+                if range_start == range_end {
+                    "Custom (1 day)".to_string()
+                } else {
+                    let days = range_end
+                        .to_julian_day()
+                        .saturating_sub(range_start.to_julian_day())
+                        + 1;
+                    format!("Custom ({} days)", days)
+                }
+            }
+            preset => preset.to_string(),
+        }
+    }
+
+    fn statistics_year_options(&self) -> Vec<i32> {
+        let today = self.statistics_today();
+        let start_year = self
+            .statistics_earliest_date()
+            .map(|date| date.year())
+            .unwrap_or(today.year())
+            .min(today.year());
+        (start_year..=today.year()).collect()
+    }
+
+    fn statistics_earliest_date(&self) -> Option<Date> {
+        self.statistics_store
+            .printers
+            .iter()
+            .flat_map(|entry| {
+                entry.poll_samples
+                    .iter()
+                    .map(|sample| sample.captured_at)
+                    .chain(entry.euro_samples.iter().map(|sample| sample.captured_at))
+            })
+            .min()
+            .and_then(statistics_local_date)
+    }
+
+    fn statistics_timestamp_text(&self, epoch_seconds: u64) -> String {
+        let (range_start, range_end) = self.statistics_selected_date_range();
+        if range_start == range_end {
+            format_clock_hms(epoch_seconds)
+        } else {
+            format_local_date_time(epoch_seconds)
+        }
     }
 
     fn statistics_series_value_text(&self, series_key: &str, value: u64) -> String {

@@ -544,6 +544,7 @@ impl PrintCountApp {
         self.statistics_revision = self.statistics_revision.saturating_add(1);
         self.sync_statistics_visible_series();
         self.persist_statistics_store_with_logging();
+        self.send_statistics_state();
         self.queue_statistics_cleanup();
     }
 
@@ -640,6 +641,28 @@ impl PrintCountApp {
         } else {
             format!("Saved manual pricing to {path}. Sync unavailable.")
         });
+    }
+
+    fn apply_statistics_sync(&mut self, payload: sync::StatisticsSyncPayload) {
+        if payload.store.is_empty() {
+            return;
+        }
+
+        let prefer_incoming =
+            payload.latest_data_at > statistics_store_latest_timestamp(&self.statistics_store);
+        let merge = merge_statistics_store(&mut self.statistics_store, &payload.store, prefer_incoming);
+        if !merge.changed {
+            return;
+        }
+
+        self.statistics_revision = self.statistics_revision.saturating_add(1);
+        self.sync_statistics_visible_series();
+        self.persist_statistics_store_with_logging();
+        self.queue_statistics_cleanup();
+
+        if merge.differs_from_incoming {
+            self.send_statistics_state();
+        }
     }
 
     fn apply_pricing_sync(&mut self, payload: sync::PricingSyncPayload) {
@@ -854,6 +877,7 @@ impl PrintCountApp {
             &self.statistics_store,
             &self.statistics_selected_printers,
             &self.pricing,
+            Some(self.statistics_time_window()),
         );
         let available_keys: HashSet<String> = available.iter().map(|series| series.key.clone()).collect();
         self.statistics_visible_series
@@ -901,6 +925,108 @@ impl PrintCountApp {
         if !self.statistics_visible_series.insert(series_key.clone()) {
             self.statistics_visible_series.remove(&series_key);
         }
+    }
+
+    fn select_statistics_range_preset(&mut self, preset: StatisticsRangePreset) {
+        self.statistics_range_preset = preset;
+        if preset == StatisticsRangePreset::Custom {
+            self.normalize_statistics_custom_range();
+        }
+        self.sync_statistics_visible_series();
+    }
+
+    fn set_statistics_date_year(&mut self, target: StatisticsDateTarget, year: i32) {
+        let current = self.statistics_custom_date(target);
+        self.set_statistics_custom_date(
+            target,
+            statistics_date_from_components(year, current.month(), current.day()),
+        );
+    }
+
+    fn set_statistics_date_month(&mut self, target: StatisticsDateTarget, month: Month) {
+        let current = self.statistics_custom_date(target);
+        self.set_statistics_custom_date(
+            target,
+            statistics_date_from_components(current.year(), month, current.day()),
+        );
+    }
+
+    fn set_statistics_date_day(&mut self, target: StatisticsDateTarget, day: u8) {
+        let current = self.statistics_custom_date(target);
+        self.set_statistics_custom_date(
+            target,
+            statistics_date_from_components(current.year(), current.month(), day),
+        );
+    }
+
+    fn set_statistics_date_today(&mut self, target: StatisticsDateTarget) {
+        self.set_statistics_custom_date(target, self.statistics_today());
+    }
+
+    fn set_statistics_custom_date(&mut self, target: StatisticsDateTarget, date: Date) {
+        let today = self.statistics_today();
+        let date = statistics_clamp_date(date, today);
+        self.statistics_range_preset = StatisticsRangePreset::Custom;
+
+        match target {
+            StatisticsDateTarget::Start => {
+                self.statistics_custom_start = date;
+                if self.statistics_custom_end < date {
+                    self.statistics_custom_end = date;
+                }
+            }
+            StatisticsDateTarget::End => {
+                self.statistics_custom_end = date;
+                if self.statistics_custom_start > date {
+                    self.statistics_custom_start = date;
+                }
+            }
+        }
+
+        self.normalize_statistics_custom_range();
+        self.sync_statistics_visible_series();
+    }
+
+    fn normalize_statistics_custom_range(&mut self) {
+        let today = self.statistics_today();
+        self.statistics_custom_start = statistics_clamp_date(self.statistics_custom_start, today);
+        self.statistics_custom_end = statistics_clamp_date(self.statistics_custom_end, today);
+
+        if self.statistics_custom_start > self.statistics_custom_end {
+            std::mem::swap(
+                &mut self.statistics_custom_start,
+                &mut self.statistics_custom_end,
+            );
+        }
+    }
+
+    fn statistics_today(&self) -> Date {
+        statistics_today_date(now_epoch_seconds())
+    }
+
+    fn statistics_custom_date(&self, target: StatisticsDateTarget) -> Date {
+        match target {
+            StatisticsDateTarget::Start => self.statistics_custom_start,
+            StatisticsDateTarget::End => self.statistics_custom_end,
+        }
+    }
+
+    fn statistics_selected_date_range(&self) -> (Date, Date) {
+        let today = self.statistics_today();
+        match self.statistics_range_preset {
+            StatisticsRangePreset::Custom => (
+                statistics_clamp_date(self.statistics_custom_start, today)
+                    .min(statistics_clamp_date(self.statistics_custom_end, today)),
+                statistics_clamp_date(self.statistics_custom_start, today)
+                    .max(statistics_clamp_date(self.statistics_custom_end, today)),
+            ),
+            preset => statistics_date_for_preset(preset, today),
+        }
+    }
+
+    fn statistics_time_window(&self) -> StatisticsTimeWindow {
+        let (start_date, end_date) = self.statistics_selected_date_range();
+        statistics_time_window_for_dates(start_date, end_date, now_epoch_seconds())
     }
 
     fn refresh_logs(&mut self) {
@@ -2362,6 +2488,7 @@ impl PrintCountApp {
                 self.sync_sender = Some(sender);
                 self.last_shared_state = self.build_shared_state(self.last_shared_state.revision);
                 self.send_shared_state(self.last_shared_state.clone());
+                self.send_statistics_state();
                 Command::none()
             }
             SyncEvent::StatusChanged(status) => {
@@ -2388,6 +2515,10 @@ impl PrintCountApp {
                 self.apply_pricing_sync(payload);
                 Command::none()
             }
+            SyncEvent::StatisticsSyncReceived(payload) => {
+                self.apply_statistics_sync(payload);
+                Command::none()
+            }
         }
     }
 
@@ -2408,6 +2539,22 @@ impl PrintCountApp {
         };
 
         let _ = sender.send(SyncCommand::SetSnapshot(snapshot));
+    }
+
+    fn send_statistics_state(&self) {
+        if self.statistics_store.is_empty() {
+            return;
+        }
+
+        let Some(sender) = self.sync_sender.as_ref() else {
+            return;
+        };
+
+        let payload = sync::StatisticsSyncPayload {
+            latest_data_at: statistics_store_latest_timestamp(&self.statistics_store),
+            store: self.statistics_store.clone(),
+        };
+        let _ = sender.send(SyncCommand::SyncStatistics(payload));
     }
 
     fn build_shared_state(&self, revision: u64) -> SharedState {
@@ -2586,6 +2733,10 @@ mod tests {
     fn read_manual_bill_store(path: &Path) -> ManualBillStore {
         let contents = fs::read_to_string(path).expect("read manual bill store file");
         parse_manual_bill_store_contents(&contents).expect("parse manual bill store file")
+    }
+
+    fn read_statistics_store(path: &Path) -> StatisticsStore {
+        load_statistics_store(path).expect("read statistics store")
     }
 
     #[test]
@@ -3488,6 +3639,62 @@ mod tests {
             .expect("statistics entry");
         assert_eq!(entry.euro_samples.len(), 1);
         assert_eq!(entry.euro_samples[0].total_cents, 175);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn apply_statistics_sync_merges_remote_store_and_persists_result() {
+        let mut app = test_app();
+        let root = temp_test_dir("statistics-sync");
+        fs::create_dir_all(&root).expect("create temp root");
+        let path = root.join("statistics.ron");
+        app.statistics_path = path.to_string_lossy().to_string();
+
+        let printer_id = PrinterId::new("printer-a");
+        let mut local_store = StatisticsStore::default();
+        append_poll_sample(
+            &mut local_store,
+            &printer_id,
+            900,
+            vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 10)],
+        );
+        app.statistics_store = local_store;
+        app.persist_statistics_store_with_logging();
+
+        let mut remote_store = StatisticsStore::default();
+        append_poll_sample(
+            &mut remote_store,
+            &printer_id,
+            901,
+            vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 11)],
+        );
+        append_poll_sample(
+            &mut remote_store,
+            &printer_id,
+            3_600,
+            vec![StatisticsPollMetric::new("1.2.4", "Clicks: Total", 20)],
+        );
+        append_euro_sample(&mut remote_store, &printer_id, 4_000, 175);
+
+        app.apply_statistics_sync(sync::StatisticsSyncPayload {
+            latest_data_at: 3_600,
+            store: remote_store,
+        });
+
+        let entry = app
+            .statistics_store
+            .entry(&printer_id)
+            .expect("statistics entry");
+        assert_eq!(entry.poll_samples.len(), 2);
+        assert_eq!(entry.poll_samples[0].captured_at, 901);
+        assert_eq!(entry.poll_samples[0].metrics[0].value, 11);
+        assert_eq!(entry.poll_samples[1].captured_at, 3_600);
+        assert_eq!(entry.euro_samples.len(), 1);
+        assert_eq!(entry.euro_samples[0].total_cents, 175);
+
+        let persisted = read_statistics_store(&path);
+        assert_eq!(persisted, app.statistics_store);
 
         let _ = fs::remove_dir_all(root);
     }

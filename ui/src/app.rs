@@ -13,6 +13,7 @@ use iced::widget::{
 use iced::{Alignment, Color, Element, Length, Subscription, Task as Command, Theme, window};
 use ron::de::from_str;
 use ron::ser::{PrettyConfig, to_string_pretty};
+use time::{Date, Month};
 
 use printcountpay_core::{
     CidrRange, CounterOidSet, DEFAULT_SNMP_PORT, Oid, PrinterId, PrinterRecord, PrinterStatus,
@@ -53,6 +54,8 @@ use profiles::*;
 use statistics::*;
 use styles::*;
 use types::*;
+
+pub(crate) use statistics::StatisticsStore;
 
 fn merge_status_messages(primary: Option<String>, secondary: Option<String>) -> Option<String> {
     match (primary, secondary) {
@@ -123,6 +126,9 @@ pub struct PrintCountApp {
     selected_printer: Option<PrinterId>,
     statistics_selected_printers: HashSet<PrinterId>,
     statistics_visible_series: HashSet<String>,
+    statistics_range_preset: StatisticsRangePreset,
+    statistics_custom_start: Date,
+    statistics_custom_end: Date,
     statistics_revision: u64,
     statistics_cleanup_in_flight: bool,
     statistics_cleanup_pending_revision: Option<u64>,
@@ -190,6 +196,7 @@ impl PrintCountApp {
         let (profile_index, profile_status) = load_profile_index(Path::new(&profiles_root));
         let profile_status = merge_status_messages(path_status, profile_status);
         let counter_oids = default_counter_oids();
+        let statistics_today = statistics_today_date(now_epoch_seconds());
         let oids_total_text = format_oid_list(&counter_oids.total);
         let recording_oids = default_recording_oid_inputs();
         let (discovery_cidr, discovery_status) = match default_discovery_cidr() {
@@ -245,6 +252,9 @@ impl PrintCountApp {
             selected_printer: None,
             statistics_selected_printers: HashSet::new(),
             statistics_visible_series: HashSet::new(),
+            statistics_range_preset: StatisticsRangePreset::Month,
+            statistics_custom_start: statistics_today,
+            statistics_custom_end: statistics_today,
             statistics_revision: 0,
             statistics_cleanup_in_flight: false,
             statistics_cleanup_pending_revision: None,
@@ -452,6 +462,26 @@ impl PrintCountApp {
             }
             Message::ToggleStatisticsSeries(series_key) => {
                 self.toggle_statistics_series(series_key);
+                Command::none()
+            }
+            Message::SelectStatisticsRangePreset(preset) => {
+                self.select_statistics_range_preset(preset);
+                Command::none()
+            }
+            Message::StatisticsDateYearSelected(target, year) => {
+                self.set_statistics_date_year(target, year);
+                Command::none()
+            }
+            Message::StatisticsDateMonthSelected(target, month) => {
+                self.set_statistics_date_month(target, month);
+                Command::none()
+            }
+            Message::StatisticsDateDaySelected(target, day) => {
+                self.set_statistics_date_day(target, day);
+                Command::none()
+            }
+            Message::StatisticsDateSetToday(target) => {
+                self.set_statistics_date_today(target);
                 Command::none()
             }
             Message::StatisticsAxisMinChanged(value) => {

@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use iced::Color;
 use iced::keyboard;
 use printcountpay_core::{CounterOidSet, Oid, PrinterStatus, SnmpVarBind};
-use time::{OffsetDateTime, UtcOffset};
+use time::{Date, Month, OffsetDateTime, UtcOffset};
 
 use crate::app::constants::{
     PRT_GENERAL_PRINTER_NAME_OID, PRT_MARKER_LIFECOUNT_1, PRT_MARKER_LIFECOUNT_2,
@@ -171,6 +171,20 @@ pub(crate) fn format_clock_hms(epoch_seconds: u64) -> String {
     format_clock_hms_with_offset(epoch_seconds, offset)
 }
 
+pub(crate) fn format_calendar_date(date: Date) -> String {
+    format!(
+        "{:02} {} {}",
+        date.day(),
+        short_month_label(date.month()),
+        date.year()
+    )
+}
+
+pub(crate) fn format_local_date_time(epoch_seconds: u64) -> String {
+    let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
+    format_local_date_time_with_offset(epoch_seconds, offset)
+}
+
 fn format_clock_hms_with_offset(epoch_seconds: u64, offset: UtcOffset) -> String {
     if epoch_seconds > i64::MAX as u64 {
         return "n/a".to_string();
@@ -187,6 +201,44 @@ fn format_clock_hms_with_offset(epoch_seconds: u64, offset: UtcOffset) -> String
             )
         }
         Err(_) => "n/a".to_string(),
+    }
+}
+
+fn format_local_date_time_with_offset(epoch_seconds: u64, offset: UtcOffset) -> String {
+    if epoch_seconds > i64::MAX as u64 {
+        return "n/a".to_string();
+    }
+
+    match OffsetDateTime::from_unix_timestamp(epoch_seconds as i64) {
+        Ok(timestamp) => {
+            let local = timestamp.to_offset(offset);
+            format!(
+                "{:02} {} {} {:02}:{:02}",
+                local.day(),
+                short_month_label(local.month()),
+                local.year(),
+                local.hour(),
+                local.minute(),
+            )
+        }
+        Err(_) => "n/a".to_string(),
+    }
+}
+
+fn short_month_label(month: Month) -> &'static str {
+    match month {
+        Month::January => "Jan",
+        Month::February => "Feb",
+        Month::March => "Mar",
+        Month::April => "Apr",
+        Month::May => "May",
+        Month::June => "Jun",
+        Month::July => "Jul",
+        Month::August => "Aug",
+        Month::September => "Sep",
+        Month::October => "Oct",
+        Month::November => "Nov",
+        Month::December => "Dec",
     }
 }
 
