@@ -2136,8 +2136,14 @@ impl PrintCountApp {
             })
             .cloned()
             .collect::<Vec<_>>();
-        let auto_bounds = statistics_chart_bounds(&visible_series);
-        let bounds = self.statistics_effective_chart_bounds(auto_bounds, &visible_series);
+        let chart_bounds = statistics_chart_bounds(&visible_series);
+        let series_y_bounds = visible_series
+            .iter()
+            .filter_map(|series| {
+                self.statistics_effective_series_y_bounds(series)
+                    .map(|bounds| (series.key.clone(), bounds))
+            })
+            .collect::<HashMap<_, _>>();
 
         let header = column![
             text("Statistics")
@@ -2157,8 +2163,8 @@ impl PrintCountApp {
                     &selected_printers,
                     &aggregated_series,
                     &visible_series,
-                    auto_bounds,
-                    bounds,
+                    chart_bounds,
+                    &series_y_bounds,
                     range_start,
                     range_end,
                 ),
@@ -2182,8 +2188,8 @@ impl PrintCountApp {
         selected_printers: &[&PrinterRecord],
         aggregated_series: &[StatisticsChartSeries],
         visible_series: &[StatisticsChartSeries],
-        auto_bounds: Option<StatisticsChartBounds>,
-        bounds: Option<StatisticsChartBounds>,
+        chart_bounds: Option<StatisticsChartBounds>,
+        series_y_bounds: &HashMap<String, StatisticsSeriesYBounds>,
         range_start: Date,
         range_end: Date,
     ) -> Element<'_, Message> {
@@ -2198,7 +2204,11 @@ impl PrintCountApp {
                 "All series are hidden. Enable at least one toggle below to draw the graph.",
             )
         } else {
-            self.statistics_line_chart(visible_series, bounds.expect("bounds should exist"))
+            self.statistics_line_chart(
+                visible_series,
+                chart_bounds.expect("bounds should exist"),
+                series_y_bounds,
+            )
         };
 
         container(
@@ -2212,6 +2222,9 @@ impl PrintCountApp {
                             .size(12)
                             .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
                         text("Aggregation: checked categories are added together across the selected printers.")
+                            .size(11)
+                            .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                        text("Y scale uses each visible series' own min/max settings.")
                             .size(11)
                             .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
                     ]
@@ -2247,9 +2260,8 @@ impl PrintCountApp {
                 ]
                 .spacing(10),
                 self.statistics_range_controls(range_start, range_end),
-                self.statistics_axis_controls(auto_bounds, visible_series),
                 chart_body,
-                if let Some(bounds) = bounds {
+                if let Some(bounds) = chart_bounds {
                     self.statistics_axis(bounds)
                 } else {
                     Space::new()
@@ -2293,7 +2305,7 @@ impl PrintCountApp {
                 text("Series")
                     .size(16)
                     .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-                text("Toggle the lines you want to compare. Matching metrics from multiple selected printers are added together into one line.")
+                text("Toggle the lines you want to compare. Matching metrics from multiple selected printers are added together into one line. Y Min/Y Max is stored per series.")
                     .size(12)
                     .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
                 body,
@@ -2331,19 +2343,84 @@ impl PrintCountApp {
             series.color,
         )));
 
+        let axis_inputs = self.statistics_axis_inputs_by_series.get(&series.key);
+        let y_min_input = axis_inputs.map(|entry| entry.min_input.as_str()).unwrap_or("");
+        let y_max_input = axis_inputs.map(|entry| entry.max_input.as_str()).unwrap_or("");
+        let auto_y_bounds = statistics_series_auto_y_bounds(series);
+        let auto_y_min = auto_y_bounds
+            .map(|bounds| self.statistics_series_value_text(&series.key, bounds.min_value))
+            .unwrap_or_else(|| "auto".to_string());
+        let auto_y_max = auto_y_bounds
+            .map(|bounds| self.statistics_series_value_text(&series.key, bounds.max_value))
+            .unwrap_or_else(|| "auto".to_string());
+        let invalid_range = auto_y_bounds.is_some()
+            && !y_min_input.trim().is_empty()
+            && !y_max_input.trim().is_empty()
+            && self.statistics_effective_series_y_bounds(series) == auto_y_bounds;
+        let invalid_note: Element<'_, Message> = if invalid_range {
+            text("Manual range ignored because min is not smaller than max.")
+                .size(11)
+                .style(theme::Text::Color(recording_active_color()))
+                .into()
+        } else {
+            Space::new()
+                .width(Length::Shrink)
+                .height(Length::Fixed(0.0))
+                .into()
+        };
+        let bounds_hint = if statistics_series_is_currency_key(&series.key) {
+            "Y bounds use EUR values for this series."
+        } else {
+            "Y bounds use raw counter values for this series."
+        };
+        let min_key = series.key.clone();
+        let max_key = series.key.clone();
+        let reset_key = series.key.clone();
+
         container(
-            row![
-                dot,
-                column![
-                    toggle,
-                    text(summary)
-                        .size(11)
-                        .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            column![
+                row![
+                    dot,
+                    column![
+                        toggle,
+                        text(summary)
+                            .size(11)
+                            .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                    ]
+                    .spacing(4),
                 ]
-                .spacing(4),
+                .spacing(10)
+                .align_items(Alignment::Center),
+                row![
+                    self.manual_input("Y Min", &auto_y_min, y_min_input, move |value| {
+                        Message::StatisticsAxisMinChanged {
+                            series_key: min_key.clone(),
+                            value,
+                        }
+                    }),
+                    self.manual_input("Y Max", &auto_y_max, y_max_input, move |value| {
+                        Message::StatisticsAxisMaxChanged {
+                            series_key: max_key.clone(),
+                            value,
+                        }
+                    }),
+                    container(
+                        button("Auto")
+                            .padding([6, 10])
+                            .style(theme::Button::custom(muted_content_button_style()))
+                            .on_press(Message::ResetStatisticsAxisBounds(reset_key)),
+                    )
+                    .align_y(iced::alignment::Vertical::Bottom)
+                    .width(Length::Shrink),
+                ]
+                .spacing(10)
+                .align_items(Alignment::End),
+                text(bounds_hint)
+                    .size(11)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                invalid_note,
             ]
-            .spacing(10)
-            .align_items(Alignment::Center),
+            .spacing(6),
         )
         .padding([8, 10])
         .width(Length::Fill)
@@ -2354,9 +2431,10 @@ impl PrintCountApp {
     fn statistics_line_chart(
         &self,
         visible_series: &[StatisticsChartSeries],
-        bounds: StatisticsChartBounds,
+        x_bounds: StatisticsChartBounds,
+        series_y_bounds: &HashMap<String, StatisticsSeriesYBounds>,
     ) -> Element<'_, Message> {
-        let svg_markup = statistics_line_chart_svg(visible_series, bounds);
+        let svg_markup = statistics_line_chart_svg(visible_series, x_bounds, series_y_bounds);
         let chart = iced::widget::svg(iced::widget::svg::Handle::from_memory(
             svg_markup.into_bytes(),
         ))
@@ -2670,31 +2748,16 @@ impl PrintCountApp {
         }
     }
 
-    fn statistics_axis_value_text(
+    fn statistics_effective_series_y_bounds(
         &self,
-        visible_series: &[StatisticsChartSeries],
-        value: u64,
-    ) -> String {
-        if !visible_series.is_empty()
-            && visible_series
-                .iter()
-                .all(|series| statistics_series_is_currency_key(&series.key))
-        {
-            format_cents(value)
-        } else {
-            format_statistics_number(value)
-        }
-    }
-
-    fn statistics_effective_chart_bounds(
-        &self,
-        auto_bounds: Option<StatisticsChartBounds>,
-        visible_series: &[StatisticsChartSeries],
-    ) -> Option<StatisticsChartBounds> {
-        let mut bounds = auto_bounds?;
-        let currency_only = statistics_series_are_currency_only(visible_series);
-        let manual_min = parse_statistics_axis_bound(&self.statistics_axis_min_input, currency_only);
-        let manual_max = parse_statistics_axis_bound(&self.statistics_axis_max_input, currency_only);
+        series: &StatisticsChartSeries,
+    ) -> Option<StatisticsSeriesYBounds> {
+        let auto_bounds = statistics_series_auto_y_bounds(series)?;
+        let mut bounds = auto_bounds;
+        let inputs = self.statistics_axis_inputs_by_series.get(&series.key);
+        let currency = statistics_series_is_currency_key(&series.key);
+        let manual_min = inputs.and_then(|entry| parse_statistics_axis_bound(&entry.min_input, currency));
+        let manual_max = inputs.and_then(|entry| parse_statistics_axis_bound(&entry.max_input, currency));
 
         if let Some(min_value) = manual_min {
             bounds.min_value = min_value;
@@ -2704,91 +2767,10 @@ impl PrintCountApp {
         }
 
         if bounds.max_value <= bounds.min_value {
-            return auto_bounds;
+            return Some(auto_bounds);
         }
 
         Some(bounds)
-    }
-
-    fn statistics_axis_controls(
-        &self,
-        auto_bounds: Option<StatisticsChartBounds>,
-        visible_series: &[StatisticsChartSeries],
-    ) -> Element<'_, Message> {
-        let currency_only = statistics_series_are_currency_only(visible_series);
-        let unit_label = if visible_series.is_empty() {
-            "Auto range will appear once a visible series has data.".to_string()
-        } else if currency_only {
-            "Axis bounds use EUR values for the visible series.".to_string()
-        } else if visible_series
-            .iter()
-            .any(|series| statistics_series_is_currency_key(&series.key))
-        {
-            "Axis bounds use raw graph values because counter and EUR lines are mixed.".to_string()
-        } else {
-            "Axis bounds use raw counter values.".to_string()
-        };
-        let auto_min = auto_bounds
-            .map(|bounds| self.statistics_axis_value_text(visible_series, bounds.min_value))
-            .unwrap_or_else(|| "auto".to_string());
-        let auto_max = auto_bounds
-            .map(|bounds| self.statistics_axis_value_text(visible_series, bounds.max_value))
-            .unwrap_or_else(|| "auto".to_string());
-        let invalid_range = auto_bounds.is_some()
-            && !self.statistics_axis_min_input.trim().is_empty()
-            && !self.statistics_axis_max_input.trim().is_empty()
-            && self
-                .statistics_effective_chart_bounds(auto_bounds, visible_series)
-                == auto_bounds;
-        let invalid_note: Element<'_, Message> = if invalid_range {
-            text("Manual range ignored because min is not smaller than max.")
-                .size(11)
-                .style(theme::Text::Color(recording_active_color()))
-                .into()
-        } else {
-            Space::new()
-                .width(Length::Shrink)
-                .height(Length::Fixed(0.0))
-                .into()
-        };
-
-        container(
-            column![
-                row![
-                    self.manual_input(
-                        "Y Min",
-                        &auto_min,
-                        &self.statistics_axis_min_input,
-                        Message::StatisticsAxisMinChanged,
-                    ),
-                    self.manual_input(
-                        "Y Max",
-                        &auto_max,
-                        &self.statistics_axis_max_input,
-                        Message::StatisticsAxisMaxChanged,
-                    ),
-                    container(
-                        button("Auto")
-                            .padding([6, 10])
-                            .style(theme::Button::custom(muted_content_button_style()))
-                            .on_press(Message::ResetStatisticsAxisBounds),
-                    )
-                    .align_y(iced::alignment::Vertical::Bottom)
-                    .width(Length::Shrink),
-                ]
-                .spacing(10)
-                .align_items(Alignment::End),
-                text(unit_label)
-                    .size(11)
-                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-                invalid_note,
-            ]
-            .spacing(6),
-        )
-        .padding([8, 10])
-        .width(Length::Fill)
-        .style(theme::Container::Custom(statistics_chart_track_style()))
-        .into()
     }
 
     fn statistics_cleanup_indicator(&self) -> Element<'_, Message> {
@@ -3843,6 +3825,12 @@ struct StatisticsChartBounds {
     max_value: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StatisticsSeriesYBounds {
+    min_value: u64,
+    max_value: u64,
+}
+
 fn statistics_chart_bounds(series: &[StatisticsChartSeries]) -> Option<StatisticsChartBounds> {
     let mut timestamps = series
         .iter()
@@ -3876,6 +3864,28 @@ fn statistics_chart_bounds(series: &[StatisticsChartSeries]) -> Option<Statistic
     Some(StatisticsChartBounds {
         min_timestamp,
         max_timestamp,
+        min_value,
+        max_value,
+    })
+}
+
+fn statistics_series_auto_y_bounds(series: &StatisticsChartSeries) -> Option<StatisticsSeriesYBounds> {
+    let mut values = series.points.iter().map(|(_, value)| *value);
+    let first = values.next()?;
+    let min_value = series
+        .points
+        .iter()
+        .map(|(_, value)| *value)
+        .min()
+        .unwrap_or(first);
+    let max_value = series
+        .points
+        .iter()
+        .map(|(_, value)| *value)
+        .max()
+        .unwrap_or(first);
+
+    Some(StatisticsSeriesYBounds {
         min_value,
         max_value,
     })
@@ -3917,13 +3927,6 @@ fn statistics_series_is_currency_key(series_key: &str) -> bool {
     )
 }
 
-fn statistics_series_are_currency_only(series: &[StatisticsChartSeries]) -> bool {
-    !series.is_empty()
-        && series
-            .iter()
-            .all(|series| statistics_series_is_currency_key(&series.key))
-}
-
 fn format_statistics_number(value: u64) -> String {
     let digits = value.to_string();
     let mut formatted = String::with_capacity(digits.len() + digits.len() / 3);
@@ -3956,7 +3959,8 @@ fn parse_statistics_axis_bound(value: &str, currency_only: bool) -> Option<u64> 
 
 fn statistics_line_chart_svg(
     series: &[StatisticsChartSeries],
-    bounds: StatisticsChartBounds,
+    x_bounds: StatisticsChartBounds,
+    series_y_bounds: &HashMap<String, StatisticsSeriesYBounds>,
 ) -> String {
     use std::fmt::Write as _;
 
@@ -3985,10 +3989,18 @@ fn statistics_line_chart_svg(
     }
 
     for series in series {
+        let y_bounds = series_y_bounds
+            .get(&series.key)
+            .copied()
+            .or_else(|| statistics_series_auto_y_bounds(series))
+            .unwrap_or(StatisticsSeriesYBounds {
+                min_value: x_bounds.min_value,
+                max_value: x_bounds.max_value,
+            });
         let mut polyline = String::new();
         for (index, (timestamp, value)) in series.points.iter().copied().enumerate() {
-            let x = statistics_chart_x(bounds, timestamp, plot_width, PAD_LEFT);
-            let y = statistics_chart_y(bounds, value, plot_height, PAD_TOP);
+            let x = statistics_chart_x(x_bounds, timestamp, plot_width, PAD_LEFT);
+            let y = statistics_chart_y(y_bounds, value, plot_height, PAD_TOP);
             if index > 0 {
                 polyline.push(' ');
             }
@@ -4004,8 +4016,8 @@ fn statistics_line_chart_svg(
         }
 
         for (timestamp, value) in &series.points {
-            let x = statistics_chart_x(bounds, *timestamp, plot_width, PAD_LEFT);
-            let y = statistics_chart_y(bounds, *value, plot_height, PAD_TOP);
+            let x = statistics_chart_x(x_bounds, *timestamp, plot_width, PAD_LEFT);
+            let y = statistics_chart_y(y_bounds, *value, plot_height, PAD_TOP);
             let _ = write!(
                 svg,
                 r#"<circle cx="{x:.2}" cy="{y:.2}" r="3.2" fill="{color}" stroke="white" stroke-width="1.5"/>"#
@@ -4032,7 +4044,7 @@ fn statistics_chart_x(
 }
 
 fn statistics_chart_y(
-    bounds: StatisticsChartBounds,
+    bounds: StatisticsSeriesYBounds,
     value: u64,
     plot_height: f32,
     top_padding: f32,

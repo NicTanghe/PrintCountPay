@@ -85,6 +85,12 @@ struct PrinterReorderDrag {
     drop_index: usize,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct StatisticsSeriesAxisInputs {
+    min_input: String,
+    max_input: String,
+}
+
 pub struct PrintCountApp {
     log_store: LogStore,
     reload_handle: ReloadHandle,
@@ -126,6 +132,7 @@ pub struct PrintCountApp {
     selected_printer: Option<PrinterId>,
     statistics_selected_printers: HashSet<PrinterId>,
     statistics_visible_series: HashSet<String>,
+    statistics_series_selection_initialized: bool,
     statistics_range_preset: StatisticsRangePreset,
     statistics_custom_start: Date,
     statistics_custom_end: Date,
@@ -133,8 +140,7 @@ pub struct PrintCountApp {
     statistics_cleanup_in_flight: bool,
     statistics_cleanup_pending_revision: Option<u64>,
     statistics_cleanup_receiver: Option<mpsc::Receiver<StatisticsCleanupResult>>,
-    statistics_axis_min_input: String,
-    statistics_axis_max_input: String,
+    statistics_axis_inputs_by_series: HashMap<String, StatisticsSeriesAxisInputs>,
     manual_pricing_selected: bool,
     selected_manual_bill_id: Option<String>,
     manual_pricing_tab: ManualPricingTab,
@@ -252,6 +258,7 @@ impl PrintCountApp {
             selected_printer: None,
             statistics_selected_printers: HashSet::new(),
             statistics_visible_series: HashSet::new(),
+            statistics_series_selection_initialized: false,
             statistics_range_preset: StatisticsRangePreset::Month,
             statistics_custom_start: statistics_today,
             statistics_custom_end: statistics_today,
@@ -259,8 +266,7 @@ impl PrintCountApp {
             statistics_cleanup_in_flight: false,
             statistics_cleanup_pending_revision: None,
             statistics_cleanup_receiver: None,
-            statistics_axis_min_input: String::new(),
-            statistics_axis_max_input: String::new(),
+            statistics_axis_inputs_by_series: HashMap::new(),
             manual_pricing_selected: false,
             selected_manual_bill_id: None,
             manual_pricing_tab: ManualPricingTab::Calculator,
@@ -484,17 +490,22 @@ impl PrintCountApp {
                 self.set_statistics_date_today(target);
                 Command::none()
             }
-            Message::StatisticsAxisMinChanged(value) => {
-                self.statistics_axis_min_input = value;
+            Message::StatisticsAxisMinChanged { series_key, value } => {
+                self.statistics_axis_inputs_by_series
+                    .entry(series_key)
+                    .or_default()
+                    .min_input = value;
                 Command::none()
             }
-            Message::StatisticsAxisMaxChanged(value) => {
-                self.statistics_axis_max_input = value;
+            Message::StatisticsAxisMaxChanged { series_key, value } => {
+                self.statistics_axis_inputs_by_series
+                    .entry(series_key)
+                    .or_default()
+                    .max_input = value;
                 Command::none()
             }
-            Message::ResetStatisticsAxisBounds => {
-                self.statistics_axis_min_input.clear();
-                self.statistics_axis_max_input.clear();
+            Message::ResetStatisticsAxisBounds(series_key) => {
+                self.statistics_axis_inputs_by_series.remove(&series_key);
                 Command::none()
             }
             Message::StartPrinterReorderDrag(printer_id) => {

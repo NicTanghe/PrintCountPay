@@ -8,11 +8,10 @@ use time::{Date, Month, OffsetDateTime, UtcOffset};
 
 use crate::app::constants::{
     PRT_GENERAL_PRINTER_NAME_OID, PRT_MARKER_LIFECOUNT_1, PRT_MARKER_LIFECOUNT_2,
-    PRT_MARKER_LIFECOUNT_3, RICOH_COUNTER_TABLE,
-    RICOH_BW_COPIER_COUNT_OID, RICOH_BW_PRINTER_COUNT_OID, RICOH_COLOR_COPIER_COUNT_OID,
-    RICOH_COLOR_PRINTER_COUNT_OID, RICOH_COUNTER_VALUE_ROOT, RICOH_TONER_BLACK_OID,
-    RICOH_TONER_CYAN_OID, RICOH_TONER_MAGENTA_OID, RICOH_TONER_YELLOW_OID, SYS_DESCR_OID,
-    SYS_NAME_OID, SYS_OBJECT_ID_OID, SYS_UPTIME_OID,
+    PRT_MARKER_LIFECOUNT_3, RICOH_BW_COPIER_COUNT_OID, RICOH_BW_PRINTER_COUNT_OID,
+    RICOH_COLOR_COPIER_COUNT_OID, RICOH_COLOR_PRINTER_COUNT_OID, RICOH_COUNTER_TABLE,
+    RICOH_COUNTER_VALUE_ROOT, RICOH_TONER_BLACK_OID, RICOH_TONER_CYAN_OID, RICOH_TONER_MAGENTA_OID,
+    RICOH_TONER_YELLOW_OID, SYS_DESCR_OID, SYS_NAME_OID, SYS_OBJECT_ID_OID, SYS_UPTIME_OID,
 };
 use crate::app::profiles::{ManufacturerProfile, RecordingOidProfile, TonerOidProfile};
 use crate::app::types::{
@@ -420,7 +419,9 @@ pub(crate) fn build_poll_label_map(
     }
 
     let default_toner = default_toner_oids();
-    let toner = profile.map(|profile| &profile.toner).unwrap_or(&default_toner);
+    let toner = profile
+        .map(|profile| &profile.toner)
+        .unwrap_or(&default_toner);
     if let Some(oid) = toner.black.as_ref() {
         insert_label(oid.clone(), "Toner: Black");
     }
@@ -589,8 +590,14 @@ pub(crate) fn recording_session_total_cents(
         (session.edits.prints_bw.include_in_price, prints_bw_delta),
     ]);
     let color_delta = sum_optional_included([
-        (session.edits.copies_color.include_in_price, copies_color_delta),
-        (session.edits.prints_color.include_in_price, prints_color_delta),
+        (
+            session.edits.copies_color.include_in_price,
+            copies_color_delta,
+        ),
+        (
+            session.edits.prints_color.include_in_price,
+            prints_color_delta,
+        ),
     ]);
 
     let bw_total = match bw_delta {
@@ -608,7 +615,9 @@ pub(crate) fn recording_session_total_cents(
 
     let color_total = match color_delta {
         Some(0) => Some(0),
-        Some(count) => color_price_from_settings(pricing).map(|value| color_cost_cents(count, value)),
+        Some(count) => {
+            color_price_from_settings(pricing).map(|value| color_cost_cents(count, value))
+        }
         None => None,
     };
 
@@ -852,8 +861,7 @@ fn manual_line_state_with_counters(
     let Some(sides) = parse_count_input(&line_item.sides_input).ok().flatten() else {
         return ManualLineState::Invalid;
     };
-    let Some(print_pricing) = manual_print_pricing(settings, line_item, sides, *counters)
-    else {
+    let Some(print_pricing) = manual_print_pricing(settings, line_item, sides, *counters) else {
         return ManualLineState::Invalid;
     };
 
@@ -1214,10 +1222,9 @@ pub(crate) fn counter_oids_from_walk(varbinds: &[SnmpVarBind]) -> CounterOidSet 
 #[cfg(test)]
 mod tests {
     use super::{
-        category_end_display, category_end_value, category_start_display, category_start_value,
-        default_recording_oid_inputs, default_toner_oids, delta_value,
+        ManualLineState, category_end_display, category_end_value, category_start_display,
+        category_start_value, default_recording_oid_inputs, default_toner_oids, delta_value,
         format_clock_hms_with_offset, format_elapsed_hms, manual_pricing_totals,
-        ManualLineState,
         manual_round_total_cents, missing_recording_snapshot_categories,
         recording_profile_from_settings_lossy, round_to_nearest_5_cents, snmp_oids,
         sum_optional_included, sum_two,

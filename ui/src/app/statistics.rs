@@ -110,7 +110,9 @@ impl StatisticsPollSample {
                 .then_with(|| left.oid.cmp(&right.oid))
         });
         self.metrics.dedup_by(|right, left| {
-            right.series_key == left.series_key && right.oid == left.oid && right.value == left.value
+            right.series_key == left.series_key
+                && right.oid == left.oid
+                && right.value == left.value
         });
         self.metrics.retain(|metric| !metric.oid.is_empty());
     }
@@ -155,7 +157,9 @@ impl StatisticsStore {
     }
 
     pub(crate) fn entry(&self, printer_id: &PrinterId) -> Option<&PrinterStatisticsEntry> {
-        self.printers.iter().find(|entry| &entry.printer_id == printer_id)
+        self.printers
+            .iter()
+            .find(|entry| &entry.printer_id == printer_id)
     }
 
     fn entry_mut(&mut self, printer_id: &PrinterId) -> &mut PrinterStatisticsEntry {
@@ -252,11 +256,16 @@ pub(crate) fn statistics_date_from_components(year: i32, month: Month, day: u8) 
     Date::from_calendar_date(year, month, day).unwrap_or_else(|_| statistics_epoch_date())
 }
 
-pub(crate) fn statistics_date_for_preset(preset: StatisticsRangePreset, today: Date) -> (Date, Date) {
+pub(crate) fn statistics_date_for_preset(
+    preset: StatisticsRangePreset,
+    today: Date,
+) -> (Date, Date) {
     match preset {
         StatisticsRangePreset::Day => (today, today),
         StatisticsRangePreset::Week => (
-            today.checked_sub(TimeDuration::days(6)).unwrap_or(Date::MIN),
+            today
+                .checked_sub(TimeDuration::days(6))
+                .unwrap_or(Date::MIN),
             today,
         ),
         StatisticsRangePreset::Month => (shift_date_back_months(today, 1), today),
@@ -322,10 +331,10 @@ fn statistics_epoch_date() -> Date {
 }
 
 pub(crate) fn load_statistics_store(path: &Path) -> Result<StatisticsStore, String> {
-    let contents =
-        fs::read_to_string(path).map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
-    let mut store =
-        from_str::<StatisticsStore>(&contents).map_err(|error| format!("Failed to parse {}: {error}", path.display()))?;
+    let contents = fs::read_to_string(path)
+        .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+    let mut store = from_str::<StatisticsStore>(&contents)
+        .map_err(|error| format!("Failed to parse {}: {error}", path.display()))?;
     normalize_statistics_store(&mut store);
     Ok(store)
 }
@@ -334,7 +343,8 @@ pub(crate) fn write_statistics_store(path: &Path, store: &StatisticsStore) -> Re
     let mut store = store.clone();
     normalize_statistics_store(&mut store);
 
-    let contents = to_string_pretty(&store, PrettyConfig::new()).map_err(|error| error.to_string())?;
+    let contents =
+        to_string_pretty(&store, PrettyConfig::new()).map_err(|error| error.to_string())?;
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -342,7 +352,8 @@ pub(crate) fn write_statistics_store(path: &Path, store: &StatisticsStore) -> Re
             .map_err(|error| format!("Failed to prepare {}: {error}", parent.display()))?;
     }
 
-    fs::write(path, contents).map_err(|error| format!("Failed to write {}: {error}", path.display()))
+    fs::write(path, contents)
+        .map_err(|error| format!("Failed to write {}: {error}", path.display()))
 }
 
 pub(crate) fn statistics_store_latest_timestamp(store: &StatisticsStore) -> u64 {
@@ -350,11 +361,11 @@ pub(crate) fn statistics_store_latest_timestamp(store: &StatisticsStore) -> u64 
         .printers
         .iter()
         .flat_map(|entry| {
-            entry.poll_samples.iter().map(|sample| sample.captured_at).chain(
-                entry.euro_samples
-                    .iter()
-                    .map(|sample| sample.captured_at),
-            )
+            entry
+                .poll_samples
+                .iter()
+                .map(|sample| sample.captured_at)
+                .chain(entry.euro_samples.iter().map(|sample| sample.captured_at))
         })
         .max()
         .unwrap_or(0)
@@ -705,10 +716,7 @@ fn estimated_income_value_for_entry(
     Some(points)
 }
 
-fn timestamp_matches_window(
-    captured_at: u64,
-    time_window: Option<StatisticsTimeWindow>,
-) -> bool {
+fn timestamp_matches_window(captured_at: u64, time_window: Option<StatisticsTimeWindow>) -> bool {
     time_window
         .map(|time_window| time_window.contains(captured_at))
         .unwrap_or(true)
@@ -780,7 +788,9 @@ pub(crate) fn normalize_statistics_store(store: &mut StatisticsStore) {
             .poll_samples
             .sort_by(|left, right| left.captured_at.cmp(&right.captured_at));
         collapse_poll_samples_by_bucket(&mut entry.poll_samples);
-        entry.poll_samples.retain(|sample| !sample.metrics.is_empty());
+        entry
+            .poll_samples
+            .retain(|sample| !sample.metrics.is_empty());
 
         entry
             .euro_samples
@@ -790,7 +800,9 @@ pub(crate) fn normalize_statistics_store(store: &mut StatisticsStore) {
         });
     }
 
-    store.printers.sort_by(|left, right| left.printer_id.0.cmp(&right.printer_id.0));
+    store
+        .printers
+        .sort_by(|left, right| left.printer_id.0.cmp(&right.printer_id.0));
     store.printers.retain(|entry| {
         !(entry.printer_id.0.trim().is_empty()
             || (entry.poll_samples.is_empty() && entry.euro_samples.is_empty()))
@@ -860,11 +872,8 @@ fn merged_statistics_store(
         merged_entries
             .entry(incoming_entry.printer_id.0.clone())
             .and_modify(|local_entry| {
-                *local_entry = merge_printer_statistics_entry(
-                    local_entry,
-                    incoming_entry,
-                    prefer_incoming,
-                );
+                *local_entry =
+                    merge_printer_statistics_entry(local_entry, incoming_entry, prefer_incoming);
             })
             .or_insert_with(|| incoming_entry.clone());
     }
@@ -925,7 +934,8 @@ fn upsert_poll_sample(
 ) {
     let bucket = statistics_bucket(sample.captured_at);
     if let Some(current) = merged.get_mut(&bucket) {
-        let prefer_candidate = prefer_poll_sample(current, sample, incoming_source, prefer_incoming);
+        let prefer_candidate =
+            prefer_poll_sample(current, sample, incoming_source, prefer_incoming);
         *current = merge_poll_sample(current, sample, prefer_candidate);
     } else {
         merged.insert(bucket, sample.clone());
@@ -964,10 +974,16 @@ fn merge_poll_sample(
 
     let mut metrics = BTreeMap::<(String, String), StatisticsPollMetric>::new();
     for metric in &secondary.metrics {
-        metrics.insert((metric.series_key.clone(), metric.oid.clone()), metric.clone());
+        metrics.insert(
+            (metric.series_key.clone(), metric.oid.clone()),
+            metric.clone(),
+        );
     }
     for metric in &preferred.metrics {
-        metrics.insert((metric.series_key.clone(), metric.oid.clone()), metric.clone());
+        metrics.insert(
+            (metric.series_key.clone(), metric.oid.clone()),
+            metric.clone(),
+        );
     }
     merged.metrics = metrics.into_values().collect();
     merged.normalize();
@@ -1129,8 +1145,18 @@ mod tests {
         let printer_id = printer_id("printer-a");
         let metrics = vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 100)];
 
-        assert!(append_poll_sample(&mut store, &printer_id, 900, metrics.clone()));
-        assert!(!append_poll_sample(&mut store, &printer_id, 905, metrics.clone()));
+        assert!(append_poll_sample(
+            &mut store,
+            &printer_id,
+            900,
+            metrics.clone()
+        ));
+        assert!(!append_poll_sample(
+            &mut store,
+            &printer_id,
+            905,
+            metrics.clone()
+        ));
         assert!(append_poll_sample(&mut store, &printer_id, 1_800, metrics));
 
         let entry = store.entry(&printer_id).expect("statistics entry");
@@ -1166,9 +1192,21 @@ mod tests {
         assert_eq!(series.len(), 5);
         assert!(series.iter().any(|entry| entry.label == "Total B/W"));
         assert!(series.iter().any(|entry| entry.label == "Prints B/W"));
-        assert!(series.iter().any(|entry| entry.label == ESTIMATED_INCOME_BW_SERIES_LABEL));
-        assert!(series.iter().any(|entry| entry.label == ESTIMATED_INCOME_SERIES_LABEL));
-        assert!(series.iter().any(|entry| entry.label == RECORDED_EUR_SERIES_LABEL));
+        assert!(
+            series
+                .iter()
+                .any(|entry| entry.label == ESTIMATED_INCOME_BW_SERIES_LABEL)
+        );
+        assert!(
+            series
+                .iter()
+                .any(|entry| entry.label == ESTIMATED_INCOME_SERIES_LABEL)
+        );
+        assert!(
+            series
+                .iter()
+                .any(|entry| entry.label == RECORDED_EUR_SERIES_LABEL)
+        );
     }
 
     #[test]
@@ -1260,7 +1298,11 @@ mod tests {
                     },
                     StatisticsPollSample {
                         captured_at: 900,
-                        metrics: vec![StatisticsPollMetric::new("1.2.4", "Recording: Prints B/W", 5)],
+                        metrics: vec![StatisticsPollMetric::new(
+                            "1.2.4",
+                            "Recording: Prints B/W",
+                            5,
+                        )],
                         legacy_total: None,
                     },
                 ],
@@ -1280,10 +1322,22 @@ mod tests {
 
         assert_eq!(series.len(), 3);
         assert!(series.iter().any(|entry| entry.label == "Prints B/W"));
-        assert!(series.iter().any(|entry| entry.label == ESTIMATED_INCOME_BW_SERIES_LABEL));
-        assert!(series.iter().any(|entry| entry.label == ESTIMATED_INCOME_SERIES_LABEL));
+        assert!(
+            series
+                .iter()
+                .any(|entry| entry.label == ESTIMATED_INCOME_BW_SERIES_LABEL)
+        );
+        assert!(
+            series
+                .iter()
+                .any(|entry| entry.label == ESTIMATED_INCOME_SERIES_LABEL)
+        );
         assert!(!series.iter().any(|entry| entry.label == "Total B/W"));
-        assert!(!series.iter().any(|entry| entry.label == RECORDED_EUR_SERIES_LABEL));
+        assert!(
+            !series
+                .iter()
+                .any(|entry| entry.label == RECORDED_EUR_SERIES_LABEL)
+        );
     }
 
     #[test]
@@ -1315,14 +1369,8 @@ mod tests {
             end_exclusive: 1_000,
         };
 
-        let points = aggregate_series_points(
-            &store,
-            &selected,
-            &pricing,
-            &metric_key,
-            32,
-            Some(window),
-        );
+        let points =
+            aggregate_series_points(&store, &selected, &pricing, &metric_key, 32, Some(window));
 
         assert_eq!(points, vec![(900, 25)]);
     }
@@ -1382,16 +1430,20 @@ mod tests {
             .expect("statistics entry");
 
         assert_eq!(entry.poll_samples.len(), 2);
-        assert!(entry
-            .poll_samples
-            .iter()
-            .flat_map(|sample| sample.metrics.iter())
-            .any(|metric| metric.value == 10));
-        assert!(entry
-            .poll_samples
-            .iter()
-            .flat_map(|sample| sample.metrics.iter())
-            .any(|metric| metric.value == 25));
+        assert!(
+            entry
+                .poll_samples
+                .iter()
+                .flat_map(|sample| sample.metrics.iter())
+                .any(|metric| metric.value == 10)
+        );
+        assert!(
+            entry
+                .poll_samples
+                .iter()
+                .flat_map(|sample| sample.metrics.iter())
+                .any(|metric| metric.value == 25)
+        );
     }
 
     #[test]
@@ -1433,8 +1485,14 @@ mod tests {
             .expect("statistics entry");
 
         assert_eq!(entry.euro_samples.len(), 4);
-        assert_eq!(entry.euro_samples.first().map(|sample| sample.total_cents), Some(100));
-        assert_eq!(entry.euro_samples.last().map(|sample| sample.total_cents), Some(107));
+        assert_eq!(
+            entry.euro_samples.first().map(|sample| sample.total_cents),
+            Some(100)
+        );
+        assert_eq!(
+            entry.euro_samples.last().map(|sample| sample.total_cents),
+            Some(107)
+        );
     }
 
     #[test]

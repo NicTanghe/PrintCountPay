@@ -1,21 +1,20 @@
 const MANUAL_BILL_ADJECTIVES: &[&str] = &[
-    "amber", "ancient", "autumn", "bright", "brisk", "calm", "cedar", "clear", "cloudy",
-    "copper", "coral", "cosmic", "crisp", "dusty", "ember", "fern", "gentle", "golden",
-    "granite", "harbor", "hazel", "hidden", "ivory", "jade", "lilac", "linen", "lively",
-    "lunar", "mellow", "misty", "noble", "ochre", "olive", "opal", "paper", "pearl",
-    "quiet", "radiant", "river", "rustic", "saffron", "satin", "silver", "soft", "solar",
-    "steady", "stone", "summer", "tender", "velvet", "vivid", "warm", "wild", "willow",
-    "winter", "woodland", "zephyr",
+    "amber", "ancient", "autumn", "bright", "brisk", "calm", "cedar", "clear", "cloudy", "copper",
+    "coral", "cosmic", "crisp", "dusty", "ember", "fern", "gentle", "golden", "granite", "harbor",
+    "hazel", "hidden", "ivory", "jade", "lilac", "linen", "lively", "lunar", "mellow", "misty",
+    "noble", "ochre", "olive", "opal", "paper", "pearl", "quiet", "radiant", "river", "rustic",
+    "saffron", "satin", "silver", "soft", "solar", "steady", "stone", "summer", "tender", "velvet",
+    "vivid", "warm", "wild", "willow", "winter", "woodland", "zephyr",
 ];
 
 const MANUAL_BILL_SUBJECTS: &[&str] = &[
     "atlas", "aurora", "beacon", "birch", "bloom", "breeze", "brook", "canvas", "cinder",
-    "circuit", "cloud", "comet", "cove", "crest", "dawn", "ember", "field", "flame",
-    "forest", "garden", "glow", "grove", "harbor", "horizon", "island", "journal",
-    "lantern", "leaf", "meadow", "mesa", "mirror", "mosaic", "notebook", "orbit", "paper",
-    "pebble", "pine", "plume", "prairie", "quartz", "rain", "reef", "river", "shadow",
-    "signal", "sketch", "song", "sparrow", "stone", "summit", "terrace", "thicket", "trail",
-    "valley", "vista", "willow", "wind", "wonder",
+    "circuit", "cloud", "comet", "cove", "crest", "dawn", "ember", "field", "flame", "forest",
+    "garden", "glow", "grove", "harbor", "horizon", "island", "journal", "lantern", "leaf",
+    "meadow", "mesa", "mirror", "mosaic", "notebook", "orbit", "paper", "pebble", "pine", "plume",
+    "prairie", "quartz", "rain", "reef", "river", "shadow", "signal", "sketch", "song", "sparrow",
+    "stone", "summit", "terrace", "thicket", "trail", "valley", "vista", "willow", "wind",
+    "wonder",
 ];
 
 const MANUAL_PRICING_MAX_BACKUPS: usize = 3;
@@ -204,7 +203,8 @@ fn write_manual_pricing_workspace(
 }
 
 fn write_manual_bill_store(path: &Path, store: &ManualBillStore) -> Result<(), String> {
-    let contents = to_string_pretty(store, PrettyConfig::new()).map_err(|error| error.to_string())?;
+    let contents =
+        to_string_pretty(store, PrettyConfig::new()).map_err(|error| error.to_string())?;
     let temp_path = manual_bill_store_temp_path(path);
 
     if let Some(parent) = path.parent()
@@ -245,7 +245,10 @@ impl ManualBillRevision {
     }
 }
 
-fn prefer_manual_bill_revision(candidate: &ManualBillRevision, current: &ManualBillRevision) -> bool {
+fn prefer_manual_bill_revision(
+    candidate: &ManualBillRevision,
+    current: &ManualBillRevision,
+) -> bool {
     candidate.timestamp() > current.timestamp()
         || (candidate.timestamp() == current.timestamp()
             && matches!(candidate, ManualBillRevision::Tombstone(_))
@@ -650,7 +653,8 @@ impl PrintCountApp {
 
         let prefer_incoming =
             payload.latest_data_at > statistics_store_latest_timestamp(&self.statistics_store);
-        let merge = merge_statistics_store(&mut self.statistics_store, &payload.store, prefer_incoming);
+        let merge =
+            merge_statistics_store(&mut self.statistics_store, &payload.store, prefer_incoming);
         if !merge.changed {
             return;
         }
@@ -666,10 +670,7 @@ impl PrintCountApp {
     }
 
     fn apply_pricing_sync(&mut self, payload: sync::PricingSyncPayload) {
-        if pricing_sync_is_stale(
-            &payload.id,
-            self.last_manual_pricing_sync_id.as_deref(),
-        ) {
+        if pricing_sync_is_stale(&payload.id, self.last_manual_pricing_sync_id.as_deref()) {
             tracing::info!(
                 target: "sync",
                 "Ignoring stale pricing sync {} because local manual pricing is newer.",
@@ -693,10 +694,11 @@ impl PrintCountApp {
         self.sync_selected_manual_bill();
         self.manual_bills_dirty = true;
 
-        self.manual_pricing_status = Some(match self.persist_manual_pricing_workspace(&workspace) {
-            Ok(path) => format!("Applied synced prices and saved manual pricing to {path}."),
-            Err(error) => format!("Applied synced prices, but save failed: {error}"),
-        });
+        self.manual_pricing_status =
+            Some(match self.persist_manual_pricing_workspace(&workspace) {
+                Ok(path) => format!("Applied synced prices and saved manual pricing to {path}."),
+                Err(error) => format!("Applied synced prices, but save failed: {error}"),
+            });
 
         self.last_shared_state = self.build_shared_state(self.last_shared_state.revision);
     }
@@ -781,12 +783,19 @@ impl PrintCountApp {
             if !already_used {
                 return (
                     candidate_id,
-                    format!("{} {}", title_case_word(adjective), title_case_word(subject)),
+                    format!(
+                        "{} {}",
+                        title_case_word(adjective),
+                        title_case_word(subject)
+                    ),
                 );
             }
         }
 
-        let fallback = format!("{}-{}-{seed:x}", MANUAL_BILL_ADJECTIVES[0], MANUAL_BILL_SUBJECTS[0]);
+        let fallback = format!(
+            "{}-{}-{seed:x}",
+            MANUAL_BILL_ADJECTIVES[0], MANUAL_BILL_SUBJECTS[0]
+        );
         (
             fallback,
             format!(
@@ -814,7 +823,8 @@ impl PrintCountApp {
         if let Some(saved_bill) = self.manual_bills.first_mut() {
             saved_bill.touch();
         }
-        self.manual_bill_tombstones.retain(|tombstone| tombstone.id != id);
+        self.manual_bill_tombstones
+            .retain(|tombstone| tombstone.id != id);
         self.manual_bills_dirty = true;
         self.manual_pricing.reset_calculator_state();
         self.manual_pricing_selected = true;
@@ -828,7 +838,11 @@ impl PrintCountApp {
             return;
         };
 
-        let Some(index) = self.manual_bills.iter().position(|bill| bill.id == selected_id) else {
+        let Some(index) = self
+            .manual_bills
+            .iter()
+            .position(|bill| bill.id == selected_id)
+        else {
             self.selected_manual_bill_id = None;
             return;
         };
@@ -879,11 +893,17 @@ impl PrintCountApp {
             &self.pricing,
             Some(self.statistics_time_window()),
         );
-        let available_keys: HashSet<String> = available.iter().map(|series| series.key.clone()).collect();
-        self.statistics_visible_series
-            .retain(|series_key| available_keys.contains(series_key));
 
-        if !self.statistics_visible_series.is_empty() || available.is_empty() {
+        if self.statistics_series_selection_initialized {
+            return;
+        }
+
+        if !self.statistics_visible_series.is_empty() {
+            self.statistics_series_selection_initialized = true;
+            return;
+        }
+
+        if available.is_empty() {
             return;
         }
 
@@ -902,7 +922,10 @@ impl PrintCountApp {
         let mut inserted = 0usize;
 
         for preferred_label in preferred_labels {
-            if let Some(series) = available.iter().find(|series| series.label == preferred_label) {
+            if let Some(series) = available
+                .iter()
+                .find(|series| series.label == preferred_label)
+            {
                 self.statistics_visible_series.insert(series.key.clone());
                 inserted += 1;
             }
@@ -912,16 +935,15 @@ impl PrintCountApp {
         }
 
         if self.statistics_visible_series.is_empty() {
-            self.statistics_visible_series.extend(
-                available
-                    .iter()
-                    .take(3)
-                    .map(|series| series.key.clone()),
-            );
+            self.statistics_visible_series
+                .extend(available.iter().take(3).map(|series| series.key.clone()));
         }
+
+        self.statistics_series_selection_initialized = true;
     }
 
     fn toggle_statistics_series(&mut self, series_key: String) {
+        self.statistics_series_selection_initialized = true;
         if !self.statistics_visible_series.insert(series_key.clone()) {
             self.statistics_visible_series.remove(&series_key);
         }
@@ -1164,10 +1186,8 @@ impl PrintCountApp {
             DiscoveryOutcome::NotPrinter => {}
             DiscoveryOutcome::Error(error) => {
                 self.discovery_errors = self.discovery_errors.saturating_add(1);
-                self.discovery_status = Some(format!(
-                    "Last error: {} ({})",
-                    error.summary, error.detail
-                ));
+                self.discovery_status =
+                    Some(format!("Last error: {} ({})", error.summary, error.detail));
             }
         }
 
@@ -1218,10 +1238,7 @@ impl PrintCountApp {
     }
 
     fn upsert_printer(&mut self, record: PrinterRecord) {
-        let host = record
-            .snmp_address
-            .as_ref()
-            .map(|addr| addr.host.as_str());
+        let host = record.snmp_address.as_ref().map(|addr| addr.host.as_str());
 
         let existing = host.and_then(|host| {
             self.printers
@@ -1373,7 +1390,11 @@ impl PrintCountApp {
             return;
         };
 
-        let Some(index) = self.printers.iter().position(|record| record.id == selected) else {
+        let Some(index) = self
+            .printers
+            .iter()
+            .position(|record| record.id == selected)
+        else {
             self.selected_printer = None;
             return;
         };
@@ -1386,7 +1407,6 @@ impl PrintCountApp {
 
         if self.printers.is_empty() {
             self.selected_printer = None;
-            self.statistics_visible_series.clear();
             return;
         }
 
@@ -1397,11 +1417,7 @@ impl PrintCountApp {
     }
 
     fn printer_matches_host(printer: &PrinterRecord, host: &str) -> bool {
-        printer
-            .snmp_address
-            .as_ref()
-            .map(|addr| addr.host.as_str())
-            == Some(host)
+        printer.snmp_address.as_ref().map(|addr| addr.host.as_str()) == Some(host)
             || printer.ip_or_hostname.as_deref() == Some(host)
     }
 
@@ -1500,11 +1516,7 @@ impl PrintCountApp {
             return;
         };
 
-        let existing = record
-            .model
-            .as_deref()
-            .map(str::trim)
-            .unwrap_or("");
+        let existing = record.model.as_deref().map(str::trim).unwrap_or("");
         let is_manual = record.id.0.starts_with("manual-");
 
         if existing.is_empty() {
@@ -1522,12 +1534,14 @@ impl PrintCountApp {
 
         let mut should_replace = false;
         if let Some(sys_descr) = sys_descr.map(str::trim)
-            && !sys_descr.is_empty() && existing == sys_descr
+            && !sys_descr.is_empty()
+            && existing == sys_descr
         {
             should_replace = true;
         }
         if let Some(host) = record.ip_or_hostname.as_deref().map(str::trim)
-            && !host.is_empty() && existing == host
+            && !host.is_empty()
+            && existing == host
         {
             should_replace = true;
         }
@@ -1572,10 +1586,8 @@ impl PrintCountApp {
         match to_string_pretty(&self.printers, config) {
             Ok(contents) => match fs::write(&path, contents) {
                 Ok(()) => {
-                    self.printers_status = Some(format!(
-                        "Saved {} printers to {path}.",
-                        self.printers.len()
-                    ));
+                    self.printers_status =
+                        Some(format!("Saved {} printers to {path}.", self.printers.len()));
                 }
                 Err(error) => {
                     self.printers_status = Some(format!("Save failed: {error}"));
@@ -1639,12 +1651,12 @@ impl PrintCountApp {
                 );
                 let sys_name =
                     varbind_text_value(&response.varbinds, &Oid::from_slice(&SYS_NAME_OID));
-                sys_descr = varbind_text_value(&response.varbinds, &Oid::from_slice(&SYS_DESCR_OID));
-                sys_object_id = varbind_text_value(
-                    &response.varbinds,
-                    &Oid::from_slice(&SYS_OBJECT_ID_OID),
-                );
-                allow_override = printer_name.is_some() || sys_name.is_some() || sys_descr.is_some();
+                sys_descr =
+                    varbind_text_value(&response.varbinds, &Oid::from_slice(&SYS_DESCR_OID));
+                sys_object_id =
+                    varbind_text_value(&response.varbinds, &Oid::from_slice(&SYS_OBJECT_ID_OID));
+                allow_override =
+                    printer_name.is_some() || sys_name.is_some() || sys_descr.is_some();
                 poll_name = printer_name.or(sys_name).or_else(|| sys_descr.clone());
                 (
                     SnmpPollStatus::Ok {
@@ -1667,10 +1679,19 @@ impl PrintCountApp {
         };
 
         if let Some(name) = poll_name {
-            self.apply_printer_name_fallback(&printer_id, name, allow_override, sys_descr.as_deref());
+            self.apply_printer_name_fallback(
+                &printer_id,
+                name,
+                allow_override,
+                sys_descr.as_deref(),
+            );
         }
 
-        if let Some(record) = self.printers.iter_mut().find(|record| record.id == printer_id) {
+        if let Some(record) = self
+            .printers
+            .iter_mut()
+            .find(|record| record.id == printer_id)
+        {
             record.sys_object_id = sys_object_id;
             record.sys_descr = sys_descr.clone();
             record.status = status;
@@ -1696,7 +1717,8 @@ impl PrintCountApp {
     }
 
     fn sync_statistics_from_poll_state(&mut self, printer_id: &PrinterId) {
-        let Some((received_at, metrics)) = self.statistics_poll_metrics_for_printer(printer_id) else {
+        let Some((received_at, metrics)) = self.statistics_poll_metrics_for_printer(printer_id)
+        else {
             return;
         };
 
@@ -1717,25 +1739,22 @@ impl PrintCountApp {
             return None;
         };
 
-        let (counter_oids, recording_settings, profile) = if self.selected_printer.as_ref() == Some(printer_id) {
-            (
-                self.counter_oids.clone(),
-                self.recording_oids.clone(),
-                self.active_profile.clone(),
-            )
-        } else if let Some(profile) = self.profile_for_poll(printer_id) {
-            (
-                profile.counters.clone(),
-                recording_settings_from_profile(&profile.recording),
-                Some(profile),
-            )
-        } else {
-            (
-                default_counter_oids(),
-                default_recording_oid_inputs(),
-                None,
-            )
-        };
+        let (counter_oids, recording_settings, profile) =
+            if self.selected_printer.as_ref() == Some(printer_id) {
+                (
+                    self.counter_oids.clone(),
+                    self.recording_oids.clone(),
+                    self.active_profile.clone(),
+                )
+            } else if let Some(profile) = self.profile_for_poll(printer_id) {
+                (
+                    profile.counters.clone(),
+                    recording_settings_from_profile(&profile.recording),
+                    Some(profile),
+                )
+            } else {
+                (default_counter_oids(), default_recording_oid_inputs(), None)
+            };
         let label_map = build_poll_label_map(&counter_oids, &recording_settings, profile.as_ref());
         let metrics = varbinds
             .iter()
@@ -1827,7 +1846,11 @@ impl PrintCountApp {
                     detail: "Printer has no SNMP address configured.".to_string(),
                 },
             );
-            if let Some(record) = self.printers.iter_mut().find(|record| record.id == printer_id) {
+            if let Some(record) = self
+                .printers
+                .iter_mut()
+                .find(|record| record.id == printer_id)
+            {
                 record.status = PrinterStatus::Error;
             }
             return Command::none();
@@ -1906,7 +1929,10 @@ impl PrintCountApp {
     }
 
     fn profile_for_poll(&self, printer_id: &PrinterId) -> Option<ManufacturerProfile> {
-        let record = self.printers.iter().find(|record| &record.id == printer_id)?;
+        let record = self
+            .printers
+            .iter()
+            .find(|record| &record.id == printer_id)?;
         let profile_id = record.profile_id.clone().or_else(|| {
             self.profile_index.match_profile_id(
                 record.sys_object_id.as_deref(),
@@ -2095,13 +2121,13 @@ impl PrintCountApp {
             return;
         };
 
-        let (name, address) = match self
-            .printers
-            .iter()
-            .find(|record| record.id == printer_id)
-        {
+        let (name, address) = match self.printers.iter().find(|record| record.id == printer_id) {
             Some(record) => {
-                let name = record.model.as_deref().unwrap_or("Unknown name").to_string();
+                let name = record
+                    .model
+                    .as_deref()
+                    .unwrap_or("Unknown name")
+                    .to_string();
                 let address = record
                     .snmp_address
                     .as_ref()
@@ -2144,10 +2170,7 @@ impl PrintCountApp {
         }
     }
 
-    fn snapshot_for_printer(
-        &self,
-        printer_id: &PrinterId,
-    ) -> Result<RecordingSnapshot, String> {
+    fn snapshot_for_printer(&self, printer_id: &PrinterId) -> Result<RecordingSnapshot, String> {
         let Some(state) = self.poll_states.get(printer_id) else {
             return Err("No poll data yet.".to_string());
         };
@@ -2157,9 +2180,9 @@ impl PrintCountApp {
                 received_at,
                 varbinds,
             } => Ok(self.build_recording_snapshot(*received_at, varbinds)),
-            SnmpPollStatus::Error { summary, detail, .. } => {
-                Err(format!("{summary} ({detail})"))
-            }
+            SnmpPollStatus::Error {
+                summary, detail, ..
+            } => Err(format!("{summary} ({detail})")),
             SnmpPollStatus::Idle => Err("No poll data yet.".to_string()),
         }
     }
@@ -2253,12 +2276,7 @@ impl PrintCountApp {
             return;
         };
 
-        if self
-            .active_profile
-            .as_ref()
-            .map(|profile| profile.id())
-            == Some(profile_id.clone())
-        {
+        if self.active_profile.as_ref().map(|profile| profile.id()) == Some(profile_id.clone()) {
             return;
         }
 
@@ -2322,7 +2340,8 @@ impl PrintCountApp {
             Ok(set) => {
                 self.counter_oids = set;
                 if let Err(error) = self.sync_active_profile_from_inputs() {
-                    self.oids_status = Some(format!("Applied mapping (profile not synced: {error})"));
+                    self.oids_status =
+                        Some(format!("Applied mapping (profile not synced: {error})"));
                 } else {
                     self.oids_status = Some("Applied OID mapping.".to_string());
                 }
@@ -2451,9 +2470,8 @@ impl PrintCountApp {
                 let mut last_error = None;
 
                 for root in CRAWL_ROOTS {
-                    let mut request =
-                        SnmpWalkRequest::new(address.clone(), Oid::from_slice(root))
-                            .with_max_results(0);
+                    let mut request = SnmpWalkRequest::new(address.clone(), Oid::from_slice(root))
+                        .with_max_results(0);
                     if let Some(ref community) = community {
                         request = request.with_community(community.clone());
                     }
@@ -2625,7 +2643,11 @@ impl PrintCountApp {
                 .or_insert(SnmpPollStatus::Idle);
         }
 
-        let known_ids: HashSet<PrinterId> = self.printers.iter().map(|record| record.id.clone()).collect();
+        let known_ids: HashSet<PrinterId> = self
+            .printers
+            .iter()
+            .map(|record| record.id.clone())
+            .collect();
         self.pending_printer_drag =
             pending_printer_drag.filter(|pending| known_ids.contains(&pending.printer_id));
         self.active_printer_drag = active_printer_drag
@@ -2648,7 +2670,8 @@ impl PrintCountApp {
                 (entry.printer_id, session)
             })
             .collect();
-        self.poll_in_flight.retain(|printer_id| known_ids.contains(printer_id));
+        self.poll_in_flight
+            .retain(|printer_id| known_ids.contains(printer_id));
         self.statistics_selected_printers
             .retain(|printer_id| known_ids.contains(printer_id));
 
@@ -3019,11 +3042,13 @@ mod tests {
         app.manual_pricing.binding_input = "4.20".to_string();
         app.manual_pricing.line_items[0].sides_input = "12".to_string();
         app.manual_pricing.line_items[0].sync_sheets_from_sides();
-        app.manual_pricing.finisher_items.push(ManualFinisherLineItem {
-            finisher_type: ManualFinisherType::Binding,
-            laminate_size: ManualLaminateSize::A4,
-            amount_input: "2".to_string(),
-        });
+        app.manual_pricing
+            .finisher_items
+            .push(ManualFinisherLineItem {
+                finisher_type: ManualFinisherType::Binding,
+                laminate_size: ManualLaminateSize::A4,
+                amount_input: "2".to_string(),
+            });
         app.manual_pricing.discount_input = "5".to_string();
         app.manual_pricing.rounding_mode = ManualRoundingMode::HalfEuro;
 
@@ -3046,10 +3071,16 @@ mod tests {
         );
         assert_eq!(app.manual_pricing.a3_input, "3.25");
         assert_eq!(app.manual_pricing.binding_input, "4.20");
-        assert_eq!(app.manual_pricing.line_items, vec![ManualPricingLineItem::default()]);
+        assert_eq!(
+            app.manual_pricing.line_items,
+            vec![ManualPricingLineItem::default()]
+        );
         assert!(app.manual_pricing.finisher_items.is_empty());
         assert!(app.manual_pricing.discount_input.is_empty());
-        assert_eq!(app.manual_pricing.rounding_mode, ManualRoundingMode::FiveCents);
+        assert_eq!(
+            app.manual_pricing.rounding_mode,
+            ManualRoundingMode::FiveCents
+        );
     }
 
     #[test]
@@ -3132,10 +3163,16 @@ mod tests {
         assert_eq!(app.manual_pricing.a0_input, "30");
         assert_eq!(app.manual_pricing.a3_input, "3.25");
         assert_eq!(app.manual_pricing.binding_input, "6.50");
-        assert_eq!(app.manual_pricing.line_items, vec![ManualPricingLineItem::default()]);
+        assert_eq!(
+            app.manual_pricing.line_items,
+            vec![ManualPricingLineItem::default()]
+        );
         assert!(app.manual_pricing.finisher_items.is_empty());
         assert!(app.manual_pricing.discount_input.is_empty());
-        assert_eq!(app.manual_pricing.rounding_mode, ManualRoundingMode::FiveCents);
+        assert_eq!(
+            app.manual_pricing.rounding_mode,
+            ManualRoundingMode::FiveCents
+        );
         assert_eq!(app.manual_bills.len(), 1);
         assert_eq!(app.manual_bills[0].id, "saved-bill");
         assert_eq!(app.manual_bills[0].pricing.discount_input, "5");
@@ -3183,7 +3220,10 @@ mod tests {
 
         assert_eq!(workspace.settings.a0_input, "30");
         assert_eq!(workspace.settings.a4_color_first_input, "0.75");
-        assert_eq!(workspace.settings.rounding_mode, ManualRoundingMode::HalfEuro);
+        assert_eq!(
+            workspace.settings.rounding_mode,
+            ManualRoundingMode::HalfEuro
+        );
         assert!(workspace.bills.is_empty());
     }
 
@@ -3201,7 +3241,10 @@ mod tests {
         assert_eq!(app.manual_bill_tombstones[0].id, deleted_id);
         assert!(app.manual_pricing_selected);
         assert_eq!(app.selected_manual_bill_id, None);
-        assert_eq!(app.manual_pricing_status, Some(format!("Deleted bill {deleted_id}.")));
+        assert_eq!(
+            app.manual_pricing_status,
+            Some(format!("Deleted bill {deleted_id}."))
+        );
     }
 
     #[test]
@@ -3371,9 +3414,15 @@ mod tests {
 
         assert_eq!(app.pricing.color_input, "0.75");
         assert_eq!(app.manual_pricing.a0_input, "99");
-        assert_eq!(app.manual_pricing.line_items, vec![ManualPricingLineItem::default()]);
+        assert_eq!(
+            app.manual_pricing.line_items,
+            vec![ManualPricingLineItem::default()]
+        );
         assert!(app.manual_pricing.discount_input.is_empty());
-        assert_eq!(app.manual_pricing.rounding_mode, ManualRoundingMode::FiveCents);
+        assert_eq!(
+            app.manual_pricing.rounding_mode,
+            ManualRoundingMode::FiveCents
+        );
         assert_eq!(app.manual_bills.len(), 1);
         assert_eq!(app.manual_bills[0].id, "shared-bill");
         let persisted_workspace = read_manual_pricing_workspace(&path);
@@ -3423,7 +3472,9 @@ mod tests {
 
         assert_eq!(app.manual_pricing.a3_color_rest_input, "1");
         assert_eq!(
-            read_manual_pricing_workspace(&path).settings.a3_color_rest_input,
+            read_manual_pricing_workspace(&path)
+                .settings
+                .a3_color_rest_input,
             "1"
         );
 
@@ -3536,7 +3587,13 @@ mod tests {
             .get(&printer_id)
             .expect("recording session should exist");
         assert!(session.active);
-        assert_eq!(session.start.as_ref().and_then(|snapshot| snapshot.bw_printer), Some(456));
+        assert_eq!(
+            session
+                .start
+                .as_ref()
+                .and_then(|snapshot| snapshot.bw_printer),
+            Some(456)
+        );
         assert_eq!(session.edits.prints_bw.start_input, "456");
     }
 
@@ -3586,6 +3643,106 @@ mod tests {
         assert_eq!(entry.poll_samples[0].metrics[0].value, 111);
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn statistics_series_selection_survives_printer_switches() {
+        let mut app = test_app();
+        let printer_a = printer_record_with_id("printer-a");
+        let printer_b = printer_record_with_id("printer-b");
+        let captured_at = app.statistics_time_window().start_inclusive;
+        let bw_key = StatisticsPollMetric::new("1.2.3", "Clicks: B/W", 0).series_key;
+        let color_key = StatisticsPollMetric::new("1.2.4", "Clicks: Color", 0).series_key;
+
+        app.replace_printers(vec![printer_a.clone(), printer_b.clone()]);
+        append_poll_sample(
+            &mut app.statistics_store,
+            &printer_a.id,
+            captured_at,
+            vec![
+                StatisticsPollMetric::new("1.2.3", "Clicks: B/W", 10),
+                StatisticsPollMetric::new("1.2.4", "Clicks: Color", 5),
+            ],
+        );
+        append_poll_sample(
+            &mut app.statistics_store,
+            &printer_b.id,
+            captured_at,
+            vec![StatisticsPollMetric::new("1.2.4", "Clicks: Color", 7)],
+        );
+
+        app.statistics_selected_printers = HashSet::from([printer_a.id.clone()]);
+        app.sync_statistics_visible_series();
+        assert!(app.statistics_visible_series.contains(&bw_key));
+
+        for series_key in app
+            .statistics_visible_series
+            .clone()
+            .into_iter()
+            .filter(|series_key| series_key != &bw_key)
+            .collect::<Vec<_>>()
+        {
+            app.toggle_statistics_series(series_key);
+        }
+        assert_eq!(
+            app.statistics_visible_series,
+            HashSet::from([bw_key.clone()])
+        );
+
+        app.statistics_selected_printers = HashSet::from([printer_b.id.clone()]);
+        app.sync_statistics_visible_series();
+        assert_eq!(
+            app.statistics_visible_series,
+            HashSet::from([bw_key.clone()])
+        );
+
+        app.statistics_selected_printers =
+            HashSet::from([printer_a.id.clone(), printer_b.id.clone()]);
+        app.sync_statistics_visible_series();
+        assert!(app.statistics_visible_series.contains(&bw_key));
+        assert!(!app.statistics_visible_series.contains(&color_key));
+    }
+
+    #[test]
+    fn statistics_series_selection_stays_empty_after_hiding_everything() {
+        let mut app = test_app();
+        let printer_a = printer_record_with_id("printer-a");
+        let printer_b = printer_record_with_id("printer-b");
+        let captured_at = app.statistics_time_window().start_inclusive;
+
+        app.replace_printers(vec![printer_a.clone(), printer_b.clone()]);
+        append_poll_sample(
+            &mut app.statistics_store,
+            &printer_a.id,
+            captured_at,
+            vec![
+                StatisticsPollMetric::new("1.2.3", "Clicks: B/W", 10),
+                StatisticsPollMetric::new("1.2.4", "Clicks: Color", 5),
+            ],
+        );
+        append_poll_sample(
+            &mut app.statistics_store,
+            &printer_b.id,
+            captured_at,
+            vec![StatisticsPollMetric::new("1.2.4", "Clicks: Color", 7)],
+        );
+
+        app.statistics_selected_printers = HashSet::from([printer_a.id.clone()]);
+        app.sync_statistics_visible_series();
+
+        for series_key in app
+            .statistics_visible_series
+            .clone()
+            .into_iter()
+            .collect::<Vec<_>>()
+        {
+            app.toggle_statistics_series(series_key);
+        }
+        assert!(app.statistics_visible_series.is_empty());
+
+        app.statistics_selected_printers = HashSet::from([printer_b.id]);
+        app.sync_statistics_visible_series();
+        assert!(app.statistics_visible_series.is_empty());
     }
 
     #[test]
