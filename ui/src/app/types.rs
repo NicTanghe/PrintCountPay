@@ -55,6 +55,13 @@ pub enum StatisticsDateTarget {
     End,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct StatisticsChartHover {
+    pub(crate) cursor_x: f32,
+    pub(crate) cursor_y: f32,
+    pub(crate) timestamp: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManualPricingTab {
     Calculator,
@@ -791,8 +798,16 @@ pub(crate) enum Message {
     StatisticsDateMonthSelected(StatisticsDateTarget, Month),
     StatisticsDateDaySelected(StatisticsDateTarget, u8),
     StatisticsDateSetToday(StatisticsDateTarget),
-    StatisticsAxisMinChanged { series_key: String, value: String },
-    StatisticsAxisMaxChanged { series_key: String, value: String },
+    StatisticsChartHoverMoved(StatisticsChartHover),
+    StatisticsChartHoverCleared,
+    StatisticsAxisMinChanged {
+        series_key: String,
+        value: String,
+    },
+    StatisticsAxisMaxChanged {
+        series_key: String,
+        value: String,
+    },
     ResetStatisticsAxisBounds(String),
     StartPrinterReorderDrag(PrinterId),
     PrinterReorderHoldTick,

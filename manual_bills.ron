@@ -2,6 +2,14 @@
     bills: [],
     bill_tombstones: [
         (
+            id: "vivid-cloud",
+            deleted_at_millis: 1776174399848,
+        ),
+        (
+            id: "satin-crest",
+            deleted_at_millis: 1776173221768,
+        ),
+        (
             id: "fern-crest",
             deleted_at_millis: 1775743303100,
         ),

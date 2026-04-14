@@ -140,6 +140,7 @@ pub struct PrintCountApp {
     statistics_cleanup_in_flight: bool,
     statistics_cleanup_pending_revision: Option<u64>,
     statistics_cleanup_receiver: Option<mpsc::Receiver<StatisticsCleanupResult>>,
+    statistics_chart_hover: Option<StatisticsChartHover>,
     statistics_axis_inputs_by_series: HashMap<String, StatisticsSeriesAxisInputs>,
     manual_pricing_selected: bool,
     selected_manual_bill_id: Option<String>,
@@ -266,6 +267,7 @@ impl PrintCountApp {
             statistics_cleanup_in_flight: false,
             statistics_cleanup_pending_revision: None,
             statistics_cleanup_receiver: None,
+            statistics_chart_hover: None,
             statistics_axis_inputs_by_series: HashMap::new(),
             manual_pricing_selected: false,
             selected_manual_bill_id: None,
@@ -488,6 +490,14 @@ impl PrintCountApp {
             }
             Message::StatisticsDateSetToday(target) => {
                 self.set_statistics_date_today(target);
+                Command::none()
+            }
+            Message::StatisticsChartHoverMoved(hover) => {
+                self.statistics_chart_hover = Some(hover);
+                Command::none()
+            }
+            Message::StatisticsChartHoverCleared => {
+                self.statistics_chart_hover = None;
                 Command::none()
             }
             Message::StatisticsAxisMinChanged { series_key, value } => {

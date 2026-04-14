@@ -1,4 +1,14 @@
 const PRINTER_DROP_SPLIT_Y: f32 = 32.0;
+const STATISTICS_CHART_SVG_WIDTH: f32 = 1000.0;
+const STATISTICS_CHART_SVG_HEIGHT: f32 = 220.0;
+const STATISTICS_CHART_PAD_LEFT: f32 = 18.0;
+const STATISTICS_CHART_PAD_RIGHT: f32 = 10.0;
+const STATISTICS_CHART_PAD_TOP: f32 = 12.0;
+const STATISTICS_CHART_PAD_BOTTOM: f32 = 12.0;
+const STATISTICS_CHART_CONTAINER_PAD_LEFT: f32 = 12.0;
+const STATISTICS_CHART_CONTAINER_PAD_RIGHT: f32 = 12.0;
+const STATISTICS_CHART_CONTAINER_PAD_TOP: f32 = 8.0;
+const STATISTICS_CHART_CONTAINER_PAD_BOTTOM: f32 = 8.0;
 
 impl PrintCountApp {
     fn tab_bar(&self) -> Element<'_, Message> {
@@ -2434,25 +2444,54 @@ impl PrintCountApp {
         x_bounds: StatisticsChartBounds,
         series_y_bounds: &HashMap<String, StatisticsSeriesYBounds>,
     ) -> Element<'_, Message> {
-        let svg_markup = statistics_line_chart_svg(visible_series, x_bounds, series_y_bounds);
-        let chart = iced::widget::svg(iced::widget::svg::Handle::from_memory(
-            svg_markup.into_bytes(),
-        ))
-        .width(Length::Fill)
-        .height(Length::Fixed(220.0))
-        .style(|_theme, _status| iced::widget::svg::Style { color: None });
+        let chart_height =
+            STATISTICS_CHART_SVG_HEIGHT + STATISTICS_CHART_CONTAINER_PAD_TOP + STATISTICS_CHART_CONTAINER_PAD_BOTTOM;
+        let hover = self.statistics_chart_hover;
+        let series = visible_series.to_vec();
+        let bounds_by_series = series_y_bounds.clone();
+        let hover_timestamps = series
+            .iter()
+            .flat_map(|entry| entry.points.iter().map(|(timestamp, _)| *timestamp))
+            .collect::<Vec<_>>();
 
-        container(chart)
-            .padding(iced::Padding {
-                top: 8.0,
-                right: 12.0,
-                bottom: 8.0,
-                left: 12.0,
-            })
+        iced::widget::responsive(move |size| {
+            let svg_markup = statistics_line_chart_svg(&series, x_bounds, &bounds_by_series, hover);
+            let chart = iced::widget::svg(iced::widget::svg::Handle::from_memory(
+                svg_markup.into_bytes(),
+            ))
             .width(Length::Fill)
-            .height(Length::Fixed(236.0))
-            .style(theme::Container::Custom(statistics_chart_track_style()))
-            .into()
+            .height(Length::Fixed(STATISTICS_CHART_SVG_HEIGHT))
+            .style(|_theme, _status| iced::widget::svg::Style { color: None });
+
+            let chart_card = container(chart)
+                .padding(iced::Padding {
+                    top: STATISTICS_CHART_CONTAINER_PAD_TOP,
+                    right: STATISTICS_CHART_CONTAINER_PAD_RIGHT,
+                    bottom: STATISTICS_CHART_CONTAINER_PAD_BOTTOM,
+                    left: STATISTICS_CHART_CONTAINER_PAD_LEFT,
+                })
+                .width(Length::Fill)
+                .height(Length::Fixed(chart_height))
+                .style(theme::Container::Custom(statistics_chart_track_style()));
+            let hover_timestamps = hover_timestamps.clone();
+
+            mouse_area(chart_card)
+                .on_move(move |point| {
+                    statistics_chart_hover_from_cursor(
+                        point,
+                        size.width,
+                        x_bounds,
+                        &hover_timestamps,
+                    )
+                    .map(Message::StatisticsChartHoverMoved)
+                    .unwrap_or(Message::StatisticsChartHoverCleared)
+                })
+                .on_exit(Message::StatisticsChartHoverCleared)
+                .into()
+        })
+        .height(Length::Fixed(chart_height))
+        .width(Length::Fill)
+        .into()
     }
 
     fn statistics_chart_empty_state(&self, label: &str) -> Element<'_, Message> {
@@ -3957,34 +3996,100 @@ fn parse_statistics_axis_bound(value: &str, currency_only: bool) -> Option<u64> 
     }
 }
 
+fn statistics_chart_hover_from_cursor(
+    cursor: iced::Point,
+    chart_width: f32,
+    x_bounds: StatisticsChartBounds,
+    timestamps: &[u64],
+) -> Option<StatisticsChartHover> {
+    let drawable_width =
+        (chart_width - STATISTICS_CHART_CONTAINER_PAD_LEFT - STATISTICS_CHART_CONTAINER_PAD_RIGHT)
+            .max(1.0);
+    let drawable_height = STATISTICS_CHART_SVG_HEIGHT.max(1.0);
+    let local_x = (cursor.x - STATISTICS_CHART_CONTAINER_PAD_LEFT).clamp(0.0, drawable_width);
+    let local_y = (cursor.y - STATISTICS_CHART_CONTAINER_PAD_TOP).clamp(0.0, drawable_height);
+    let cursor_x = (local_x / drawable_width) * STATISTICS_CHART_SVG_WIDTH;
+    let cursor_y = (local_y / drawable_height) * STATISTICS_CHART_SVG_HEIGHT;
+    let inferred_timestamp = statistics_timestamp_from_chart_x(x_bounds, cursor_x);
+    let timestamp =
+        statistics_nearest_timestamp(timestamps, inferred_timestamp).unwrap_or(inferred_timestamp);
+
+    Some(StatisticsChartHover {
+        cursor_x,
+        cursor_y,
+        timestamp,
+    })
+}
+
+fn statistics_timestamp_from_chart_x(bounds: StatisticsChartBounds, chart_x: f32) -> u64 {
+    let plot_left = STATISTICS_CHART_PAD_LEFT;
+    let plot_right = STATISTICS_CHART_SVG_WIDTH - STATISTICS_CHART_PAD_RIGHT;
+    let clamped_x = chart_x.clamp(plot_left, plot_right);
+    let span = bounds.max_timestamp.saturating_sub(bounds.min_timestamp);
+    if span == 0 {
+        return bounds.min_timestamp;
+    }
+
+    let ratio = (clamped_x - plot_left) / (plot_right - plot_left).max(1.0);
+    bounds.min_timestamp + (span as f32 * ratio).round() as u64
+}
+
+fn statistics_nearest_timestamp(timestamps: &[u64], target: u64) -> Option<u64> {
+    timestamps
+        .iter()
+        .copied()
+        .min_by_key(|timestamp| timestamp.abs_diff(target))
+}
+
+fn statistics_nearest_series_point(points: &[(u64, u64)], target: u64) -> Option<(u64, u64)> {
+    points
+        .iter()
+        .copied()
+        .min_by_key(|(timestamp, _)| timestamp.abs_diff(target))
+}
+
+fn statistics_series_tooltip_value_text(series_key: &str, value: u64) -> String {
+    if statistics_series_is_currency_key(series_key) {
+        format_cents(value)
+    } else {
+        format_statistics_number(value)
+    }
+}
+
+fn statistics_escape_svg_text(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
 fn statistics_line_chart_svg(
     series: &[StatisticsChartSeries],
     x_bounds: StatisticsChartBounds,
     series_y_bounds: &HashMap<String, StatisticsSeriesYBounds>,
+    hover: Option<StatisticsChartHover>,
 ) -> String {
     use std::fmt::Write as _;
 
-    const WIDTH: f32 = 1000.0;
-    const HEIGHT: f32 = 220.0;
-    const PAD_LEFT: f32 = 18.0;
-    const PAD_RIGHT: f32 = 10.0;
-    const PAD_TOP: f32 = 12.0;
-    const PAD_BOTTOM: f32 = 12.0;
-
-    let plot_width = WIDTH - PAD_LEFT - PAD_RIGHT;
-    let plot_height = HEIGHT - PAD_TOP - PAD_BOTTOM;
+    let plot_width = STATISTICS_CHART_SVG_WIDTH - STATISTICS_CHART_PAD_LEFT - STATISTICS_CHART_PAD_RIGHT;
+    let plot_height = STATISTICS_CHART_SVG_HEIGHT - STATISTICS_CHART_PAD_TOP - STATISTICS_CHART_PAD_BOTTOM;
     let mut svg = String::new();
     let _ = write!(
         svg,
-        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {WIDTH} {HEIGHT}" fill="none">"#
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" fill="none">"#,
+        width = STATISTICS_CHART_SVG_WIDTH,
+        height = STATISTICS_CHART_SVG_HEIGHT,
     );
 
     for line in 0..=4 {
-        let y = PAD_TOP + (plot_height / 4.0) * line as f32;
+        let y = STATISTICS_CHART_PAD_TOP + (plot_height / 4.0) * line as f32;
         let _ = write!(
             svg,
-            r##"<line x1="{PAD_LEFT}" y1="{y:.2}" x2="{x2}" y2="{y:.2}" stroke="#D7DEE6" stroke-width="1"/>"##,
-            x2 = WIDTH - PAD_RIGHT,
+            r##"<line x1="{left}" y1="{y:.2}" x2="{x2}" y2="{y:.2}" stroke="#D7DEE6" stroke-width="1"/>"##,
+            left = STATISTICS_CHART_PAD_LEFT,
+            x2 = STATISTICS_CHART_SVG_WIDTH - STATISTICS_CHART_PAD_RIGHT,
         );
     }
 
@@ -3999,8 +4104,8 @@ fn statistics_line_chart_svg(
             });
         let mut polyline = String::new();
         for (index, (timestamp, value)) in series.points.iter().copied().enumerate() {
-            let x = statistics_chart_x(x_bounds, timestamp, plot_width, PAD_LEFT);
-            let y = statistics_chart_y(y_bounds, value, plot_height, PAD_TOP);
+            let x = statistics_chart_x(x_bounds, timestamp, plot_width, STATISTICS_CHART_PAD_LEFT);
+            let y = statistics_chart_y(y_bounds, value, plot_height, STATISTICS_CHART_PAD_TOP);
             if index > 0 {
                 polyline.push(' ');
             }
@@ -4016,12 +4121,141 @@ fn statistics_line_chart_svg(
         }
 
         for (timestamp, value) in &series.points {
-            let x = statistics_chart_x(x_bounds, *timestamp, plot_width, PAD_LEFT);
-            let y = statistics_chart_y(y_bounds, *value, plot_height, PAD_TOP);
+            let x = statistics_chart_x(
+                x_bounds,
+                *timestamp,
+                plot_width,
+                STATISTICS_CHART_PAD_LEFT,
+            );
+            let y = statistics_chart_y(
+                y_bounds,
+                *value,
+                plot_height,
+                STATISTICS_CHART_PAD_TOP,
+            );
             let _ = write!(
                 svg,
                 r#"<circle cx="{x:.2}" cy="{y:.2}" r="3.2" fill="{color}" stroke="white" stroke-width="1.5"/>"#
             );
+        }
+    }
+
+    if let Some(hover) = hover {
+        let guide_x = statistics_chart_x(
+            x_bounds,
+            hover.timestamp,
+            plot_width,
+            STATISTICS_CHART_PAD_LEFT,
+        );
+        let guide_top = STATISTICS_CHART_PAD_TOP;
+        let guide_bottom = STATISTICS_CHART_SVG_HEIGHT - STATISTICS_CHART_PAD_BOTTOM;
+        let _ = write!(
+            svg,
+            r##"<line x1="{x:.2}" y1="{top:.2}" x2="{x:.2}" y2="{bottom:.2}" stroke="#485560" stroke-width="1" stroke-dasharray="4 3" stroke-opacity="0.7"/>"##,
+            x = guide_x,
+            top = guide_top,
+            bottom = guide_bottom,
+        );
+
+        let mut rows: Vec<(String, String, String)> = Vec::new();
+        for series in series {
+            let y_bounds = series_y_bounds
+                .get(&series.key)
+                .copied()
+                .or_else(|| statistics_series_auto_y_bounds(series))
+                .unwrap_or(StatisticsSeriesYBounds {
+                    min_value: x_bounds.min_value,
+                    max_value: x_bounds.max_value,
+                });
+            let Some((point_timestamp, point_value)) =
+                statistics_nearest_series_point(&series.points, hover.timestamp)
+            else {
+                continue;
+            };
+            let point_x = statistics_chart_x(
+                x_bounds,
+                point_timestamp,
+                plot_width,
+                STATISTICS_CHART_PAD_LEFT,
+            );
+            let point_y = statistics_chart_y(
+                y_bounds,
+                point_value,
+                plot_height,
+                STATISTICS_CHART_PAD_TOP,
+            );
+            let color = statistics_color_hex(series.color);
+            let _ = write!(
+                svg,
+                r##"<circle cx="{x:.2}" cy="{y:.2}" r="5.0" fill="{color}" stroke="white" stroke-width="2"/>"##,
+                x = point_x,
+                y = point_y,
+            );
+            rows.push((
+                series.label.clone(),
+                statistics_series_tooltip_value_text(&series.key, point_value),
+                color,
+            ));
+        }
+
+        if !rows.is_empty() {
+            let timestamp_label = format_local_date_time(hover.timestamp);
+            let mut max_chars = timestamp_label.chars().count();
+            for (label, value, _) in &rows {
+                max_chars = max_chars.max(label.chars().count() + value.chars().count() + 2);
+            }
+            let tooltip_width = (max_chars as f32 * 6.6 + 34.0).clamp(160.0, 360.0);
+            let tooltip_height = 24.0 + rows.len() as f32 * 16.0 + 12.0;
+            let mut tooltip_x = hover.cursor_x + 12.0;
+            let mut tooltip_y = hover.cursor_y - tooltip_height - 12.0;
+            if tooltip_x + tooltip_width > STATISTICS_CHART_SVG_WIDTH - 4.0 {
+                tooltip_x = hover.cursor_x - tooltip_width - 12.0;
+            }
+            if tooltip_x < 4.0 {
+                tooltip_x = 4.0;
+            }
+            if tooltip_y < 4.0 {
+                tooltip_y = (hover.cursor_y + 12.0)
+                    .min(STATISTICS_CHART_SVG_HEIGHT - tooltip_height - 4.0);
+            }
+            if tooltip_y < 4.0 {
+                tooltip_y = 4.0;
+            }
+
+            let _ = write!(
+                svg,
+                r##"<rect x="{x:.2}" y="{y:.2}" width="{width:.2}" height="{height:.2}" rx="8" fill="#FDFEFE" stroke="#97A4B2" stroke-width="1.2"/>"##,
+                x = tooltip_x,
+                y = tooltip_y,
+                width = tooltip_width,
+                height = tooltip_height,
+            );
+            let _ = write!(
+                svg,
+                r##"<text x="{x:.2}" y="{y:.2}" fill="#2B3640" font-size="11.5" font-family="Segoe UI, Arial, sans-serif">{label}</text>"##,
+                x = tooltip_x + 10.0,
+                y = tooltip_y + 16.0,
+                label = statistics_escape_svg_text(&timestamp_label),
+            );
+
+            for (index, (label, value, color)) in rows.iter().enumerate() {
+                let row_y = tooltip_y + 33.0 + index as f32 * 16.0;
+                let _ = write!(
+                    svg,
+                    r##"<circle cx="{x:.2}" cy="{y:.2}" r="3.0" fill="{color}"/>"##,
+                    x = tooltip_x + 11.0,
+                    y = row_y - 3.5,
+                    color = color,
+                );
+                let line = format!("{label}: {value}");
+                let _ = write!(
+                    svg,
+                    r##"<text x="{x:.2}" y="{y:.2}" fill="#33404A" font-size="11" font-family="Segoe UI, Arial, sans-serif">{line}</text>"##,
+                    x = tooltip_x + 20.0,
+                    y = row_y,
+                    line = statistics_escape_svg_text(&line),
+                );
+            }
         }
     }
 
