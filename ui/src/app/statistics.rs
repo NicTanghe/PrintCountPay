@@ -47,7 +47,6 @@ const BUSINESS_START_MINUTES: u16 = 10 * 60 + 45;
 const BUSINESS_END_MINUTES: u16 = 18 * 60 + 45;
 const RECORDING_POINTS_PER_DAY: usize = 4;
 const LEGACY_TOTAL_SERIES_LABEL: &str = "Clicks: Total";
-const RICOH_COUNTER_9_5_OID: &str = "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct StatisticsPollMetric {
@@ -1104,10 +1103,6 @@ fn canonical_statistics_source_label(metric: &StatisticsPollMetric) -> Option<&'
         "Copy color counter" => Some("Recording: Copies Color"),
         "Print B/W counter" => Some("Recording: Prints B/W"),
         "Print color counter" => Some("Recording: Prints Color"),
-        // Legacy Pro 8320 profile labeling.
-        "Observed counter 5" if metric.oid.trim() == RICOH_COUNTER_9_5_OID => {
-            Some("Recording: Prints B/W")
-        }
         _ => None,
     }
 }
@@ -1260,6 +1255,48 @@ mod tests {
     }
 
     #[test]
+    fn available_series_ignores_observed_counter_5_when_prints_bw_exists() {
+        let printer_id = printer_id("printer-a");
+        let pricing = PricingSettings::default();
+        let store = StatisticsStore {
+            printers: vec![PrinterStatisticsEntry {
+                printer_id: printer_id.clone(),
+                poll_samples: vec![StatisticsPollSample {
+                    captured_at: 900,
+                    metrics: vec![
+                        StatisticsPollMetric::new(
+                            "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            "Observed counter 5",
+                            42,
+                        ),
+                        StatisticsPollMetric::new(
+                            "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            "Recording: Prints B/W",
+                            84,
+                        ),
+                    ],
+                    legacy_total: None,
+                }],
+                euro_samples: Vec::new(),
+            }],
+        };
+        let selected = HashSet::from([printer_id]);
+
+        let series = available_series(&store, &selected, &pricing, None);
+        let prints_bw_count = series
+            .iter()
+            .filter(|entry| entry.label == "Prints B/W")
+            .count();
+
+        assert_eq!(prints_bw_count, 1);
+        assert!(
+            !series
+                .iter()
+                .any(|entry| entry.key == "label:Observed counter 5")
+        );
+    }
+
+    #[test]
     fn aggregate_series_points_adds_matching_metrics_across_printers() {
         let printer_a = printer_id("printer-a");
         let printer_b = printer_id("printer-b");
@@ -1334,18 +1371,18 @@ mod tests {
     }
 
     #[test]
-    fn sample_total_bw_count_supports_legacy_8320_labeling() {
+    fn sample_total_bw_count_does_not_map_observed_counter_5_as_prints_bw() {
         let sample = StatisticsPollSample {
             captured_at: 900,
             metrics: vec![StatisticsPollMetric::new(
-                RICOH_COUNTER_9_5_OID,
+                "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
                 "Observed counter 5",
                 42,
             )],
             legacy_total: None,
         };
 
-        assert_eq!(sample_total_bw_count(&sample), Some(42));
+        assert_eq!(sample_total_bw_count(&sample), None);
     }
 
     #[test]

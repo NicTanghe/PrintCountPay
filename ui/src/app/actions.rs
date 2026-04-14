@@ -106,6 +106,26 @@ fn pricing_sync_is_stale(candidate_id: &str, current_id: Option<&str>) -> bool {
     }
 }
 
+fn should_preserve_local_stopped_session(
+    local: &RecordingSession,
+    incoming: &RecordingSession,
+) -> bool {
+    if local.active || !incoming.active {
+        return false;
+    }
+
+    let Some(local_end_at) = local.end.as_ref().map(|snapshot| snapshot.received_at) else {
+        return false;
+    };
+
+    let incoming_start_at = incoming
+        .start
+        .as_ref()
+        .map(|snapshot| snapshot.received_at)
+        .unwrap_or(0);
+    incoming_start_at <= local_end_at
+}
+
 fn manual_pricing_backup_path(path: &Path, index: usize) -> std::path::PathBuf {
     std::path::PathBuf::from(format!("{}.bak{index}", path.to_string_lossy()))
 }
@@ -2660,12 +2680,16 @@ impl PrintCountApp {
             .into_iter()
             .filter(|entry| known_ids.contains(&entry.printer_id))
             .map(|entry| {
-                let local_unlock_state = self
-                    .recording_sessions
-                    .get(&entry.printer_id)
+                let local_session = self.recording_sessions.get(&entry.printer_id);
+                let local_unlock_state = local_session
                     .map(|session| session.end_fields_unlocked)
                     .unwrap_or(entry.session.end_fields_unlocked);
                 let mut session = entry.session;
+                if let Some(local_session) = local_session
+                    && should_preserve_local_stopped_session(local_session, &session)
+                {
+                    session = local_session.clone();
+                }
                 session.end_fields_unlocked = local_unlock_state;
                 (entry.printer_id, session)
             })
@@ -3032,6 +3056,138 @@ mod tests {
                 .get(&printer_id)
                 .map(|session| session.end_fields_unlocked),
             Some(true)
+        );
+    }
+
+    #[test]
+    fn apply_shared_state_keeps_local_stopped_session_when_remote_active_is_older() {
+        let mut app = test_app();
+        let record = printer_record(PrinterStatus::Online, Some(123));
+        let printer_id = record.id.clone();
+        app.replace_printers(vec![record.clone()]);
+
+        let mut local_session = RecordingSession::default();
+        local_session.active = false;
+        local_session.start = Some(RecordingSnapshot {
+            received_at: 100,
+            bw_printer: Some(100),
+            bw_copier: None,
+            color_printer: None,
+            color_copier: None,
+        });
+        local_session.end = Some(RecordingSnapshot {
+            received_at: 200,
+            bw_printer: Some(120),
+            bw_copier: None,
+            color_printer: None,
+            color_copier: None,
+        });
+        local_session.status = Some("Stopped locally.".to_string());
+        local_session.edits.prints_bw.end_input = "120".to_string();
+        app.recording_sessions
+            .insert(printer_id.clone(), local_session.clone());
+        app.last_shared_state = app.build_shared_state(2);
+
+        let mut remote_session = RecordingSession::default();
+        remote_session.active = true;
+        remote_session.start = Some(RecordingSnapshot {
+            received_at: 150,
+            bw_printer: Some(110),
+            bw_copier: None,
+            color_printer: None,
+            color_copier: None,
+        });
+
+        app.apply_shared_state(sync::SharedState {
+            revision: 3,
+            printers: vec![record],
+            poll_states: vec![sync::PollStateEntry {
+                printer_id: printer_id.clone(),
+                state: SnmpPollStatus::Idle,
+            }],
+            recording_sessions: vec![sync::RecordingSessionEntry {
+                printer_id: printer_id.clone(),
+                session: remote_session,
+            }],
+            pricing: app.pricing.clone(),
+            bill_sync_supported: false,
+            manual_bills: Vec::new(),
+            manual_bill_tombstones: Vec::new(),
+        });
+
+        let applied = app
+            .recording_sessions
+            .get(&printer_id)
+            .expect("recording session should exist");
+        assert!(!applied.active);
+        assert_eq!(
+            applied.end.as_ref().map(|snapshot| snapshot.received_at),
+            Some(200)
+        );
+        assert_eq!(applied.edits.prints_bw.end_input, "120");
+    }
+
+    #[test]
+    fn apply_shared_state_accepts_remote_active_session_when_started_after_local_end() {
+        let mut app = test_app();
+        let record = printer_record(PrinterStatus::Online, Some(123));
+        let printer_id = record.id.clone();
+        app.replace_printers(vec![record.clone()]);
+
+        let mut local_session = RecordingSession::default();
+        local_session.active = false;
+        local_session.start = Some(RecordingSnapshot {
+            received_at: 100,
+            bw_printer: Some(100),
+            bw_copier: None,
+            color_printer: None,
+            color_copier: None,
+        });
+        local_session.end = Some(RecordingSnapshot {
+            received_at: 200,
+            bw_printer: Some(120),
+            bw_copier: None,
+            color_printer: None,
+            color_copier: None,
+        });
+        app.recording_sessions.insert(printer_id.clone(), local_session);
+        app.last_shared_state = app.build_shared_state(2);
+
+        let mut remote_session = RecordingSession::default();
+        remote_session.active = true;
+        remote_session.start = Some(RecordingSnapshot {
+            received_at: 250,
+            bw_printer: Some(130),
+            bw_copier: None,
+            color_printer: None,
+            color_copier: None,
+        });
+
+        app.apply_shared_state(sync::SharedState {
+            revision: 3,
+            printers: vec![record],
+            poll_states: vec![sync::PollStateEntry {
+                printer_id: printer_id.clone(),
+                state: SnmpPollStatus::Idle,
+            }],
+            recording_sessions: vec![sync::RecordingSessionEntry {
+                printer_id: printer_id.clone(),
+                session: remote_session,
+            }],
+            pricing: app.pricing.clone(),
+            bill_sync_supported: false,
+            manual_bills: Vec::new(),
+            manual_bill_tombstones: Vec::new(),
+        });
+
+        let applied = app
+            .recording_sessions
+            .get(&printer_id)
+            .expect("recording session should exist");
+        assert!(applied.active);
+        assert_eq!(
+            applied.start.as_ref().map(|snapshot| snapshot.received_at),
+            Some(250)
         );
     }
 

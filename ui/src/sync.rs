@@ -630,7 +630,10 @@ fn broadcast(clients: &mut HashMap<u64, UnboundedSender<WireMessage>>, message: 
 
 fn is_newer(candidate: &SharedState, current: Option<&SharedState>) -> bool {
     current
-        .map(|current| candidate.revision > current.revision)
+        .map(|current| {
+            candidate.revision > current.revision
+                || (candidate.revision == current.revision && candidate != current)
+        })
         .unwrap_or(true)
 }
 
@@ -681,4 +684,41 @@ where
     writer.write_u32_le(bytes.len() as u32).await?;
     writer.write_all(&bytes).await?;
     writer.flush().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn snapshot(revision: u64) -> SharedState {
+        SharedState {
+            revision,
+            ..SharedState::default()
+        }
+    }
+
+    #[test]
+    fn is_newer_accepts_equal_revision_when_snapshot_changed() {
+        let current = snapshot(5);
+        let mut candidate = snapshot(5);
+        candidate.pricing.bw_first_input = "0.30".to_string();
+
+        assert!(is_newer(&candidate, Some(&current)));
+    }
+
+    #[test]
+    fn is_newer_rejects_equal_revision_when_snapshot_unchanged() {
+        let current = snapshot(5);
+        let candidate = snapshot(5);
+
+        assert!(!is_newer(&candidate, Some(&current)));
+    }
+
+    #[test]
+    fn is_newer_rejects_older_revision() {
+        let current = snapshot(6);
+        let candidate = snapshot(5);
+
+        assert!(!is_newer(&candidate, Some(&current)));
+    }
 }

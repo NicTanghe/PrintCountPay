@@ -4204,18 +4204,18 @@ fn statistics_line_chart_svg(
             for (label, value, _) in &rows {
                 max_chars = max_chars.max(label.chars().count() + value.chars().count() + 2);
             }
-            let tooltip_width = (max_chars as f32 * 6.6 + 34.0).clamp(160.0, 360.0);
-            let tooltip_height = 24.0 + rows.len() as f32 * 16.0 + 12.0;
-            let mut tooltip_x = hover.cursor_x + 12.0;
-            let mut tooltip_y = hover.cursor_y - tooltip_height - 12.0;
+            let tooltip_width = (max_chars as f32 * 11.5 + 73.0).clamp(308.0, 658.0);
+            let tooltip_height = 64.0 + rows.len() as f32 * 31.0;
+            let mut tooltip_x = hover.cursor_x + 22.0;
+            let mut tooltip_y = hover.cursor_y - tooltip_height - 22.0;
             if tooltip_x + tooltip_width > STATISTICS_CHART_SVG_WIDTH - 4.0 {
-                tooltip_x = hover.cursor_x - tooltip_width - 12.0;
+                tooltip_x = hover.cursor_x - tooltip_width - 22.0;
             }
             if tooltip_x < 4.0 {
                 tooltip_x = 4.0;
             }
             if tooltip_y < 4.0 {
-                tooltip_y = (hover.cursor_y + 12.0)
+                tooltip_y = (hover.cursor_y + 17.0)
                     .min(STATISTICS_CHART_SVG_HEIGHT - tooltip_height - 4.0);
             }
             if tooltip_y < 4.0 {
@@ -4224,7 +4224,7 @@ fn statistics_line_chart_svg(
 
             let _ = write!(
                 svg,
-                r##"<rect x="{x:.2}" y="{y:.2}" width="{width:.2}" height="{height:.2}" rx="8" fill="#FDFEFE" stroke="#97A4B2" stroke-width="1.2"/>"##,
+                r##"<rect x="{x:.2}" y="{y:.2}" width="{width:.2}" height="{height:.2}" rx="14" fill="#FFFFFF" stroke="#8B99A8" stroke-width="2.0"/>"##,
                 x = tooltip_x,
                 y = tooltip_y,
                 width = tooltip_width,
@@ -4232,26 +4232,26 @@ fn statistics_line_chart_svg(
             );
             let _ = write!(
                 svg,
-                r##"<text x="{x:.2}" y="{y:.2}" fill="#2B3640" font-size="11.5" font-family="Segoe UI, Arial, sans-serif">{label}</text>"##,
-                x = tooltip_x + 10.0,
-                y = tooltip_y + 16.0,
+                r##"<text x="{x:.2}" y="{y:.2}" fill="#2B3640" font-size="20" font-weight="700" font-family="Segoe UI, Arial, sans-serif">{label}</text>"##,
+                x = tooltip_x + 20.0,
+                y = tooltip_y + 31.0,
                 label = statistics_escape_svg_text(&timestamp_label),
             );
 
             for (index, (label, value, color)) in rows.iter().enumerate() {
-                let row_y = tooltip_y + 33.0 + index as f32 * 16.0;
+                let row_y = tooltip_y + 64.0 + index as f32 * 31.0;
                 let _ = write!(
                     svg,
-                    r##"<circle cx="{x:.2}" cy="{y:.2}" r="3.0" fill="{color}"/>"##,
-                    x = tooltip_x + 11.0,
-                    y = row_y - 3.5,
+                    r##"<circle cx="{x:.2}" cy="{y:.2}" r="5.6" fill="{color}"/>"##,
+                    x = tooltip_x + 21.0,
+                    y = row_y - 6.5,
                     color = color,
                 );
                 let line = format!("{label}: {value}");
                 let _ = write!(
                     svg,
-                    r##"<text x="{x:.2}" y="{y:.2}" fill="#33404A" font-size="11" font-family="Segoe UI, Arial, sans-serif">{line}</text>"##,
-                    x = tooltip_x + 20.0,
+                    r##"<text x="{x:.2}" y="{y:.2}" fill="#33404A" font-size="18" font-family="Segoe UI, Arial, sans-serif">{line}</text>"##,
+                    x = tooltip_x + 39.0,
                     y = row_y,
                     line = statistics_escape_svg_text(&line),
                 );
