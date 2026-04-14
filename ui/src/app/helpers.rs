@@ -437,7 +437,8 @@ pub(crate) fn build_poll_label_map(
 
     if let Some(profile) = profile {
         for entry in &profile.extra_poll_labels {
-            map.insert(entry.oid.clone(), entry.label.clone());
+            map.entry(entry.oid.clone())
+                .or_insert_with(|| entry.label.clone());
         }
     }
 
@@ -1222,15 +1223,17 @@ pub(crate) fn counter_oids_from_walk(varbinds: &[SnmpVarBind]) -> CounterOidSet 
 #[cfg(test)]
 mod tests {
     use super::{
-        ManualLineState, category_end_display, category_end_value, category_start_display,
-        category_start_value, default_recording_oid_inputs, default_toner_oids, delta_value,
-        format_clock_hms_with_offset, format_elapsed_hms, manual_pricing_totals,
-        manual_round_total_cents, missing_recording_snapshot_categories,
+        ManualLineState, build_poll_label_map, category_end_display, category_end_value,
+        category_start_display, category_start_value, default_recording_oid_inputs,
+        default_toner_oids, delta_value, format_clock_hms_with_offset, format_elapsed_hms,
+        manual_pricing_totals, manual_round_total_cents, missing_recording_snapshot_categories,
         recording_profile_from_settings_lossy, round_to_nearest_5_cents, snmp_oids,
         sum_optional_included, sum_two,
     };
     use crate::app::constants::PRT_GENERAL_PRINTER_NAME_OID;
-    use crate::app::profiles::RecordingOidProfile;
+    use crate::app::profiles::{
+        MachineMatcher, ManufacturerProfile, OidLabel, RecordingOidProfile, TonerOidProfile,
+    };
     use crate::app::{
         ManualFinisherLineItem, ManualFinisherType, ManualLaminateSize, ManualPaperModifier,
         ManualPricingLineItem, ManualPricingSettings, ManualPrintMode, ManualPrintSize,
@@ -1642,6 +1645,49 @@ mod tests {
         assert!(
             !oids.contains(&Oid::from_slice(&PRT_GENERAL_PRINTER_NAME_OID)),
             "recurring polling should not request the discovery-only printer name OID"
+        );
+    }
+
+    #[test]
+    fn extra_poll_labels_do_not_override_canonical_labels() {
+        let recording_settings = default_recording_oid_inputs();
+        let canonical_oid =
+            Oid::from_slice(&[1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 19, 5, 1, 9, 401]);
+        let extra_oid =
+            Oid::from_slice(&[1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 19, 5, 1, 9, 71]);
+        let profile = ManufacturerProfile {
+            id: "test-profile".to_string(),
+            manufacturer: "ricoh".to_string(),
+            firmware: "test".to_string(),
+            recording: recording_profile_from_settings_lossy(&recording_settings),
+            counters: CounterOidSet::default(),
+            toner: TonerOidProfile::default(),
+            extra_poll_labels: vec![
+                OidLabel {
+                    oid: canonical_oid.clone(),
+                    label: "Should Not Override".to_string(),
+                },
+                OidLabel {
+                    oid: extra_oid.clone(),
+                    label: "Observed counter 71".to_string(),
+                },
+            ],
+            counter_table: None,
+            legacy_profile_ids: Vec::new(),
+            matchers: Vec::<MachineMatcher>::new(),
+            source_path: None,
+        };
+
+        let labels =
+            build_poll_label_map(&CounterOidSet::default(), &recording_settings, Some(&profile));
+
+        assert_eq!(
+            labels.get(&canonical_oid).map(String::as_str),
+            Some("Recording: Prints B/W")
+        );
+        assert_eq!(
+            labels.get(&extra_oid).map(String::as_str),
+            Some("Observed counter 71")
         );
     }
 }

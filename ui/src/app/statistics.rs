@@ -47,6 +47,7 @@ const BUSINESS_START_MINUTES: u16 = 10 * 60 + 45;
 const BUSINESS_END_MINUTES: u16 = 18 * 60 + 45;
 const RECORDING_POINTS_PER_DAY: usize = 4;
 const LEGACY_TOTAL_SERIES_LABEL: &str = "Clicks: Total";
+const RICOH_COUNTER_9_5_OID: &str = "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct StatisticsPollMetric {
@@ -741,10 +742,11 @@ fn sample_total_color_count(sample: &StatisticsPollSample) -> Option<u64> {
 }
 
 fn sum_metrics_for_label(sample: &StatisticsPollSample, label: &str) -> Option<u64> {
+    let canonical_target = label.trim();
     let mut total = 0u64;
     let mut matched = false;
     for metric in &sample.metrics {
-        if metric.label == label {
+        if canonical_statistics_source_label(metric) == Some(canonical_target) {
             matched = true;
             total = total.saturating_add(metric.value);
         }
@@ -1084,11 +1086,34 @@ fn select_representative_euro_samples(
 }
 
 fn display_label_for_metric(metric: &StatisticsPollMetric) -> Option<String> {
-    canonical_statistics_label(&metric.label).map(str::to_string)
+    canonical_statistics_source_label(metric)
+        .and_then(canonical_statistics_label)
+        .map(str::to_string)
+}
+
+fn canonical_statistics_source_label(metric: &StatisticsPollMetric) -> Option<&'static str> {
+    match metric.label.trim() {
+        "Recording: Copies B/W" => Some("Recording: Copies B/W"),
+        "Recording: Prints B/W" => Some("Recording: Prints B/W"),
+        "Recording: Copies Color" => Some("Recording: Copies Color"),
+        "Recording: Prints Color" => Some("Recording: Prints Color"),
+        "Clicks: B/W" => Some("Clicks: B/W"),
+        "Clicks: Color" => Some("Clicks: Color"),
+        // Legacy labels from older profiles.
+        "Copy B/W counter" => Some("Recording: Copies B/W"),
+        "Copy color counter" => Some("Recording: Copies Color"),
+        "Print B/W counter" => Some("Recording: Prints B/W"),
+        "Print color counter" => Some("Recording: Prints Color"),
+        // Legacy Pro 8320 profile labeling.
+        "Observed counter 5" if metric.oid.trim() == RICOH_COUNTER_9_5_OID => {
+            Some("Recording: Prints B/W")
+        }
+        _ => None,
+    }
 }
 
 fn canonical_statistics_label(label: &str) -> Option<&'static str> {
-    match label.trim() {
+    match label {
         "Recording: Copies B/W" => Some("Copies B/W"),
         "Recording: Prints B/W" => Some("Prints B/W"),
         "Recording: Copies Color" => Some("Copies Color"),
@@ -1210,6 +1235,31 @@ mod tests {
     }
 
     #[test]
+    fn available_series_accepts_legacy_poll_labels() {
+        let printer_id = printer_id("printer-a");
+        let pricing = PricingSettings::default();
+        let store = StatisticsStore {
+            printers: vec![PrinterStatisticsEntry {
+                printer_id: printer_id.clone(),
+                poll_samples: vec![StatisticsPollSample {
+                    captured_at: 900,
+                    metrics: vec![
+                        StatisticsPollMetric::new("1.2.3", "Print B/W counter", 100),
+                        StatisticsPollMetric::new("1.2.4", "Copy color counter", 50),
+                    ],
+                    legacy_total: None,
+                }],
+                euro_samples: Vec::new(),
+            }],
+        };
+        let selected = HashSet::from([printer_id]);
+
+        let series = available_series(&store, &selected, &pricing, None);
+        assert!(series.iter().any(|entry| entry.label == "Prints B/W"));
+        assert!(series.iter().any(|entry| entry.label == "Copies Color"));
+    }
+
+    #[test]
     fn aggregate_series_points_adds_matching_metrics_across_printers() {
         let printer_a = printer_id("printer-a");
         let printer_b = printer_id("printer-b");
@@ -1281,6 +1331,21 @@ mod tests {
             None,
         );
         assert_eq!(points, vec![(901, 300)]);
+    }
+
+    #[test]
+    fn sample_total_bw_count_supports_legacy_8320_labeling() {
+        let sample = StatisticsPollSample {
+            captured_at: 900,
+            metrics: vec![StatisticsPollMetric::new(
+                RICOH_COUNTER_9_5_OID,
+                "Observed counter 5",
+                42,
+            )],
+            legacy_total: None,
+        };
+
+        assert_eq!(sample_total_bw_count(&sample), Some(42));
     }
 
     #[test]
