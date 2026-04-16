@@ -9,6 +9,7 @@ const STATISTICS_CHART_CONTAINER_PAD_LEFT: f32 = 12.0;
 const STATISTICS_CHART_CONTAINER_PAD_RIGHT: f32 = 12.0;
 const STATISTICS_CHART_CONTAINER_PAD_TOP: f32 = 8.0;
 const STATISTICS_CHART_CONTAINER_PAD_BOTTOM: f32 = 8.0;
+const STATISTICS_DATE_CONTROLS_INLINE_MIN_WIDTH: f32 = 626.0;
 
 impl PrintCountApp {
     fn tab_bar(&self) -> Element<'_, Message> {
@@ -107,7 +108,11 @@ impl PrintCountApp {
     }
 
     fn window_button(&self, label: &str, message: Message) -> Element<'_, Message> {
-        self.top_bar_button(label, theme::Button::custom(top_controls_button_style()), message)
+        self.top_bar_button(
+            label,
+            theme::Button::custom(top_controls_button_style()),
+            message,
+        )
     }
 
     fn top_bar_button(
@@ -137,17 +142,16 @@ impl PrintCountApp {
             .into()
     }
 
-    fn statistics_tab_bar(
-        &self,
-        width: f32,
-        height: f32,
-        color: Color,
-    ) -> Element<'_, Message> {
-        container(Space::new().width(Length::Fixed(width)).height(Length::Fixed(height)))
-            .width(Length::Fixed(width))
-            .height(Length::Fixed(height))
-            .style(theme::Container::Custom(statistics_tab_icon_style(color)))
-            .into()
+    fn statistics_tab_bar(&self, width: f32, height: f32, color: Color) -> Element<'_, Message> {
+        container(
+            Space::new()
+                .width(Length::Fixed(width))
+                .height(Length::Fixed(height)),
+        )
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(height))
+        .style(theme::Container::Custom(statistics_tab_icon_style(color)))
+        .into()
     }
 
     fn printer_tab_bar(&self) -> Element<'_, Message> {
@@ -354,8 +358,8 @@ impl PrintCountApp {
                     )))
                     .on_press(Message::AddManualPrinter)
             ]
-                .spacing(8)
-                .align_items(Alignment::Center),
+            .spacing(8)
+            .align_items(Alignment::Center),
             text(format!("Status: {status}"))
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
@@ -851,21 +855,21 @@ impl PrintCountApp {
             .into()
         };
 
-        let mut content = column![title_block]
-            .spacing(12)
-            .height(Length::Fill);
+        let mut content = column![title_block].spacing(12).height(Length::Fill);
 
         if self.selected_manual_bill().is_none() {
             content = content.push(self.manual_pricing_tab_bar());
         }
 
         content = content.push(
-            scrollable(container(self.manual_pricing_body_view()).padding(iced::Padding {
-                top: 0.0,
-                right: 16.0,
-                bottom: 0.0,
-                left: 0.0,
-            }))
+            scrollable(
+                container(self.manual_pricing_body_view()).padding(iced::Padding {
+                    top: 0.0,
+                    right: 16.0,
+                    bottom: 0.0,
+                    left: 0.0,
+                }),
+            )
             .direction(scrollable::Direction::Vertical(
                 scrollable::Scrollbar::new()
                     .width(8)
@@ -925,7 +929,11 @@ impl PrintCountApp {
         ]
         .spacing(8);
 
-        for size in [ManualPrintSize::A0, ManualPrintSize::A1, ManualPrintSize::A2] {
+        for size in [
+            ManualPrintSize::A0,
+            ManualPrintSize::A1,
+            ManualPrintSize::A2,
+        ] {
             size_prices = size_prices.push(self.manual_input(
                 &format!("{size} per side (EUR)"),
                 "0.00",
@@ -965,8 +973,7 @@ impl PrintCountApp {
         .spacing(8);
 
         for (index, modifier) in manual.modifiers.iter().enumerate() {
-            modifier_setup =
-                modifier_setup.push(self.manual_pricing_modifier_row(index, modifier));
+            modifier_setup = modifier_setup.push(self.manual_pricing_modifier_row(index, modifier));
         }
 
         let modifier_setup = container(modifier_setup)
@@ -1005,11 +1012,8 @@ impl PrintCountApp {
                 .get(index)
                 .cloned()
                 .unwrap_or(ManualLineState::Invalid);
-            calculator_section = calculator_section.push(self.manual_pricing_line_item_row(
-                index,
-                line_item,
-                line_state,
-            ));
+            calculator_section = calculator_section
+                .push(self.manual_pricing_line_item_row(index, line_item, line_state));
         }
 
         calculator_section = calculator_section.push(
@@ -1041,72 +1045,76 @@ impl PrintCountApp {
 
         calculator_section = calculator_section
             .push(
-            checkbox(manual.cutting_enabled)
-                .label("Cutting (+3 EUR)")
-                .on_toggle(Message::ManualPricingCuttingChanged)
-                .size(12)
-                .style(theme::Checkbox::custom(brand_checkbox_style(
-                    CONTENT_BRAND_SAMPLE,
-                ))),
+                checkbox(manual.cutting_enabled)
+                    .label("Cutting (+3 EUR)")
+                    .on_toggle(Message::ManualPricingCuttingChanged)
+                    .size(12)
+                    .style(theme::Checkbox::custom(brand_checkbox_style(
+                        CONTENT_BRAND_SAMPLE,
+                    ))),
             )
-            .push(
-                self.manual_input(
-                    "Discount (%)",
-                    "0",
-                    &manual.discount_input,
-                    Message::ManualPricingDiscountChanged,
-                ),
-            )
+            .push(self.manual_input(
+                "Discount (%)",
+                "0",
+                &manual.discount_input,
+                Message::ManualPricingDiscountChanged,
+            ))
             .push(
                 text("Rounding")
-                .size(13)
-                .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                    .size(13)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
             )
             .push(
                 column![
-                checkbox(manual.rounding_mode == ManualRoundingMode::FiveCents)
-                    .label("Round down to 0.05 EUR")
-                    .on_toggle(|value| {
-                        Message::ManualPricingRoundingToggled(ManualRoundingMode::FiveCents, value)
-                    })
-                    .size(12)
-                    .style(theme::Checkbox::custom(brand_checkbox_style(
-                        CONTENT_BRAND_SAMPLE,
-                    ))),
-                checkbox(manual.rounding_mode == ManualRoundingMode::HalfEuro)
-                    .label("Round down to 0.50 EUR")
-                    .on_toggle(|value| {
-                        Message::ManualPricingRoundingToggled(ManualRoundingMode::HalfEuro, value)
-                    })
-                    .size(12)
-                    .style(theme::Checkbox::custom(brand_checkbox_style(
-                        CONTENT_BRAND_SAMPLE,
-                    ))),
-                checkbox(manual.rounding_mode == ManualRoundingMode::DownToFiveEuro)
-                    .label("Round down to 5 EUR")
-                    .on_toggle(|value| {
-                        Message::ManualPricingRoundingToggled(
-                            ManualRoundingMode::DownToFiveEuro,
-                            value,
-                        )
-                    })
-                    .size(12)
-                    .style(theme::Checkbox::custom(brand_checkbox_style(
-                        CONTENT_BRAND_SAMPLE,
-                    ))),
-                checkbox(manual.rounding_mode == ManualRoundingMode::DownToTenEuro)
-                    .label("Round down to 10 EUR")
-                    .on_toggle(|value| {
-                        Message::ManualPricingRoundingToggled(
-                            ManualRoundingMode::DownToTenEuro,
-                            value,
-                        )
-                    })
-                    .size(12)
-                    .style(theme::Checkbox::custom(brand_checkbox_style(
-                        CONTENT_BRAND_SAMPLE,
-                    ))),
-            ]
+                    checkbox(manual.rounding_mode == ManualRoundingMode::FiveCents)
+                        .label("Round down to 0.05 EUR")
+                        .on_toggle(|value| {
+                            Message::ManualPricingRoundingToggled(
+                                ManualRoundingMode::FiveCents,
+                                value,
+                            )
+                        })
+                        .size(12)
+                        .style(theme::Checkbox::custom(brand_checkbox_style(
+                            CONTENT_BRAND_SAMPLE,
+                        ))),
+                    checkbox(manual.rounding_mode == ManualRoundingMode::HalfEuro)
+                        .label("Round down to 0.50 EUR")
+                        .on_toggle(|value| {
+                            Message::ManualPricingRoundingToggled(
+                                ManualRoundingMode::HalfEuro,
+                                value,
+                            )
+                        })
+                        .size(12)
+                        .style(theme::Checkbox::custom(brand_checkbox_style(
+                            CONTENT_BRAND_SAMPLE,
+                        ))),
+                    checkbox(manual.rounding_mode == ManualRoundingMode::DownToFiveEuro)
+                        .label("Round down to 5 EUR")
+                        .on_toggle(|value| {
+                            Message::ManualPricingRoundingToggled(
+                                ManualRoundingMode::DownToFiveEuro,
+                                value,
+                            )
+                        })
+                        .size(12)
+                        .style(theme::Checkbox::custom(brand_checkbox_style(
+                            CONTENT_BRAND_SAMPLE,
+                        ))),
+                    checkbox(manual.rounding_mode == ManualRoundingMode::DownToTenEuro)
+                        .label("Round down to 10 EUR")
+                        .on_toggle(|value| {
+                            Message::ManualPricingRoundingToggled(
+                                ManualRoundingMode::DownToTenEuro,
+                                value,
+                            )
+                        })
+                        .size(12)
+                        .style(theme::Checkbox::custom(brand_checkbox_style(
+                            CONTENT_BRAND_SAMPLE,
+                        ))),
+                ]
                 .spacing(6),
             );
 
@@ -1166,10 +1174,7 @@ impl PrintCountApp {
             self.value_line("Subtotal before discount", Some(subtotal_label)),
             self.value_line("Discount", Some(discount_label)),
             self.value_line("Before rounding", Some(before_rounding_label)),
-            self.value_line(
-                "Rounding",
-                Some(manual.rounding_mode.to_string()),
-            ),
+            self.value_line("Rounding", Some(manual.rounding_mode.to_string()),),
             self.value_line("Final total", Some(total_label)),
         ]
         .spacing(6);
@@ -1201,15 +1206,13 @@ impl PrintCountApp {
                 tiered_prices,
                 modifier_setup
             ]
-                .spacing(12)
-                .width(Length::Fill)
-                .into(),
-            ManualPricingTab::Finishers => column![
-                self.manual_pricing_finishers_config_view()
-            ]
             .spacing(12)
             .width(Length::Fill)
             .into(),
+            ManualPricingTab::Finishers => column![self.manual_pricing_finishers_config_view()]
+                .spacing(12)
+                .width(Length::Fill)
+                .into(),
         }
     }
 
@@ -1399,10 +1402,8 @@ impl PrintCountApp {
         line_item: &ManualPricingLineItem,
         line_state: ManualLineState,
     ) -> Element<'_, Message> {
-        let modifier_choices = self.manual_modifier_choices(
-            line_item.size,
-            line_item.modifier_index,
-        );
+        let modifier_choices =
+            self.manual_modifier_choices(line_item.size, line_item.modifier_index);
         let size_picker = pick_list(
             &ManualPrintSize::ALL[..],
             Some(line_item.size),
@@ -1421,11 +1422,9 @@ impl PrintCountApp {
                 index: None,
                 label: "No modifier".to_string(),
             });
-        let modifier_picker = pick_list(
-            modifier_choices,
-            Some(selected_modifier),
-            move |choice| Message::ManualPricingLineModifierChanged(index, choice.index),
-        )
+        let modifier_picker = pick_list(modifier_choices, Some(selected_modifier), move |choice| {
+            Message::ManualPricingLineModifierChanged(index, choice.index)
+        })
         .placeholder("Modifier")
         .text_size(11)
         .width(Length::Fill)
@@ -1445,7 +1444,8 @@ impl PrintCountApp {
             )));
         let sheets_value =
             self.recording_readonly_value(&line_item.sheets_input, Length::Fixed(54.0));
-        let remove_button = self.manual_remove_icon_button(Message::ManualPricingLineRemoved(index));
+        let remove_button =
+            self.manual_remove_icon_button(Message::ManualPricingLineRemoved(index));
         let placeholder_label = || {
             text(" ")
                 .size(12)
@@ -1519,11 +1519,13 @@ impl PrintCountApp {
             ManualLineState::Empty => {
                 text("Set printed sides. Sheets are auto-calculated from the double-sided toggle.")
             }
-                .size(12)
-                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-            ManualLineState::Invalid => text("Enter valid sheets, sides, size pricing, and modifier pricing.")
-                .size(12)
-                .style(theme::Text::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f))),
+            .size(12)
+            .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            ManualLineState::Invalid => {
+                text("Enter valid sheets, sides, size pricing, and modifier pricing.")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f)))
+            }
             ManualLineState::Ready(line) => text(format!(
                 "{} | print {} sides = {} + {} sheets x {} = {}",
                 line.print_pricing_label,
@@ -1615,11 +1617,9 @@ impl PrintCountApp {
             ManualFinisherState::Empty => text("Set an amount to price this finisher.")
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-            ManualFinisherState::Invalid => {
-                text("Enter a valid amount and finisher price.")
-                    .size(12)
-                    .style(theme::Text::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f)))
-            }
+            ManualFinisherState::Invalid => text("Enter a valid amount and finisher price.")
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f))),
             ManualFinisherState::Ready(finisher) => text(format!(
                 "{} x {} = {}",
                 finisher.amount,
@@ -1646,14 +1646,26 @@ impl PrintCountApp {
             self.manual_input(
                 "1-5 sides (EUR)",
                 "0.00",
-                manual.bw_tier_input(size, ManualBwTier::FirstFive).unwrap_or(""),
-                move |value| Message::ManualPricingBwTierChanged(size, ManualBwTier::FirstFive, value),
+                manual
+                    .bw_tier_input(size, ManualBwTier::FirstFive)
+                    .unwrap_or(""),
+                move |value| Message::ManualPricingBwTierChanged(
+                    size,
+                    ManualBwTier::FirstFive,
+                    value
+                ),
             ),
             self.manual_input(
                 "6-10 sides (EUR)",
                 "0.00",
-                manual.bw_tier_input(size, ManualBwTier::NextFive).unwrap_or(""),
-                move |value| Message::ManualPricingBwTierChanged(size, ManualBwTier::NextFive, value),
+                manual
+                    .bw_tier_input(size, ManualBwTier::NextFive)
+                    .unwrap_or(""),
+                move |value| Message::ManualPricingBwTierChanged(
+                    size,
+                    ManualBwTier::NextFive,
+                    value
+                ),
             ),
             self.manual_input(
                 "11+ sides (EUR)",
@@ -1663,7 +1675,6 @@ impl PrintCountApp {
             ),
         ]
         .spacing(6);
-        
 
         let color = column![
             text("Color")
@@ -1672,7 +1683,9 @@ impl PrintCountApp {
             self.manual_input(
                 "1-5 sides (EUR)",
                 "0.00",
-                manual.color_tier_input(size, ManualColorTier::FirstFive).unwrap_or(""),
+                manual
+                    .color_tier_input(size, ManualColorTier::FirstFive)
+                    .unwrap_or(""),
                 move |value| {
                     Message::ManualPricingColorTierChanged(size, ManualColorTier::FirstFive, value)
                 },
@@ -1680,7 +1693,9 @@ impl PrintCountApp {
             self.manual_input(
                 "6+ sides (EUR)",
                 "0.00",
-                manual.color_tier_input(size, ManualColorTier::Rest).unwrap_or(""),
+                manual
+                    .color_tier_input(size, ManualColorTier::Rest)
+                    .unwrap_or(""),
                 move |value| {
                     Message::ManualPricingColorTierChanged(size, ManualColorTier::Rest, value)
                 },
@@ -1696,8 +1711,11 @@ impl PrintCountApp {
                 text("A3 and A4 can price B/W and Color separately.")
                     .size(12)
                     .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-                row![bw.width(Length::FillPortion(1)), color.width(Length::FillPortion(1))]
-                    .spacing(12),
+                row![
+                    bw.width(Length::FillPortion(1)),
+                    color.width(Length::FillPortion(1))
+                ]
+                .spacing(12),
             ]
             .spacing(8),
         )
@@ -1807,7 +1825,9 @@ impl PrintCountApp {
         }
 
         if let Some(selected_index) = selected_index
-            && !choices.iter().any(|choice| choice.index == Some(selected_index))
+            && !choices
+                .iter()
+                .any(|choice| choice.index == Some(selected_index))
         {
             let label = manual
                 .modifiers
@@ -1873,9 +1893,8 @@ impl PrintCountApp {
     }
 
     fn manual_pricing_bill_row(&self, bill: &ManualPricingBill) -> Element<'_, Message> {
-        let is_selected =
-            self.manual_pricing_selected
-                && self.selected_manual_bill_id.as_deref() == Some(bill.id.as_str());
+        let is_selected = self.manual_pricing_selected
+            && self.selected_manual_bill_id.as_deref() == Some(bill.id.as_str());
         let bill_id = bill.id.clone();
         let bill_subject = bill.display_subject().to_string();
         let base_color = Color::from_rgb8(0xf3, 0xf6, 0xfa);
@@ -1933,7 +1952,10 @@ impl PrintCountApp {
                     .style(theme::Text::Color(Color::from_rgb8(0x4a, 0x4a, 0x4a))),
             );
         } else {
-            let active_drop_index = self.active_printer_drag.as_ref().map(|drag| drag.drop_index);
+            let active_drop_index = self
+                .active_printer_drag
+                .as_ref()
+                .map(|drag| drag.drop_index);
             let total = self.printers.len();
             for (index, record) in self.printers.iter().enumerate() {
                 if active_drop_index == Some(index) {
@@ -1960,15 +1982,15 @@ impl PrintCountApp {
                     left: 0.0,
                 }),
         )
-            .direction(scrollable::Direction::Vertical(
-                scrollable::Scrollbar::new()
-                    .width(8)
-                    .margin(2)
-                    .scroller_width(8),
-            ))
-            .style(printer_list_scrollable_style())
-            .height(Length::Fill)
-            .width(Length::Fill);
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::new()
+                .width(8)
+                .margin(2)
+                .scroller_width(8),
+        ))
+        .style(printer_list_scrollable_style())
+        .height(Length::Fill)
+        .width(Length::Fill);
         let mut content = column![
             self.tab_bar(),
             text(if self.active_tab == Tab::Statistics {
@@ -1976,8 +1998,8 @@ impl PrintCountApp {
             } else {
                 "Printers"
             })
-                .size(28)
-                .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+            .size(28)
+            .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
         ]
         .spacing(18);
 
@@ -2004,7 +2026,12 @@ impl PrintCountApp {
             .into()
     }
 
-    fn printer_row(&self, record: &PrinterRecord, index: usize, total: usize) -> Element<'_, Message> {
+    fn printer_row(
+        &self,
+        record: &PrinterRecord,
+        index: usize,
+        total: usize,
+    ) -> Element<'_, Message> {
         let statistics_mode = self.active_tab == Tab::Statistics;
         let is_selected = if statistics_mode {
             self.statistics_selected_printers.contains(&record.id)
@@ -2031,7 +2058,11 @@ impl PrintCountApp {
             .or_else(|| record.snmp_address.as_ref().map(|addr| addr.host.as_str()))
             .unwrap_or("unknown host")
             .to_string();
-        let name = record.model.as_deref().unwrap_or("Unknown name").to_string();
+        let name = record
+            .model
+            .as_deref()
+            .unwrap_or("Unknown name")
+            .to_string();
         let status = status_label(record.status).to_string();
         let name_color = if is_selected {
             Color::from_rgb8(0xff, 0xff, 0xff)
@@ -2069,9 +2100,7 @@ impl PrintCountApp {
         .align_items(Alignment::Center);
 
         let content = column![
-            text(name)
-                .size(16)
-                .style(theme::Text::Color(name_color)),
+            text(name).size(16).style(theme::Text::Color(name_color)),
             details,
         ]
         .spacing(6);
@@ -2085,8 +2114,8 @@ impl PrintCountApp {
                 is_pending_drag || is_active_drag,
             )));
 
-        let card = BadgeOverlay::new(base, self.recording_badge(is_recording), is_recording)
-            .margin(6.0);
+        let card =
+            BadgeOverlay::new(base, self.recording_badge(is_recording), is_recording).margin(6.0);
         if statistics_mode {
             return mouse_area(card)
                 .interaction(iced::mouse::Interaction::Pointer)
@@ -2328,10 +2357,7 @@ impl PrintCountApp {
         .into()
     }
 
-    fn statistics_series_toggle_row(
-        &self,
-        series: &StatisticsChartSeries,
-    ) -> Element<'_, Message> {
+    fn statistics_series_toggle_row(&self, series: &StatisticsChartSeries) -> Element<'_, Message> {
         let series_key = series.key.clone();
         let checked = self.statistics_visible_series.contains(&series.key);
         let toggle = checkbox(checked)
@@ -2354,8 +2380,12 @@ impl PrintCountApp {
         )));
 
         let axis_inputs = self.statistics_axis_inputs_by_series.get(&series.key);
-        let y_min_input = axis_inputs.map(|entry| entry.min_input.as_str()).unwrap_or("");
-        let y_max_input = axis_inputs.map(|entry| entry.max_input.as_str()).unwrap_or("");
+        let y_min_input = axis_inputs
+            .map(|entry| entry.min_input.as_str())
+            .unwrap_or("");
+        let y_max_input = axis_inputs
+            .map(|entry| entry.max_input.as_str())
+            .unwrap_or("");
         let auto_y_bounds = statistics_series_auto_y_bounds(series);
         let auto_y_min = auto_y_bounds
             .map(|bounds| self.statistics_series_value_text(&series.key, bounds.min_value))
@@ -2444,8 +2474,9 @@ impl PrintCountApp {
         x_bounds: StatisticsChartBounds,
         series_y_bounds: &HashMap<String, StatisticsSeriesYBounds>,
     ) -> Element<'_, Message> {
-        let chart_height =
-            STATISTICS_CHART_SVG_HEIGHT + STATISTICS_CHART_CONTAINER_PAD_TOP + STATISTICS_CHART_CONTAINER_PAD_BOTTOM;
+        let chart_height = STATISTICS_CHART_SVG_HEIGHT
+            + STATISTICS_CHART_CONTAINER_PAD_TOP
+            + STATISTICS_CHART_CONTAINER_PAD_BOTTOM;
         let hover = self.statistics_chart_hover;
         let series = visible_series.to_vec();
         let bounds_by_series = series_y_bounds.clone();
@@ -2526,11 +2557,7 @@ impl PrintCountApp {
         .into()
     }
 
-    fn statistics_summary_tile(
-        &self,
-        label: &str,
-        value: String,
-    ) -> Element<'_, Message> {
+    fn statistics_summary_tile(&self, label: &str, value: String) -> Element<'_, Message> {
         container(
             column![
                 text(label.to_string())
@@ -2581,8 +2608,18 @@ impl PrintCountApp {
         let Some((captured_at, latest)) = series.points.last().copied() else {
             return "No stored points yet.".to_string();
         };
-        let min = series.points.iter().map(|(_, value)| *value).min().unwrap_or(latest);
-        let max = series.points.iter().map(|(_, value)| *value).max().unwrap_or(latest);
+        let min = series
+            .points
+            .iter()
+            .map(|(_, value)| *value)
+            .min()
+            .unwrap_or(latest);
+        let max = series
+            .points
+            .iter()
+            .map(|(_, value)| *value)
+            .max()
+            .unwrap_or(latest);
 
         format!(
             "{} points | latest {} at {} | min {} | max {}",
@@ -2594,7 +2631,11 @@ impl PrintCountApp {
         )
     }
 
-    fn statistics_range_controls(&self, range_start: Date, range_end: Date) -> Element<'_, Message> {
+    fn statistics_range_controls(
+        &self,
+        range_start: Date,
+        range_end: Date,
+    ) -> Element<'_, Message> {
         let today = self.statistics_today();
         let preset_rows = column![
             row![
@@ -2628,19 +2669,55 @@ impl PrintCountApp {
 
         let custom_controls: Element<'_, Message> =
             if self.statistics_range_preset == StatisticsRangePreset::Custom {
-                row![
-                    self.statistics_date_picker("Start date", StatisticsDateTarget::Start, range_start),
-                    self.statistics_date_picker("End date", StatisticsDateTarget::End, range_end),
-                    container(
-                        button("Today")
-                            .padding([6, 10])
-                            .style(theme::Button::custom(muted_content_button_style()))
-                            .on_press(Message::StatisticsDateSetToday(StatisticsDateTarget::End)),
-                    )
-                    .align_y(iced::alignment::Vertical::Bottom)
-                    .width(Length::Shrink),
-                ]
-                .spacing(10)
+                iced::widget::responsive(move |size| {
+                    let start_picker = || {
+                        container(self.statistics_date_picker(
+                            "Start date",
+                            StatisticsDateTarget::Start,
+                            range_start,
+                        ))
+                        .padding([7, 8])
+                        .style(theme::Container::Custom(statistics_date_picker_group_style()))
+                        .width(Length::Shrink)
+                    };
+
+                    let end_picker = || {
+                        container(self.statistics_date_picker(
+                            "End date",
+                            StatisticsDateTarget::End,
+                            range_end,
+                        ))
+                        .padding([7, 8])
+                        .style(theme::Container::Custom(statistics_date_picker_group_style()))
+                        .width(Length::Shrink)
+                    };
+
+                    let today_button = || {
+                        container(
+                            button("Today")
+                                .padding([7, 12])
+                                .style(theme::Button::custom(statistics_date_today_button_style()))
+                                .on_press(Message::StatisticsDateSetToday(
+                                    StatisticsDateTarget::End,
+                                )),
+                        )
+                        .align_y(iced::alignment::Vertical::Bottom)
+                        .width(Length::Shrink)
+                    };
+
+                    if size.width >= STATISTICS_DATE_CONTROLS_INLINE_MIN_WIDTH {
+                        row![start_picker(), end_picker(), today_button()]
+                            .spacing(8)
+                            .align_items(Alignment::End)
+                            .into()
+                    } else {
+                        column![start_picker(), end_picker(), today_button()]
+                            .spacing(8)
+                            .align_items(Alignment::Start)
+                            .into()
+                    }
+                })
+                .width(Length::Fill)
                 .into()
             } else {
                 Space::new()
@@ -2656,17 +2733,6 @@ impl PrintCountApp {
                     .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                 preset_rows,
                 custom_controls,
-                row![
-                    button("Remove non-initial zero entries")
-                        .padding([6, 10])
-                        .style(theme::Button::custom(muted_content_button_style()))
-                        .on_press(Message::RemoveStatisticsZeroEntries),
-                    text("Deletes zero poll values unless they are the first stored point for that printer and series.")
-                        .size(11)
-                        .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
-                ]
-                .spacing(10)
-                .align_items(Alignment::Center),
                 text(range_note)
                     .size(11)
                     .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
@@ -2679,7 +2745,10 @@ impl PrintCountApp {
         .into()
     }
 
-    fn statistics_range_preset_button(&self, preset: StatisticsRangePreset) -> Element<'_, Message> {
+    fn statistics_range_preset_button(
+        &self,
+        preset: StatisticsRangePreset,
+    ) -> Element<'_, Message> {
         let style: Box<
             dyn Fn(&Theme, iced::widget::button::Status) -> iced::widget::button::Style,
         > = if self.statistics_range_preset == preset {
@@ -2708,35 +2777,35 @@ impl PrintCountApp {
         let year_picker = pick_list(year_options, Some(date.year()), move |year| {
             Message::StatisticsDateYearSelected(target, year)
         })
-        .text_size(11)
-        .width(Length::Fixed(84.0))
-        .style(profile_pick_list_style())
-        .menu_style(profile_pick_list_menu_style());
+        .text_size(12)
+        .width(Length::Fixed(82.0))
+        .style(statistics_date_pick_list_style())
+        .menu_style(statistics_date_pick_list_menu_style());
         let month_picker = pick_list(&STATISTICS_MONTHS[..], Some(date.month()), move |month| {
             Message::StatisticsDateMonthSelected(target, month)
         })
-        .text_size(11)
-        .width(Length::Fixed(110.0))
-        .style(profile_pick_list_style())
-        .menu_style(profile_pick_list_menu_style());
+        .text_size(12)
+        .width(Length::Fixed(108.0))
+        .style(statistics_date_pick_list_style())
+        .menu_style(statistics_date_pick_list_menu_style());
         let day_picker = pick_list(day_options, Some(date.day()), move |day| {
             Message::StatisticsDateDaySelected(target, day)
         })
-        .text_size(11)
-        .width(Length::Fixed(72.0))
-        .style(profile_pick_list_style())
-        .menu_style(profile_pick_list_menu_style());
+        .text_size(12)
+        .width(Length::Fixed(58.0))
+        .style(statistics_date_pick_list_style())
+        .menu_style(statistics_date_pick_list_menu_style());
 
         column![
             text(label.to_string())
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
             row![year_picker, month_picker, day_picker]
-                .spacing(6)
+                .spacing(5)
                 .align_items(Alignment::Center),
         ]
-        .spacing(4)
-        .width(Length::Fill)
+        .spacing(5)
+        .width(Length::Shrink)
         .into()
     }
 
@@ -2801,8 +2870,10 @@ impl PrintCountApp {
         let mut bounds = auto_bounds;
         let inputs = self.statistics_axis_inputs_by_series.get(&series.key);
         let currency = statistics_series_is_currency_key(&series.key);
-        let manual_min = inputs.and_then(|entry| parse_statistics_axis_bound(&entry.min_input, currency));
-        let manual_max = inputs.and_then(|entry| parse_statistics_axis_bound(&entry.max_input, currency));
+        let manual_min =
+            inputs.and_then(|entry| parse_statistics_axis_bound(&entry.min_input, currency));
+        let manual_max =
+            inputs.and_then(|entry| parse_statistics_axis_bound(&entry.max_input, currency));
 
         if let Some(min_value) = manual_min {
             bounds.min_value = min_value;
@@ -2831,9 +2902,8 @@ impl PrintCountApp {
 
     fn printer_details_view(&self) -> Element<'_, Message> {
         let selected_id = self.selected_printer.as_ref();
-        let record = selected_id.and_then(|selected| {
-            self.printers.iter().find(|record| &record.id == selected)
-        });
+        let record = selected_id
+            .and_then(|selected| self.printers.iter().find(|record| &record.id == selected));
         let selection_missing = selected_id.is_some() && record.is_none();
 
         let header = match self.printer_tab {
@@ -2852,9 +2922,11 @@ impl PrintCountApp {
                     PrinterTab::Pricing => "Pricing",
                     _ => "Printer details",
                 };
-                let mut content = column![text(title)
-                    .size(20)
-                    .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12)))]
+                let mut content = column![
+                    text(title)
+                        .size(20)
+                        .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12)))
+                ]
                 .spacing(4);
 
                 if let Some(record) = record {
@@ -2936,15 +3008,13 @@ impl PrintCountApp {
                     self.empty_printer_tab_view("Select a printer to start polling.")
                 }
             }
-            PrinterTab::Oids => {
-                self.boxed_printer_tab_scroll_view(if let Some(record) = record {
-                    self.printer_oids_view(record)
-                } else if selection_missing {
-                    self.empty_printer_tab_view("Selected printer not found.")
-                } else {
-                    self.empty_printer_tab_view("Select a printer to edit OIDs.")
-                })
-            }
+            PrinterTab::Oids => self.boxed_printer_tab_scroll_view(if let Some(record) = record {
+                self.printer_oids_view(record)
+            } else if selection_missing {
+                self.empty_printer_tab_view("Selected printer not found.")
+            } else {
+                self.empty_printer_tab_view("Select a printer to edit OIDs.")
+            }),
             PrinterTab::Recording => self.recording_tab_view(),
             PrinterTab::Pricing => self.pricing_tab_view(),
             PrinterTab::AddPrinters => {
@@ -3081,8 +3151,8 @@ impl PrintCountApp {
                 .on_press(Message::ApplyOids),
             crawl_button
         ]
-            .spacing(8)
-            .align_items(Alignment::Center);
+        .spacing(8)
+        .align_items(Alignment::Center);
 
         let content = column![
             text("Profile OID mapping")
@@ -3193,9 +3263,7 @@ impl PrintCountApp {
                             .get(&varbind.oid)
                             .cloned()
                             .unwrap_or_else(|| varbind.oid.to_string());
-                        rows = rows.push(
-                            self.poll_varbind_row(&label, &varbind.value.to_string()),
-                        );
+                        rows = rows.push(self.poll_varbind_row(&label, &varbind.value.to_string()));
                     }
                     if total_varbinds > shown_varbinds {
                         rows = rows.push(
@@ -3337,22 +3405,13 @@ impl PrintCountApp {
                     text("Toner levels")
                         .size(13)
                         .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-                    self.value_line(
-                        "Black",
-                        self.toner_value(varbinds, toner.black.as_ref()),
-                    ),
-                    self.value_line(
-                        "Cyan",
-                        self.toner_value(varbinds, toner.cyan.as_ref()),
-                    ),
+                    self.value_line("Black", self.toner_value(varbinds, toner.black.as_ref()),),
+                    self.value_line("Cyan", self.toner_value(varbinds, toner.cyan.as_ref()),),
                     self.value_line(
                         "Magenta",
                         self.toner_value(varbinds, toner.magenta.as_ref()),
                     ),
-                    self.value_line(
-                        "Yellow",
-                        self.toner_value(varbinds, toner.yellow.as_ref()),
-                    ),
+                    self.value_line("Yellow", self.toner_value(varbinds, toner.yellow.as_ref()),),
                 ]
                 .spacing(4);
 
@@ -3365,10 +3424,8 @@ impl PrintCountApp {
 
                     let mut table_rows = column![].spacing(4);
                     for entry in &RICOH_COUNTER_TABLE {
-                        let label = format!(
-                            "{} (type {}, {})",
-                            entry.label, entry.type_id, entry.unit
-                        );
+                        let label =
+                            format!("{} (type {}, {})", entry.label, entry.type_id, entry.unit);
                         table_rows = table_rows.push(self.value_line_owned(
                             label,
                             varbind_display_value(varbinds, &ricoh_counter_oid(entry.type_id)),
@@ -3481,7 +3538,9 @@ impl PrintCountApp {
     }
 
     fn counter_line(&self, label: &str, value: Option<u64>) -> Element<'_, Message> {
-        let value_text = value.map(|value| value.to_string()).unwrap_or_else(|| "N/A".to_string());
+        let value_text = value
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "N/A".to_string());
 
         let label = text(label.to_string())
             .size(13)
@@ -3549,20 +3608,12 @@ impl PrintCountApp {
         }
     }
 
-    fn value_from_oids(
-        &self,
-        varbinds: &[SnmpVarBind],
-        oids: &[Oid],
-    ) -> Option<String> {
+    fn value_from_oids(&self, varbinds: &[SnmpVarBind], oids: &[Oid]) -> Option<String> {
         oids.iter()
             .find_map(|oid| varbind_display_value(varbinds, oid))
     }
 
-    fn toner_value(
-        &self,
-        varbinds: &[SnmpVarBind],
-        oid: Option<&Oid>,
-    ) -> Option<String> {
+    fn toner_value(&self, varbinds: &[SnmpVarBind], oid: Option<&Oid>) -> Option<String> {
         oid.and_then(|oid| varbind_display_value(varbinds, oid))
     }
 
@@ -3645,7 +3696,9 @@ impl PrintCountApp {
         let indicator = button(text("o").size(12))
             .on_press(Message::RecordingToggleInclude(category))
             .padding(2)
-            .style(theme::Button::custom(indicator_button_style(indicator_color)));
+            .style(theme::Button::custom(indicator_button_style(
+                indicator_color,
+            )));
 
         let label = row![
             indicator,
@@ -3844,6 +3897,11 @@ impl PrintCountApp {
                     SIDEBAR_BRAND_SAMPLE,
                 )))
                 .on_press(Message::RemoveStatisticsZeroEntries),
+            button("Repair duplicate statistics series")
+                .style(theme::Button::custom(solid_brand_button_style(
+                    SIDEBAR_BRAND_SAMPLE,
+                )))
+                .on_press(Message::RepairStatisticsDuplicateSeries),
             text(format!("Clipboard: {copy_status}"))
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
@@ -3856,7 +3914,6 @@ impl PrintCountApp {
             .style(theme::Container::Box)
             .into()
     }
-
 }
 
 #[derive(Debug, Clone)]
@@ -3919,7 +3976,9 @@ fn statistics_chart_bounds(series: &[StatisticsChartSeries]) -> Option<Statistic
     })
 }
 
-fn statistics_series_auto_y_bounds(series: &StatisticsChartSeries) -> Option<StatisticsSeriesYBounds> {
+fn statistics_series_auto_y_bounds(
+    series: &StatisticsChartSeries,
+) -> Option<StatisticsSeriesYBounds> {
     let mut values = series.points.iter().map(|(_, value)| *value);
     let first = values.next()?;
     let min_value = series
@@ -4065,8 +4124,10 @@ fn statistics_line_chart_svg(
 ) -> String {
     use std::fmt::Write as _;
 
-    let plot_width = STATISTICS_CHART_SVG_WIDTH - STATISTICS_CHART_PAD_LEFT - STATISTICS_CHART_PAD_RIGHT;
-    let plot_height = STATISTICS_CHART_SVG_HEIGHT - STATISTICS_CHART_PAD_TOP - STATISTICS_CHART_PAD_BOTTOM;
+    let plot_width =
+        STATISTICS_CHART_SVG_WIDTH - STATISTICS_CHART_PAD_LEFT - STATISTICS_CHART_PAD_RIGHT;
+    let plot_height =
+        STATISTICS_CHART_SVG_HEIGHT - STATISTICS_CHART_PAD_TOP - STATISTICS_CHART_PAD_BOTTOM;
     let mut svg = String::new();
     let _ = write!(
         svg,
@@ -4113,18 +4174,8 @@ fn statistics_line_chart_svg(
         }
 
         for (timestamp, value) in &series.points {
-            let x = statistics_chart_x(
-                x_bounds,
-                *timestamp,
-                plot_width,
-                STATISTICS_CHART_PAD_LEFT,
-            );
-            let y = statistics_chart_y(
-                y_bounds,
-                *value,
-                plot_height,
-                STATISTICS_CHART_PAD_TOP,
-            );
+            let x = statistics_chart_x(x_bounds, *timestamp, plot_width, STATISTICS_CHART_PAD_LEFT);
+            let y = statistics_chart_y(y_bounds, *value, plot_height, STATISTICS_CHART_PAD_TOP);
             let _ = write!(
                 svg,
                 r#"<circle cx="{x:.2}" cy="{y:.2}" r="3.2" fill="{color}" stroke="white" stroke-width="1.5"/>"#
@@ -4170,12 +4221,8 @@ fn statistics_line_chart_svg(
                 plot_width,
                 STATISTICS_CHART_PAD_LEFT,
             );
-            let point_y = statistics_chart_y(
-                y_bounds,
-                point_value,
-                plot_height,
-                STATISTICS_CHART_PAD_TOP,
-            );
+            let point_y =
+                statistics_chart_y(y_bounds, point_value, plot_height, STATISTICS_CHART_PAD_TOP);
             let color = statistics_color_hex(series.color);
             let _ = write!(
                 svg,
@@ -4207,8 +4254,8 @@ fn statistics_line_chart_svg(
                 tooltip_x = 4.0;
             }
             if tooltip_y < 4.0 {
-                tooltip_y = (hover.cursor_y + 17.0)
-                    .min(STATISTICS_CHART_SVG_HEIGHT - tooltip_height - 4.0);
+                tooltip_y =
+                    (hover.cursor_y + 17.0).min(STATISTICS_CHART_SVG_HEIGHT - tooltip_height - 4.0);
             }
             if tooltip_y < 4.0 {
                 tooltip_y = 4.0;
@@ -4266,7 +4313,8 @@ fn statistics_chart_x(
         return left_padding + plot_width * 0.5;
     }
 
-    left_padding + ((timestamp.saturating_sub(bounds.min_timestamp)) as f32 / span as f32) * plot_width
+    left_padding
+        + ((timestamp.saturating_sub(bounds.min_timestamp)) as f32 / span as f32) * plot_width
 }
 
 fn statistics_chart_y(

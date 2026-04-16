@@ -1587,10 +1587,8 @@ mod tests {
     #[test]
     fn extra_poll_labels_do_not_override_canonical_labels() {
         let recording_settings = default_recording_oid_inputs();
-        let canonical_oid =
-            Oid::from_slice(&[1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 19, 5, 1, 9, 401]);
-        let extra_oid =
-            Oid::from_slice(&[1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 19, 5, 1, 9, 71]);
+        let canonical_oid = Oid::from_slice(&[1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 19, 5, 1, 9, 401]);
+        let extra_oid = Oid::from_slice(&[1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 19, 5, 1, 9, 71]);
         let profile = ManufacturerProfile {
             id: "test-profile".to_string(),
             manufacturer: "ricoh".to_string(),
@@ -1614,8 +1612,11 @@ mod tests {
             source_path: None,
         };
 
-        let labels =
-            build_poll_label_map(&CounterOidSet::default(), &recording_settings, Some(&profile));
+        let labels = build_poll_label_map(
+            &CounterOidSet::default(),
+            &recording_settings,
+            Some(&profile),
+        );
 
         assert_eq!(
             labels.get(&canonical_oid).map(String::as_str),

@@ -589,6 +589,24 @@ impl PrintCountApp {
         self.mark_statistics_changed();
     }
 
+    fn repair_statistics_duplicate_series(&mut self) {
+        let before = self.statistics_store.clone();
+        normalize_statistics_store(&mut self.statistics_store);
+        if self.statistics_store == before {
+            tracing::info!(
+                target: targets::STORAGE,
+                "Statistics duplicate-series repair found no changes."
+            );
+            return;
+        }
+
+        tracing::info!(
+            target: targets::STORAGE,
+            "Repaired statistics duplicate series labels and keys."
+        );
+        self.mark_statistics_changed();
+    }
+
     fn queue_statistics_cleanup(&mut self) {
         if self.statistics_store.is_empty() {
             return;

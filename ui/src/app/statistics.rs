@@ -390,6 +390,7 @@ pub(crate) fn metric_series_key(oid: &str, label: &str) -> String {
     if label.is_empty() {
         format!("oid:{oid}")
     } else {
+        let label = canonical_statistics_source_label_value(label).unwrap_or(label);
         format!("label:{label}")
     }
 }
@@ -407,9 +408,8 @@ pub(crate) fn append_poll_sample(
         }
     }
 
-    metrics.retain(|metric| {
-        metric.value != 0 || !entry_has_series_history(entry, &metric.series_key)
-    });
+    metrics
+        .retain(|metric| metric.value != 0 || !entry_has_series_history(entry, &metric.series_key));
     if metrics.is_empty() {
         return false;
     }
@@ -454,7 +454,9 @@ pub(crate) fn remove_non_initial_zero_poll_metrics(store: &mut StatisticsStore) 
             });
         }
 
-        entry.poll_samples.retain(|sample| !sample.metrics.is_empty());
+        entry
+            .poll_samples
+            .retain(|sample| !sample.metrics.is_empty());
     }
 
     store.printers.retain(|entry| {
@@ -588,7 +590,10 @@ fn upsert_latest_bucket_point(
     }
 }
 
-fn aggregate_cumulative_entry_points(entry_points: Vec<BTreeMap<u64, AggregatedPoint>>, max_points: usize) -> Vec<(u64, u64)> {
+fn aggregate_cumulative_entry_points(
+    entry_points: Vec<BTreeMap<u64, AggregatedPoint>>,
+    max_points: usize,
+) -> Vec<(u64, u64)> {
     if entry_points.is_empty() {
         return Vec::new();
     }
@@ -955,8 +960,8 @@ fn display_label_for_metric(metric: &StatisticsPollMetric) -> Option<String> {
         .map(str::to_string)
 }
 
-fn canonical_statistics_source_label(metric: &StatisticsPollMetric) -> Option<&'static str> {
-    match metric.label.trim() {
+fn canonical_statistics_source_label_value(label: &str) -> Option<&'static str> {
+    match label.trim() {
         "Recording: Copies B/W" => Some("Recording: Copies B/W"),
         "Recording: Prints B/W" => Some("Recording: Prints B/W"),
         "Recording: Copies Color" => Some("Recording: Copies Color"),
@@ -970,6 +975,10 @@ fn canonical_statistics_source_label(metric: &StatisticsPollMetric) -> Option<&'
         "Print color counter" => Some("Recording: Prints Color"),
         _ => None,
     }
+}
+
+fn canonical_statistics_source_label(metric: &StatisticsPollMetric) -> Option<&'static str> {
+    canonical_statistics_source_label_value(&metric.label)
 }
 
 fn canonical_statistics_label(label: &str) -> Option<&'static str> {
@@ -1249,6 +1258,72 @@ mod tests {
     }
 
     #[test]
+    fn metric_series_key_normalizes_legacy_recording_labels() {
+        let legacy = metric_series_key("1.2.3", "Print B/W counter");
+        let canonical = metric_series_key("1.2.3", "Recording: Prints B/W");
+        assert_eq!(legacy, canonical);
+
+        let legacy = metric_series_key("1.2.4", "Print color counter");
+        let canonical = metric_series_key("1.2.4", "Recording: Prints Color");
+        assert_eq!(legacy, canonical);
+    }
+
+    #[test]
+    fn normalize_statistics_store_collapses_legacy_and_canonical_series() {
+        let printer_id = printer_id("printer-a");
+        let pricing = PricingSettings::default();
+        let mut store = StatisticsStore {
+            printers: vec![PrinterStatisticsEntry {
+                printer_id: printer_id.clone(),
+                poll_samples: vec![StatisticsPollSample {
+                    captured_at: 900,
+                    metrics: vec![
+                        StatisticsPollMetric::new("1.2.3", "Print B/W counter", 100),
+                        StatisticsPollMetric::new("1.2.3", "Recording: Prints B/W", 100),
+                        StatisticsPollMetric::new("1.2.4", "Print color counter", 50),
+                        StatisticsPollMetric::new("1.2.4", "Recording: Prints Color", 50),
+                    ],
+                    legacy_total: None,
+                }],
+                euro_samples: Vec::new(),
+            }],
+        };
+        normalize_statistics_store(&mut store);
+
+        let selected = HashSet::from([printer_id]);
+        let series = available_series(&store, &selected, &pricing, None);
+        let prints_bw_count = series
+            .iter()
+            .filter(|entry| entry.label == "Prints B/W")
+            .count();
+        let prints_color_count = series
+            .iter()
+            .filter(|entry| entry.label == "Prints Color")
+            .count();
+        assert_eq!(prints_bw_count, 1);
+        assert_eq!(prints_color_count, 1);
+
+        let prints_bw_points = aggregate_series_points(
+            &store,
+            &selected,
+            &pricing,
+            &metric_series_key("1.2.3", "Recording: Prints B/W"),
+            10,
+            None,
+        );
+        let prints_color_points = aggregate_series_points(
+            &store,
+            &selected,
+            &pricing,
+            &metric_series_key("1.2.4", "Recording: Prints Color"),
+            10,
+            None,
+        );
+        assert_eq!(prints_bw_points, vec![(900, 100)]);
+        assert_eq!(prints_color_points, vec![(900, 50)]);
+    }
+
+    #[test]
     fn available_series_ignores_observed_counter_5_when_prints_bw_exists() {
         let printer_id = printer_id("printer-a");
         let pricing = PricingSettings::default();
@@ -1337,20 +1412,12 @@ mod tests {
                     poll_samples: vec![
                         StatisticsPollSample {
                             captured_at: 900,
-                            metrics: vec![StatisticsPollMetric::new(
-                                "1.2.3",
-                                "Clicks: Total",
-                                100,
-                            )],
+                            metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 100)],
                             legacy_total: None,
                         },
                         StatisticsPollSample {
                             captured_at: 2_700,
-                            metrics: vec![StatisticsPollMetric::new(
-                                "1.2.3",
-                                "Clicks: Total",
-                                130,
-                            )],
+                            metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 130)],
                             legacy_total: None,
                         },
                     ],
@@ -1361,29 +1428,17 @@ mod tests {
                     poll_samples: vec![
                         StatisticsPollSample {
                             captured_at: 900,
-                            metrics: vec![StatisticsPollMetric::new(
-                                "1.2.3",
-                                "Clicks: Total",
-                                40,
-                            )],
+                            metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 40)],
                             legacy_total: None,
                         },
                         StatisticsPollSample {
                             captured_at: 1_800,
-                            metrics: vec![StatisticsPollMetric::new(
-                                "1.2.3",
-                                "Clicks: Total",
-                                50,
-                            )],
+                            metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 50)],
                             legacy_total: None,
                         },
                         StatisticsPollSample {
                             captured_at: 2_700,
-                            metrics: vec![StatisticsPollMetric::new(
-                                "1.2.3",
-                                "Clicks: Total",
-                                60,
-                            )],
+                            metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: Total", 60)],
                             legacy_total: None,
                         },
                     ],

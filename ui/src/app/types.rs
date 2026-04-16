@@ -810,6 +810,7 @@ pub(crate) enum Message {
     },
     ResetStatisticsAxisBounds(String),
     RemoveStatisticsZeroEntries,
+    RepairStatisticsDuplicateSeries,
     StartPrinterReorderDrag(PrinterId),
     PrinterReorderHoldTick,
     CompletePrinterCardPress(PrinterId),

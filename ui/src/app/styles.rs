@@ -269,6 +269,78 @@ pub(crate) fn profile_pick_list_menu_style() -> impl Fn(&Theme) -> menu::Style {
     }
 }
 
+pub(crate) fn statistics_date_pick_list_style()
+-> impl Fn(&Theme, pick_list::Status) -> pick_list::Style {
+    move |_theme, status| {
+        let accent = sampled_brand_color(CONTENT_BRAND_SAMPLE);
+        let (background, border_color) = match status {
+            pick_list::Status::Hovered | pick_list::Status::Opened { .. } => (
+                Background::Color(Color::from_rgb8(0xf3, 0xf7, 0xfc)),
+                shift_color(accent, -0.02),
+            ),
+            pick_list::Status::Active => (
+                Background::Color(Color::from_rgb8(0xea, 0xef, 0xf5)),
+                Color::from_rgb8(0xc8, 0xd2, 0xde),
+            ),
+        };
+
+        pick_list::Style {
+            text_color: Color::from_rgb8(0x2e, 0x3d, 0x4f),
+            placeholder_color: Color::from_rgb8(0x6f, 0x7d, 0x8c),
+            handle_color: accent,
+            background,
+            border: Border {
+                color: border_color,
+                width: 1.0,
+                radius: 9.0.into(),
+            },
+        }
+    }
+}
+
+pub(crate) fn statistics_date_pick_list_menu_style() -> impl Fn(&Theme) -> menu::Style {
+    move |_theme| {
+        let accent = sampled_brand_color(CONTENT_BRAND_SAMPLE);
+        menu::Style {
+            background: Background::Color(Color::from_rgb8(0xf7, 0xfa, 0xfd)),
+            border: Border {
+                color: Color::from_rgb8(0xc8, 0xd2, 0xde),
+                width: 1.0,
+                radius: 9.0.into(),
+            },
+            text_color: Color::from_rgb8(0x2e, 0x3d, 0x4f),
+            selected_text_color: Color::WHITE,
+            selected_background: Background::Color(accent),
+            shadow: Shadow {
+                color: Color::from_rgba8(0x10, 0x19, 0x2b, 0.08),
+                offset: Vector::new(0.0, 4.0),
+                blur_radius: 10.0,
+            },
+        }
+    }
+}
+
+pub(crate) fn statistics_date_picker_group_style() -> impl Fn(&Theme) -> container::Style {
+    move |_theme| container::Style {
+        background: Some(Background::Color(Color::from_rgb8(0xe9, 0xee, 0xf4))),
+        border: Border {
+            color: Color::from_rgb8(0xca, 0xd4, 0xdf),
+            width: 1.0,
+            radius: 10.0.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
+pub(crate) fn statistics_date_today_button_style()
+-> impl Fn(&Theme, button::Status) -> button::Style {
+    subtle_button_style(
+        Color::from_rgb8(0xe8, 0xed, 0xf4),
+        Color::from_rgb8(0xc5, 0xcf, 0xdb),
+        Color::from_rgb8(0x4e, 0x5d, 0x6d),
+    )
+}
+
 fn inset_scrollable_style(
     inactive_scroller_color: Color,
 ) -> impl Fn(&Theme, scrollable::Status) -> scrollable::Style {

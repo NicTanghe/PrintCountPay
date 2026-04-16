@@ -522,6 +522,10 @@ impl PrintCountApp {
                 self.remove_non_initial_zero_statistics_entries();
                 Command::none()
             }
+            Message::RepairStatisticsDuplicateSeries => {
+                self.repair_statistics_duplicate_series();
+                Command::none()
+            }
             Message::StartPrinterReorderDrag(printer_id) => {
                 self.start_printer_reorder_drag(printer_id);
                 Command::none()
