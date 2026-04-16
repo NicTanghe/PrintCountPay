@@ -809,6 +809,7 @@ pub(crate) enum Message {
         value: String,
     },
     ResetStatisticsAxisBounds(String),
+    RemoveStatisticsZeroEntries,
     StartPrinterReorderDrag(PrinterId),
     PrinterReorderHoldTick,
     CompletePrinterCardPress(PrinterId),

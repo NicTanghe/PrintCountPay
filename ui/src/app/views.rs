@@ -2207,7 +2207,7 @@ impl PrintCountApp {
         let range_label = self.statistics_date_range_summary(range_start, range_end);
         let chart_body: Element<'_, Message> = if aggregated_series.is_empty() {
             self.statistics_chart_empty_state(
-                "Waiting for the first stored statistics sample. Poll snapshots are saved every 15 minutes, and recorded EUR is added whenever a recording stops.",
+                "Waiting for the first stored statistics sample. Poll snapshots are saved every 15 minutes.",
             )
         } else if visible_series.is_empty() {
             self.statistics_chart_empty_state(
@@ -2656,6 +2656,17 @@ impl PrintCountApp {
                     .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                 preset_rows,
                 custom_controls,
+                row![
+                    button("Remove non-initial zero entries")
+                        .padding([6, 10])
+                        .style(theme::Button::custom(muted_content_button_style()))
+                        .on_press(Message::RemoveStatisticsZeroEntries),
+                    text("Deletes zero poll values unless they are the first stored point for that printer and series.")
+                        .size(11)
+                        .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                ]
+                .spacing(10)
+                .align_items(Alignment::Center),
                 text(range_note)
                     .size(11)
                     .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
@@ -2760,12 +2771,7 @@ impl PrintCountApp {
         self.statistics_store
             .printers
             .iter()
-            .flat_map(|entry| {
-                entry.poll_samples
-                    .iter()
-                    .map(|sample| sample.captured_at)
-                    .chain(entry.euro_samples.iter().map(|sample| sample.captured_at))
-            })
+            .flat_map(|entry| entry.poll_samples.iter().map(|sample| sample.captured_at))
             .min()
             .and_then(statistics_local_date)
     }
@@ -3833,6 +3839,11 @@ impl PrintCountApp {
                     CONTENT_BRAND_SAMPLE,
                 )))
                 .on_press(Message::CopyDiagnostics),
+            button("Remove non-initial zero entries")
+                .style(theme::Button::custom(solid_brand_button_style(
+                    SIDEBAR_BRAND_SAMPLE,
+                )))
+                .on_press(Message::RemoveStatisticsZeroEntries),
             text(format!("Clipboard: {copy_status}"))
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
@@ -3930,20 +3941,7 @@ fn statistics_series_auto_y_bounds(series: &StatisticsChartSeries) -> Option<Sta
     })
 }
 
-fn statistics_series_color(series_key: &str, index: usize) -> Color {
-    if series_key == RECORDED_EUR_SERIES_KEY {
-        return recording_active_color();
-    }
-    if series_key == ESTIMATED_INCOME_SERIES_KEY {
-        return Color::from_rgb(0.25, 0.57, 0.29);
-    }
-    if series_key == ESTIMATED_INCOME_BW_SERIES_KEY {
-        return Color::from_rgb(0.47, 0.63, 0.20);
-    }
-    if series_key == ESTIMATED_INCOME_COLOR_SERIES_KEY {
-        return Color::from_rgb(0.81, 0.54, 0.17);
-    }
-
+fn statistics_series_color(_series_key: &str, index: usize) -> Color {
     const PALETTE: [Color; 6] = [
         Color::from_rgb(0.32, 0.69, 0.86),
         Color::from_rgb(0.17, 0.55, 0.49),
@@ -3956,14 +3954,8 @@ fn statistics_series_color(series_key: &str, index: usize) -> Color {
     PALETTE[index % PALETTE.len()]
 }
 
-fn statistics_series_is_currency_key(series_key: &str) -> bool {
-    matches!(
-        series_key,
-        RECORDED_EUR_SERIES_KEY
-            | ESTIMATED_INCOME_SERIES_KEY
-            | ESTIMATED_INCOME_BW_SERIES_KEY
-            | ESTIMATED_INCOME_COLOR_SERIES_KEY
-    )
+fn statistics_series_is_currency_key(_series_key: &str) -> bool {
+    false
 }
 
 fn format_statistics_number(value: u64) -> String {

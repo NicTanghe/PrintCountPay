@@ -571,6 +571,24 @@ impl PrintCountApp {
         self.queue_statistics_cleanup();
     }
 
+    fn remove_non_initial_zero_statistics_entries(&mut self) {
+        let removed = remove_non_initial_zero_poll_metrics(&mut self.statistics_store);
+        if removed == 0 {
+            tracing::info!(
+                target: targets::STORAGE,
+                "Statistics zero cleanup found no removable entries."
+            );
+            return;
+        }
+
+        tracing::info!(
+            target: targets::STORAGE,
+            "Removed {} non-initial zero statistics entries.",
+            removed
+        );
+        self.mark_statistics_changed();
+    }
+
     fn queue_statistics_cleanup(&mut self) {
         if self.statistics_store.is_empty() {
             return;
@@ -928,16 +946,12 @@ impl PrintCountApp {
         }
 
         let preferred_labels = [
-            ESTIMATED_INCOME_SERIES_LABEL,
-            RECORDED_EUR_SERIES_LABEL,
             "Total B/W",
             "Total Color",
             "Copies B/W",
             "Prints B/W",
             "Copies Color",
             "Prints Color",
-            ESTIMATED_INCOME_BW_SERIES_LABEL,
-            ESTIMATED_INCOME_COLOR_SERIES_LABEL,
         ];
         let mut inserted = 0usize;
 
@@ -2069,18 +2083,6 @@ impl PrintCountApp {
                 session.end = Some(snapshot.clone());
                 session.edits.apply_end_snapshot(&snapshot);
                 session.status = None;
-                let euro_sample = recording_session_total_cents(session, None, &self.pricing)
-                    .map(|total_cents| (snapshot.received_at, total_cents));
-                if let Some((captured_at, total_cents)) = euro_sample
-                    && append_euro_sample(
-                        &mut self.statistics_store,
-                        &printer_id,
-                        captured_at,
-                        total_cents,
-                    )
-                {
-                    self.mark_statistics_changed();
-                }
             }
             Err(error) => {
                 session.status = Some(format!("Stop failed: {error}"));
@@ -2643,6 +2645,9 @@ impl PrintCountApp {
             manual_bills,
             manual_bill_tombstones,
         } = snapshot;
+        let incoming_manual_bills = bill_sync_supported.then_some(manual_bills.clone());
+        let incoming_manual_bill_tombstones =
+            bill_sync_supported.then_some(manual_bill_tombstones.clone());
 
         self.printers = printers;
         self.pricing = pricing;
@@ -2715,7 +2720,16 @@ impl PrintCountApp {
             self.clear_active_profile();
         }
 
-        self.last_shared_state = self.build_shared_state(revision);
+        let mut applied_snapshot = self.build_shared_state(revision);
+        if let (Some(incoming_manual_bills), Some(incoming_manual_bill_tombstones)) = (
+            incoming_manual_bills,
+            incoming_manual_bill_tombstones,
+        ) {
+            applied_snapshot.manual_bills = incoming_manual_bills;
+            applied_snapshot.manual_bill_tombstones = incoming_manual_bill_tombstones;
+        }
+
+        self.last_shared_state = applied_snapshot;
     }
 
     fn counter_oids_empty(&self) -> bool {
@@ -3189,6 +3203,44 @@ mod tests {
             applied.start.as_ref().map(|snapshot| snapshot.received_at),
             Some(250)
         );
+    }
+
+    #[test]
+    fn apply_shared_state_rebroadcasts_local_newer_bill_on_next_flush() {
+        let mut app = test_app();
+        app.manual_bills = vec![ManualPricingBill {
+            id: "shared-bill".to_string(),
+            subject: "Local newer".to_string(),
+            pricing: ManualPricingSettings::default(),
+            updated_at_millis: 200,
+        }];
+        app.last_shared_state = app.build_shared_state(5);
+
+        app.apply_shared_state(sync::SharedState {
+            revision: 6,
+            printers: Vec::new(),
+            poll_states: Vec::new(),
+            recording_sessions: Vec::new(),
+            pricing: app.pricing.clone(),
+            bill_sync_supported: true,
+            manual_bills: vec![ManualPricingBill {
+                id: "shared-bill".to_string(),
+                subject: "Remote older".to_string(),
+                pricing: ManualPricingSettings::default(),
+                updated_at_millis: 100,
+            }],
+            manual_bill_tombstones: Vec::new(),
+        });
+
+        assert_eq!(app.manual_bills.len(), 1);
+        assert_eq!(app.manual_bills[0].subject, "Local newer");
+        assert_eq!(app.last_shared_state.revision, 6);
+        assert_eq!(app.last_shared_state.manual_bills[0].subject, "Remote older");
+
+        app.flush_shared_state();
+
+        assert_eq!(app.last_shared_state.revision, 7);
+        assert_eq!(app.last_shared_state.manual_bills[0].subject, "Local newer");
     }
 
     #[test]
@@ -3902,7 +3954,7 @@ mod tests {
     }
 
     #[test]
-    fn stop_recording_stores_euro_statistics_sample() {
+    fn stop_recording_does_not_store_income_statistics_sample() {
         let mut app = test_app();
         let root = temp_test_dir("statistics-euro");
         fs::create_dir_all(&root).expect("create temp root");
@@ -3946,12 +3998,7 @@ mod tests {
 
         app.stop_recording();
 
-        let entry = app
-            .statistics_store
-            .entry(&printer_id)
-            .expect("statistics entry");
-        assert_eq!(entry.euro_samples.len(), 1);
-        assert_eq!(entry.euro_samples[0].total_cents, 175);
+        assert!(app.statistics_store.entry(&printer_id).is_none());
 
         let _ = fs::remove_dir_all(root);
     }
@@ -3988,8 +4035,6 @@ mod tests {
             3_600,
             vec![StatisticsPollMetric::new("1.2.4", "Clicks: Total", 20)],
         );
-        append_euro_sample(&mut remote_store, &printer_id, 4_000, 175);
-
         app.apply_statistics_sync(sync::StatisticsSyncPayload {
             latest_data_at: 3_600,
             store: remote_store,
@@ -4003,8 +4048,7 @@ mod tests {
         assert_eq!(entry.poll_samples[0].captured_at, 901);
         assert_eq!(entry.poll_samples[0].metrics[0].value, 11);
         assert_eq!(entry.poll_samples[1].captured_at, 3_600);
-        assert_eq!(entry.euro_samples.len(), 1);
-        assert_eq!(entry.euro_samples[0].total_cents, 175);
+        assert!(entry.euro_samples.is_empty());
 
         let persisted = read_statistics_store(&path);
         assert_eq!(persisted, app.statistics_store);

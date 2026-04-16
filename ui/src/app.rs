@@ -518,6 +518,10 @@ impl PrintCountApp {
                 self.statistics_axis_inputs_by_series.remove(&series_key);
                 Command::none()
             }
+            Message::RemoveStatisticsZeroEntries => {
+                self.remove_non_initial_zero_statistics_entries();
+                Command::none()
+            }
             Message::StartPrinterReorderDrag(printer_id) => {
                 self.start_printer_reorder_drag(printer_id);
                 Command::none()
