@@ -515,12 +515,167 @@ pub(crate) fn format_count(value: Option<u64>) -> String {
         .unwrap_or_else(|| "N/A".to_string())
 }
 
+#[derive(Debug)]
+struct ArithmeticExpressionParser<'a> {
+    bytes: &'a [u8],
+    position: usize,
+}
+
+impl<'a> ArithmeticExpressionParser<'a> {
+    fn new(input: &'a str) -> Self {
+        Self {
+            bytes: input.as_bytes(),
+            position: 0,
+        }
+    }
+
+    fn parse(mut self) -> Result<f64, ()> {
+        let value = self.parse_expression()?;
+        self.skip_whitespace();
+        if self.position == self.bytes.len() {
+            Ok(value)
+        } else {
+            Err(())
+        }
+    }
+
+    fn parse_expression(&mut self) -> Result<f64, ()> {
+        let mut value = self.parse_term()?;
+
+        loop {
+            self.skip_whitespace();
+            match self.peek() {
+                Some(b'+') => {
+                    self.position += 1;
+                    value += self.parse_term()?;
+                }
+                Some(b'-') => {
+                    self.position += 1;
+                    value -= self.parse_term()?;
+                }
+                _ => break,
+            }
+        }
+
+        Ok(value)
+    }
+
+    fn parse_term(&mut self) -> Result<f64, ()> {
+        let mut value = self.parse_factor()?;
+
+        loop {
+            self.skip_whitespace();
+            match self.peek() {
+                Some(b'*') => {
+                    self.position += 1;
+                    value *= self.parse_factor()?;
+                }
+                Some(b'/') => {
+                    self.position += 1;
+                    let divisor = self.parse_factor()?;
+                    if divisor.abs() <= f64::EPSILON {
+                        return Err(());
+                    }
+                    value /= divisor;
+                }
+                _ => break,
+            }
+        }
+
+        Ok(value)
+    }
+
+    fn parse_factor(&mut self) -> Result<f64, ()> {
+        self.skip_whitespace();
+
+        match self.peek() {
+            Some(b'+') => {
+                self.position += 1;
+                self.parse_factor()
+            }
+            Some(b'-') => {
+                self.position += 1;
+                Ok(-self.parse_factor()?)
+            }
+            Some(b'(') => {
+                self.position += 1;
+                let value = self.parse_expression()?;
+                self.skip_whitespace();
+                if self.peek() == Some(b')') {
+                    self.position += 1;
+                    Ok(value)
+                } else {
+                    Err(())
+                }
+            }
+            _ => self.parse_number(),
+        }
+    }
+
+    fn parse_number(&mut self) -> Result<f64, ()> {
+        self.skip_whitespace();
+        let start = self.position;
+        let mut seen_digit = false;
+        let mut seen_decimal = false;
+
+        while let Some(byte) = self.peek() {
+            match byte {
+                b'0'..=b'9' => {
+                    seen_digit = true;
+                    self.position += 1;
+                }
+                b'.' if !seen_decimal => {
+                    seen_decimal = true;
+                    self.position += 1;
+                }
+                _ => break,
+            }
+        }
+
+        if !seen_digit {
+            return Err(());
+        }
+
+        let token = std::str::from_utf8(&self.bytes[start..self.position]).map_err(|_| ())?;
+        token.parse::<f64>().map_err(|_| ())
+    }
+
+    fn skip_whitespace(&mut self) {
+        while matches!(self.peek(), Some(b' ' | b'\t' | b'\n' | b'\r')) {
+            self.position += 1;
+        }
+    }
+
+    fn peek(&self) -> Option<u8> {
+        self.bytes.get(self.position).copied()
+    }
+}
+
+fn parse_arithmetic_expression(value: &str) -> Result<f64, ()> {
+    ArithmeticExpressionParser::new(value).parse()
+}
+
 pub(crate) fn parse_count_input(value: &str) -> Result<Option<u64>, ()> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return Ok(None);
     }
-    trimmed.parse::<u64>().map(Some).map_err(|_| ())
+
+    let parsed = parse_arithmetic_expression(trimmed).map_err(|_| ())?;
+    if !parsed.is_finite() || parsed < 0.0 {
+        return Err(());
+    }
+
+    let rounded = parsed.round();
+    if (parsed - rounded).abs() > 1e-9 {
+        return Err(());
+    }
+
+    if rounded > u64::MAX as f64 {
+        return Err(());
+    }
+
+    Ok(Some(rounded as u64))
 }
 
 pub(crate) fn parse_price_input(value: &str) -> Result<Option<u64>, ()> {
@@ -1163,8 +1318,8 @@ mod tests {
         category_start_display, category_start_value, default_recording_oid_inputs,
         default_toner_oids, delta_value, format_clock_hms_with_offset, format_elapsed_hms,
         manual_pricing_totals, manual_round_total_cents, missing_recording_snapshot_categories,
-        recording_profile_from_settings_lossy, round_to_nearest_5_cents, snmp_oids,
-        sum_optional_included, sum_two,
+        parse_count_input, recording_profile_from_settings_lossy, round_to_nearest_5_cents,
+        snmp_oids, sum_optional_included, sum_two,
     };
     use crate::app::constants::PRT_GENERAL_PRINTER_NAME_OID;
     use crate::app::profiles::{
@@ -1299,6 +1454,17 @@ mod tests {
         assert_eq!(round_to_nearest_5_cents(3), 5);
         assert_eq!(round_to_nearest_5_cents(27), 25);
         assert_eq!(round_to_nearest_5_cents(28), 30);
+    }
+
+    #[test]
+    fn parse_count_input_accepts_parenthesized_formulas() {
+        assert_eq!(parse_count_input("4*8"), Ok(Some(32)));
+        assert_eq!(parse_count_input("(2+5)*8"), Ok(Some(56)));
+    }
+
+    #[test]
+    fn parse_count_input_rejects_fractional_formula_results() {
+        assert!(parse_count_input("5/2").is_err());
     }
 
     #[test]

@@ -7,6 +7,7 @@ use printcountpay_core::{
 use serde::{Deserialize, Serialize};
 use time::Month;
 
+use super::helpers::parse_count_input;
 use crate::logging::{LogLevel, LogStore, ReloadHandle};
 use crate::sync::SyncEvent;
 
@@ -232,7 +233,7 @@ impl ManualPricingLineItem {
             return None;
         }
 
-        let sides = trimmed.parse::<u64>().ok()?;
+        let sides = parse_count_input(trimmed).ok().flatten()?;
         Some(if self.double_sided {
             (sides + 1) / 2
         } else {
@@ -1146,6 +1147,20 @@ mod tests {
         assert_eq!(default_line.modifier_index, None);
         assert_eq!(default_line.sides_input, "0");
         assert_eq!(default_line.sheets_input, "0");
+    }
+
+    #[test]
+    fn manual_pricing_line_item_derives_sheets_from_formula_input() {
+        let mut line_item = ManualPricingLineItem {
+            sides_input: "(2+5)*8".to_string(),
+            ..ManualPricingLineItem::default()
+        };
+
+        assert_eq!(line_item.derived_sheets(), Some(56));
+
+        line_item.double_sided = true;
+
+        assert_eq!(line_item.derived_sheets(), Some(28));
     }
 
     #[test]
