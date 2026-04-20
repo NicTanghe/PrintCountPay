@@ -647,6 +647,10 @@ fn current_timestamp_millis() -> u64 {
         .as_millis() as u64
 }
 
+fn next_timestamp_millis(previous: u64) -> u64 {
+    current_timestamp_millis().max(previous.saturating_add(1))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManualPricingBill {
     #[serde(default)]
@@ -1059,12 +1063,23 @@ pub struct RecordingSession {
     pub(crate) end_fields_unlocked: bool,
     #[serde(default)]
     pub(crate) updated_at_millis: u64,
+    #[serde(default)]
+    pub(crate) manual_state_changed_at_millis: u64,
     pub(crate) edits: RecordingEdits,
 }
 
 impl RecordingSession {
     pub(crate) fn touch(&mut self) {
-        self.updated_at_millis = current_timestamp_millis();
+        self.updated_at_millis = next_timestamp_millis(self.updated_at_millis);
+    }
+
+    pub(crate) fn mark_manual_state_change(&mut self) {
+        let latest = self
+            .updated_at_millis
+            .max(self.manual_state_changed_at_millis);
+        let timestamp = next_timestamp_millis(latest);
+        self.updated_at_millis = timestamp;
+        self.manual_state_changed_at_millis = timestamp;
     }
 
     pub(crate) fn version_millis(&self) -> u64 {

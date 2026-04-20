@@ -323,7 +323,9 @@ async fn run_as_master(
                     MasterEvent::ClientMessage(client_id, message) => {
                         match message {
                             WireMessage::Snapshot(snapshot) => {
-                                if is_newer(&snapshot, latest_snapshot.as_ref()) {
+                                if let Some(snapshot) =
+                                    incoming_snapshot(snapshot, latest_snapshot.as_ref())
+                                {
                                     *latest_snapshot = Some(snapshot.clone());
                                     if output.send(SyncEvent::SnapshotReceived(snapshot.clone())).await.is_err() {
                                         return Err(());
@@ -634,10 +636,24 @@ fn broadcast(clients: &mut HashMap<u64, UnboundedSender<WireMessage>>, message: 
     }
 }
 
-fn is_newer(candidate: &SharedState, current: Option<&SharedState>) -> bool {
-    current
-        .map(|current| candidate.revision > current.revision)
-        .unwrap_or(true)
+fn incoming_snapshot(
+    mut snapshot: SharedState,
+    current: Option<&SharedState>,
+) -> Option<SharedState> {
+    let Some(current) = current else {
+        return Some(snapshot);
+    };
+
+    if snapshot.revision > current.revision {
+        return Some(snapshot);
+    }
+
+    if snapshot.revision == current.revision && snapshot != *current {
+        snapshot.revision = current.revision.saturating_add(1);
+        return Some(snapshot);
+    }
+
+    None
 }
 
 fn outgoing_snapshot(
@@ -721,28 +737,31 @@ mod tests {
     }
 
     #[test]
-    fn is_newer_rejects_equal_revision_when_snapshot_changed() {
+    fn incoming_snapshot_bumps_equal_revision_when_snapshot_changed() {
         let current = snapshot(5);
         let mut candidate = snapshot(5);
         candidate.pricing.bw_first_input = "0.30".to_string();
 
-        assert!(!is_newer(&candidate, Some(&current)));
+        let incoming = incoming_snapshot(candidate, Some(&current)).expect("incoming snapshot");
+
+        assert_eq!(incoming.revision, 6);
+        assert_eq!(incoming.pricing.bw_first_input, "0.30");
     }
 
     #[test]
-    fn is_newer_rejects_equal_revision_when_snapshot_unchanged() {
+    fn incoming_snapshot_rejects_equal_revision_when_snapshot_unchanged() {
         let current = snapshot(5);
         let candidate = snapshot(5);
 
-        assert!(!is_newer(&candidate, Some(&current)));
+        assert!(incoming_snapshot(candidate, Some(&current)).is_none());
     }
 
     #[test]
-    fn is_newer_rejects_older_revision() {
+    fn incoming_snapshot_rejects_older_revision() {
         let current = snapshot(6);
         let candidate = snapshot(5);
 
-        assert!(!is_newer(&candidate, Some(&current)));
+        assert!(incoming_snapshot(candidate, Some(&current)).is_none());
     }
 
     #[test]
