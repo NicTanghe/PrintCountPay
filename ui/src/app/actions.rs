@@ -126,6 +126,60 @@ fn should_preserve_local_stopped_session(
     incoming_start_at <= local_end_at
 }
 
+fn should_preserve_local_active_session(
+    local: &RecordingSession,
+    incoming: &RecordingSession,
+) -> bool {
+    if !local.active || incoming.active {
+        return false;
+    }
+
+    let Some(local_start_at) = local.start.as_ref().map(|snapshot| snapshot.received_at) else {
+        return false;
+    };
+
+    let incoming_latest_at = incoming
+        .end
+        .as_ref()
+        .map(|snapshot| snapshot.received_at)
+        .or_else(|| incoming.start.as_ref().map(|snapshot| snapshot.received_at))
+        .unwrap_or(0);
+    incoming_latest_at < local_start_at
+}
+
+fn prefer_local_recording_session(
+    local: &RecordingSession,
+    incoming: Option<&RecordingSession>,
+) -> bool {
+    let Some(incoming) = incoming else {
+        return local.has_state();
+    };
+
+    if should_preserve_local_stopped_session(local, incoming)
+        || should_preserve_local_active_session(local, incoming)
+    {
+        return true;
+    }
+
+    let local_version = local.version_millis();
+    let incoming_version = incoming.version_millis();
+    if local_version != incoming_version {
+        return local_version > incoming_version;
+    }
+
+    local.end.is_some() && incoming.end.is_none()
+}
+
+fn prefer_local_poll_state(local: &SnmpPollStatus, incoming: &SnmpPollStatus) -> bool {
+    match (poll_received_at(local), poll_received_at(incoming)) {
+        (Some(local_received_at), Some(incoming_received_at)) => {
+            local_received_at > incoming_received_at
+        }
+        (Some(_), None) => true,
+        _ => false,
+    }
+}
+
 fn manual_pricing_backup_path(path: &Path, index: usize) -> std::path::PathBuf {
     std::path::PathBuf::from(format!("{}.bak{index}", path.to_string_lossy()))
 }
@@ -740,12 +794,28 @@ impl PrintCountApp {
             pricing,
             mut workspace,
         } = payload;
+        let incoming_bills = workspace.bills.clone();
+        let incoming_tombstones = workspace.bill_tombstones.clone();
+        let merged_store = canonical_manual_bill_store(
+            self.manual_bills
+                .iter()
+                .cloned()
+                .chain(workspace.bills.into_iter())
+                .collect(),
+            self.manual_bill_tombstones
+                .iter()
+                .cloned()
+                .chain(workspace.bill_tombstones.into_iter())
+                .collect(),
+        );
+        workspace.bills = merged_store.bills.clone();
+        workspace.bill_tombstones = merged_store.bill_tombstones.clone();
         self.last_manual_pricing_sync_id = Some(id);
         self.pricing = pricing;
         workspace.settings.reset_calculator_state();
         self.manual_pricing = workspace.settings.clone();
-        self.manual_bills = workspace.bills.clone();
-        self.manual_bill_tombstones = workspace.bill_tombstones.clone();
+        self.manual_bills = merged_store.bills;
+        self.manual_bill_tombstones = merged_store.bill_tombstones;
         self.normalize_manual_bills();
         self.sync_selected_manual_bill();
         self.manual_bills_dirty = true;
@@ -756,7 +826,10 @@ impl PrintCountApp {
                 Err(error) => format!("Applied synced prices, but save failed: {error}"),
             });
 
-        self.last_shared_state = self.build_shared_state(self.last_shared_state.revision);
+        let mut applied_snapshot = self.build_shared_state(self.last_shared_state.revision);
+        applied_snapshot.manual_bills = incoming_bills;
+        applied_snapshot.manual_bill_tombstones = incoming_tombstones;
+        self.last_shared_state = applied_snapshot;
     }
 
     fn active_manual_pricing(&self) -> &ManualPricingSettings {
@@ -2046,6 +2119,7 @@ impl PrintCountApp {
                 .entry(printer_id.clone())
                 .or_default();
             session.status = Some("Start ignored: recording already active.".to_string());
+            session.touch();
             return;
         }
 
@@ -2068,6 +2142,7 @@ impl PrintCountApp {
                 session.status = Some(format!("Start failed: {error}"));
             }
         }
+        session.touch();
     }
 
     fn stop_recording(&mut self) {
@@ -2086,6 +2161,7 @@ impl PrintCountApp {
                 .entry(printer_id.clone())
                 .or_default();
             session.status = Some("Stop failed: no active recording.".to_string());
+            session.touch();
             return;
         }
 
@@ -2106,6 +2182,7 @@ impl PrintCountApp {
                 session.status = Some(format!("Stop failed: {error}"));
             }
         }
+        session.touch();
     }
 
     fn reset_recording_end_to_polled(&mut self, category: RecordingCategory) {
@@ -2133,6 +2210,7 @@ impl PrintCountApp {
         session.edits.category_mut(category).end_input = polled_value
             .map(|value| value.to_string())
             .unwrap_or_default();
+        session.touch();
     }
 
     fn export_poll_data(&mut self) {
@@ -2649,10 +2727,12 @@ impl PrintCountApp {
     }
 
     fn apply_shared_state(&mut self, snapshot: SharedState) {
+        let incoming_snapshot = snapshot.clone();
         let selected = self.selected_printer.clone();
         let selected_manual_bill_id = self.selected_manual_bill_id.clone();
         let pending_printer_drag = self.pending_printer_drag.clone();
         let active_printer_drag = self.active_printer_drag.clone();
+        let local_poll_states = self.poll_states.clone();
         let SharedState {
             revision,
             printers,
@@ -2675,21 +2755,31 @@ impl PrintCountApp {
             self.normalize_manual_bills();
             self.manual_bills_dirty = true;
         }
-        self.poll_states = poll_states
-            .into_iter()
-            .map(|entry| (entry.printer_id, entry.state))
-            .collect();
-
-        for record in &self.printers {
-            self.poll_states
-                .entry(record.id.clone())
-                .or_insert(SnmpPollStatus::Idle);
-        }
-
         let known_ids: HashSet<PrinterId> = self
             .printers
             .iter()
             .map(|record| record.id.clone())
+            .collect();
+        let incoming_poll_states: HashMap<_, _> = poll_states
+            .into_iter()
+            .filter(|entry| known_ids.contains(&entry.printer_id))
+            .map(|entry| (entry.printer_id, entry.state))
+            .collect();
+        self.poll_states = known_ids
+            .iter()
+            .map(|printer_id| {
+                let local_state = local_poll_states.get(printer_id);
+                let incoming_state = incoming_poll_states.get(printer_id);
+                let state = match (local_state, incoming_state) {
+                    (Some(local), Some(incoming)) if prefer_local_poll_state(local, incoming) => {
+                        local.clone()
+                    }
+                    (_, Some(incoming)) => incoming.clone(),
+                    (Some(local), None) if poll_received_at(local).is_some() => local.clone(),
+                    _ => SnmpPollStatus::Idle,
+                };
+                (printer_id.clone(), state)
+            })
             .collect();
         self.pending_printer_drag =
             pending_printer_drag.filter(|pending| known_ids.contains(&pending.printer_id));
@@ -2699,22 +2789,37 @@ impl PrintCountApp {
                 drag.drop_index = drag.drop_index.min(self.printers.len());
                 drag
             });
-        self.recording_sessions = recording_sessions
+        let local_recording_sessions = std::mem::take(&mut self.recording_sessions);
+        let incoming_recording_sessions: HashMap<_, _> = recording_sessions
             .into_iter()
             .filter(|entry| known_ids.contains(&entry.printer_id))
-            .map(|entry| {
-                let local_session = self.recording_sessions.get(&entry.printer_id);
+            .map(|entry| (entry.printer_id, entry.session))
+            .collect();
+        self.recording_sessions = known_ids
+            .iter()
+            .filter_map(|printer_id| {
+                let local_session = local_recording_sessions.get(printer_id);
+                let incoming_session = incoming_recording_sessions.get(printer_id);
                 let local_unlock_state = local_session
                     .map(|session| session.end_fields_unlocked)
-                    .unwrap_or(entry.session.end_fields_unlocked);
-                let mut session = entry.session;
-                if let Some(local_session) = local_session
-                    && should_preserve_local_stopped_session(local_session, &session)
-                {
-                    session = local_session.clone();
-                }
+                    .or_else(|| incoming_session.map(|session| session.end_fields_unlocked))
+                    .unwrap_or(false);
+
+                let mut session = match (local_session, incoming_session) {
+                    (Some(local), Some(incoming))
+                        if prefer_local_recording_session(local, Some(incoming)) =>
+                    {
+                        local.clone()
+                    }
+                    (Some(local), None) if prefer_local_recording_session(local, None) => {
+                        local.clone()
+                    }
+                    (_, Some(incoming)) => incoming.clone(),
+                    (Some(local), None) => local.clone(),
+                    (None, None) => return None,
+                };
                 session.end_fields_unlocked = local_unlock_state;
-                (entry.printer_id, session)
+                Some((printer_id.clone(), session))
             })
             .collect();
         self.poll_in_flight
@@ -2747,7 +2852,11 @@ impl PrintCountApp {
             applied_snapshot.manual_bill_tombstones = incoming_manual_bill_tombstones;
         }
 
-        self.last_shared_state = applied_snapshot;
+        self.last_shared_state = if applied_snapshot == incoming_snapshot {
+            applied_snapshot
+        } else {
+            incoming_snapshot
+        };
     }
 
     fn counter_oids_empty(&self) -> bool {
@@ -3160,6 +3269,134 @@ mod tests {
     }
 
     #[test]
+    fn apply_shared_state_keeps_local_active_session_when_remote_snapshot_omits_it() {
+        let mut app = test_app();
+        let record = printer_record(PrinterStatus::Online, Some(123));
+        let printer_id = record.id.clone();
+        app.replace_printers(vec![record.clone()]);
+
+        let mut local_session = RecordingSession::default();
+        local_session.active = true;
+        local_session.start = Some(RecordingSnapshot {
+            received_at: 300,
+            bw_printer: Some(130),
+            bw_copier: None,
+            color_printer: None,
+            color_copier: None,
+        });
+        app.recording_sessions
+            .insert(printer_id.clone(), local_session.clone());
+        app.last_shared_state = app.build_shared_state(4);
+
+        app.apply_shared_state(sync::SharedState {
+            revision: 5,
+            printers: vec![record],
+            poll_states: vec![sync::PollStateEntry {
+                printer_id: printer_id.clone(),
+                state: SnmpPollStatus::Idle,
+            }],
+            recording_sessions: Vec::new(),
+            pricing: app.pricing.clone(),
+            bill_sync_supported: false,
+            manual_bills: Vec::new(),
+            manual_bill_tombstones: Vec::new(),
+        });
+
+        let applied = app
+            .recording_sessions
+            .get(&printer_id)
+            .expect("recording session should remain active");
+        assert!(applied.active);
+        assert_eq!(
+            applied.start.as_ref().map(|snapshot| snapshot.received_at),
+            Some(300)
+        );
+    }
+
+    #[test]
+    fn apply_shared_state_keeps_local_active_session_when_remote_inactive_is_older() {
+        let mut app = test_app();
+        let record = printer_record(PrinterStatus::Online, Some(123));
+        let printer_id = record.id.clone();
+        app.replace_printers(vec![record.clone()]);
+
+        let mut local_session = RecordingSession::default();
+        local_session.active = true;
+        local_session.start = Some(RecordingSnapshot {
+            received_at: 300,
+            bw_printer: Some(130),
+            bw_copier: None,
+            color_printer: None,
+            color_copier: None,
+        });
+        app.recording_sessions
+            .insert(printer_id.clone(), local_session.clone());
+        app.last_shared_state = app.build_shared_state(6);
+
+        let mut remote_session = RecordingSession::default();
+        remote_session.active = false;
+        remote_session.start = Some(RecordingSnapshot {
+            received_at: 100,
+            bw_printer: Some(100),
+            bw_copier: None,
+            color_printer: None,
+            color_copier: None,
+        });
+        remote_session.end = Some(RecordingSnapshot {
+            received_at: 200,
+            bw_printer: Some(120),
+            bw_copier: None,
+            color_printer: None,
+            color_copier: None,
+        });
+
+        app.apply_shared_state(sync::SharedState {
+            revision: 7,
+            printers: vec![record],
+            poll_states: vec![sync::PollStateEntry {
+                printer_id: printer_id.clone(),
+                state: SnmpPollStatus::Idle,
+            }],
+            recording_sessions: vec![sync::RecordingSessionEntry {
+                printer_id: printer_id.clone(),
+                session: remote_session,
+            }],
+            pricing: app.pricing.clone(),
+            bill_sync_supported: false,
+            manual_bills: Vec::new(),
+            manual_bill_tombstones: Vec::new(),
+        });
+
+        let applied = app
+            .recording_sessions
+            .get(&printer_id)
+            .expect("recording session should remain active");
+        assert!(applied.active);
+        assert_eq!(
+            applied.start.as_ref().map(|snapshot| snapshot.received_at),
+            Some(300)
+        );
+
+        assert_eq!(app.last_shared_state.revision, 7);
+        assert!(
+            app.last_shared_state
+                .recording_sessions
+                .iter()
+                .any(|entry| entry.printer_id == printer_id && !entry.session.active)
+        );
+
+        app.flush_shared_state();
+
+        assert_eq!(app.last_shared_state.revision, 8);
+        assert!(
+            app.last_shared_state
+                .recording_sessions
+                .iter()
+                .any(|entry| entry.printer_id == printer_id && entry.session.active)
+        );
+    }
+
+    #[test]
     fn apply_shared_state_accepts_remote_active_session_when_started_after_local_end() {
         let mut app = test_app();
         let record = printer_record(PrinterStatus::Online, Some(123));
@@ -3220,6 +3457,63 @@ mod tests {
         assert_eq!(
             applied.start.as_ref().map(|snapshot| snapshot.received_at),
             Some(250)
+        );
+    }
+
+    #[test]
+    fn apply_shared_state_keeps_fresher_local_poll_state() {
+        let mut app = test_app();
+        let record = printer_record(PrinterStatus::Online, Some(123));
+        let printer_id = record.id.clone();
+        app.replace_printers(vec![record.clone()]);
+        app.poll_states.insert(
+            printer_id.clone(),
+            SnmpPollStatus::Ok {
+                received_at: 200,
+                varbinds: Vec::new(),
+            },
+        );
+        app.last_shared_state = app.build_shared_state(4);
+
+        app.apply_shared_state(sync::SharedState {
+            revision: 5,
+            printers: vec![record],
+            poll_states: vec![sync::PollStateEntry {
+                printer_id: printer_id.clone(),
+                state: SnmpPollStatus::Ok {
+                    received_at: 100,
+                    varbinds: Vec::new(),
+                },
+            }],
+            recording_sessions: Vec::new(),
+            pricing: app.pricing.clone(),
+            bill_sync_supported: false,
+            manual_bills: Vec::new(),
+            manual_bill_tombstones: Vec::new(),
+        });
+
+        assert_eq!(
+            app.poll_states.get(&printer_id).and_then(poll_received_at),
+            Some(200)
+        );
+        assert_eq!(app.last_shared_state.revision, 5);
+        assert!(
+            app.last_shared_state
+                .poll_states
+                .iter()
+                .any(|entry| entry.printer_id == printer_id
+                    && poll_received_at(&entry.state) == Some(100))
+        );
+
+        app.flush_shared_state();
+
+        assert_eq!(app.last_shared_state.revision, 6);
+        assert!(
+            app.last_shared_state
+                .poll_states
+                .iter()
+                .any(|entry| entry.printer_id == printer_id
+                    && poll_received_at(&entry.state) == Some(200))
         );
     }
 
@@ -3674,6 +3968,97 @@ mod tests {
     }
 
     #[test]
+    fn apply_pricing_sync_merges_local_newer_bills_and_rebroadcasts_them() {
+        let mut app = test_app();
+        let root = temp_test_dir("apply-pricing-sync-merge");
+        fs::create_dir_all(&root).expect("create temp root");
+        let path = root.join("manual_pricing.ron");
+        write_manual_pricing_workspace(&path, &ManualPricingWorkspace::default())
+            .expect("seed workspace");
+        app.manual_pricing_path = path.to_string_lossy().to_string();
+        app.manual_bills = vec![
+            ManualPricingBill {
+                id: "shared-bill".to_string(),
+                subject: "Local Newer".to_string(),
+                pricing: ManualPricingSettings::default(),
+                updated_at_millis: 300,
+            },
+            ManualPricingBill {
+                id: "local-only".to_string(),
+                subject: "Local Only".to_string(),
+                pricing: ManualPricingSettings::default(),
+                updated_at_millis: 250,
+            },
+        ];
+        app.last_shared_state = app.build_shared_state(9);
+
+        let incoming_workspace = ManualPricingWorkspace {
+            settings: ManualPricingSettings::default(),
+            bills: vec![
+                ManualPricingBill {
+                    id: "shared-bill".to_string(),
+                    subject: "Remote Older".to_string(),
+                    pricing: ManualPricingSettings::default(),
+                    updated_at_millis: 100,
+                },
+                ManualPricingBill {
+                    id: "remote-only".to_string(),
+                    subject: "Remote Only".to_string(),
+                    pricing: ManualPricingSettings::default(),
+                    updated_at_millis: 200,
+                },
+            ],
+            bill_tombstones: Vec::new(),
+        };
+
+        app.apply_pricing_sync(sync::PricingSyncPayload {
+            id: "sync-2".to_string(),
+            pricing: PricingSettings::default(),
+            workspace: incoming_workspace.clone(),
+        });
+
+        assert_eq!(app.manual_bills.len(), 3);
+        assert_eq!(
+            app.manual_bills
+                .iter()
+                .find(|bill| bill.id == "shared-bill")
+                .map(|bill| bill.subject.as_str()),
+            Some("Local Newer")
+        );
+        assert!(app.manual_bills.iter().any(|bill| bill.id == "local-only"));
+        assert!(app.manual_bills.iter().any(|bill| bill.id == "remote-only"));
+
+        let persisted_workspace = read_manual_pricing_workspace(&path);
+        assert_eq!(persisted_workspace.bills.len(), 3);
+        assert_eq!(
+            persisted_workspace
+                .bills
+                .iter()
+                .find(|bill| bill.id == "shared-bill")
+                .map(|bill| bill.subject.as_str()),
+            Some("Local Newer")
+        );
+
+        assert_eq!(app.last_shared_state.revision, 9);
+        assert_eq!(app.last_shared_state.manual_bills, incoming_workspace.bills);
+
+        app.flush_shared_state();
+
+        assert_eq!(app.last_shared_state.revision, 10);
+        assert_eq!(app.last_shared_state.manual_bills.len(), 3);
+        assert_eq!(
+            app.last_shared_state
+                .manual_bills
+                .iter()
+                .find(|bill| bill.id == "shared-bill")
+                .map(|bill| bill.subject.as_str()),
+            Some("Local Newer")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn apply_pricing_sync_ignores_older_payload_than_loaded_workspace() {
         let mut app = test_app();
         let root = temp_test_dir("stale-pricing-sync");
@@ -4000,6 +4385,7 @@ mod tests {
                 end: None,
                 status: None,
                 end_fields_unlocked: false,
+                updated_at_millis: 0,
                 edits: RecordingEdits::default(),
             },
         );

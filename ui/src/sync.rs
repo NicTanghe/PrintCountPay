@@ -275,10 +275,10 @@ async fn run_as_master(
                 };
                 match command {
                     SyncCommand::SetSnapshot(snapshot) => {
-                        if is_newer(&snapshot, latest_snapshot.as_ref()) || latest_snapshot.is_none() {
+                        if is_newer(&snapshot, latest_snapshot.as_ref()) {
                             *latest_snapshot = Some(snapshot.clone());
+                            broadcast(&mut clients, &WireMessage::Snapshot(snapshot));
                         }
-                        broadcast(&mut clients, &WireMessage::Snapshot(snapshot));
                     }
                     SyncCommand::RequestPoll(printer_id) => {
                         if output.send(SyncEvent::PollRequested(printer_id)).await.is_err() {
@@ -630,10 +630,7 @@ fn broadcast(clients: &mut HashMap<u64, UnboundedSender<WireMessage>>, message: 
 
 fn is_newer(candidate: &SharedState, current: Option<&SharedState>) -> bool {
     current
-        .map(|current| {
-            candidate.revision > current.revision
-                || (candidate.revision == current.revision && candidate != current)
-        })
+        .map(|current| candidate.revision > current.revision)
         .unwrap_or(true)
 }
 
@@ -698,12 +695,12 @@ mod tests {
     }
 
     #[test]
-    fn is_newer_accepts_equal_revision_when_snapshot_changed() {
+    fn is_newer_rejects_equal_revision_when_snapshot_changed() {
         let current = snapshot(5);
         let mut candidate = snapshot(5);
         candidate.pricing.bw_first_input = "0.30".to_string();
 
-        assert!(is_newer(&candidate, Some(&current)));
+        assert!(!is_newer(&candidate, Some(&current)));
     }
 
     #[test]

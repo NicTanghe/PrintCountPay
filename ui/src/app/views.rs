@@ -1526,17 +1526,11 @@ impl PrintCountApp {
                     .size(12)
                     .style(theme::Text::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f)))
             }
-            ManualLineState::Ready(line) => text(format!(
-                "{} | print {} sides = {} + {} sheets x {} = {}",
-                line.print_pricing_label,
-                line.sides,
-                format_cents(line.print_total_cents),
-                line.sheets,
-                format_cents(line.paper_price_cents),
-                format_cents(line.total_cents),
-            ))
-            .size(12)
-            .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37))),
+            ManualLineState::Ready(line) => {
+                text(manual_line_summary(&line))
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37)))
+            }
         };
 
         container(column![controls, summary].spacing(10))

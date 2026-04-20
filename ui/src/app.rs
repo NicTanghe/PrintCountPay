@@ -660,6 +660,7 @@ impl PrintCountApp {
                 if let Some(printer_id) = self.selected_printer.clone() {
                     let session = self.recording_sessions.entry(printer_id).or_default();
                     session.edits.category_mut(category).start_input = value;
+                    session.touch();
                 }
                 Command::none()
             }
@@ -667,6 +668,7 @@ impl PrintCountApp {
                 if let Some(printer_id) = self.selected_printer.clone() {
                     let session = self.recording_sessions.entry(printer_id).or_default();
                     session.edits.category_mut(category).end_input = value;
+                    session.touch();
                 }
                 Command::none()
             }
@@ -679,6 +681,7 @@ impl PrintCountApp {
                     let session = self.recording_sessions.entry(printer_id).or_default();
                     let entry = session.edits.category_mut(category);
                     entry.include_in_price = !entry.include_in_price;
+                    session.touch();
                 }
                 Command::none()
             }
@@ -686,6 +689,7 @@ impl PrintCountApp {
                 if let Some(printer_id) = self.selected_printer.clone() {
                     let session = self.recording_sessions.entry(printer_id).or_default();
                     session.end_fields_unlocked = value;
+                    session.touch();
                 }
                 Command::none()
             }
@@ -985,8 +989,6 @@ impl PrintCountApp {
         let statistics_cleanup_tick =
             iced::time::every(STATISTICS_CLEANUP_TICK).map(|_| Message::StatisticsCleanupTick);
         let sync_tick = iced::time::every(sync::SYNC_FLUSH_INTERVAL).map(|_| Message::SyncTick);
-        let reorder_hold_tick =
-            iced::time::every(PRINTER_REORDER_HOLD_TICK).map(|_| Message::PrinterReorderHoldTick);
         let sync_subscription = sync::subscription().map(Message::SyncEvent);
         let global_events = iced::event::listen_with(|event, _status, _window| match event {
             iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
@@ -1001,16 +1003,23 @@ impl PrintCountApp {
             }
             _ => None,
         });
-        Subscription::batch(vec![
+        let mut subscriptions = vec![
             log_tick,
             poll_tick,
             statistics_poll_tick,
             statistics_cleanup_tick,
             sync_tick,
-            reorder_hold_tick,
             sync_subscription,
             global_events,
-        ])
+        ];
+        if self.pending_printer_drag.is_some() {
+            subscriptions.push(
+                iced::time::every(PRINTER_REORDER_HOLD_TICK)
+                    .map(|_| Message::PrinterReorderHoldTick),
+            );
+        }
+
+        Subscription::batch(subscriptions)
     }
 
     pub(crate) fn view(&self) -> Element<'_, Message> {

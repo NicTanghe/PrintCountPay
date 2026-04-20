@@ -1057,7 +1057,47 @@ pub struct RecordingSession {
     pub(crate) status: Option<String>,
     #[serde(default)]
     pub(crate) end_fields_unlocked: bool,
+    #[serde(default)]
+    pub(crate) updated_at_millis: u64,
     pub(crate) edits: RecordingEdits,
+}
+
+impl RecordingSession {
+    pub(crate) fn touch(&mut self) {
+        self.updated_at_millis = current_timestamp_millis();
+    }
+
+    pub(crate) fn version_millis(&self) -> u64 {
+        let snapshot_millis = if self.active {
+            self.start
+                .as_ref()
+                .map(|snapshot| snapshot.received_at.saturating_mul(1_000))
+        } else {
+            self.end
+                .as_ref()
+                .map(|snapshot| snapshot.received_at.saturating_mul(1_000))
+                .or_else(|| {
+                    self.start
+                        .as_ref()
+                        .map(|snapshot| snapshot.received_at.saturating_mul(1_000))
+                })
+        }
+        .unwrap_or(0);
+
+        self.updated_at_millis.max(snapshot_millis)
+    }
+
+    pub(crate) fn has_state(&self) -> bool {
+        self.active
+            || self.start.is_some()
+            || self.end.is_some()
+            || self.end_fields_unlocked
+            || self
+                .status
+                .as_ref()
+                .is_some_and(|status| !status.is_empty())
+            || self.edits != RecordingEdits::default()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
