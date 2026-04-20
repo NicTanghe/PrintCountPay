@@ -275,7 +275,9 @@ async fn run_as_master(
                 };
                 match command {
                     SyncCommand::SetSnapshot(snapshot) => {
-                        if is_newer(&snapshot, latest_snapshot.as_ref()) {
+                        if let Some(snapshot) =
+                            outgoing_snapshot(snapshot, latest_snapshot.as_ref())
+                        {
                             *latest_snapshot = Some(snapshot.clone());
                             broadcast(&mut clients, &WireMessage::Snapshot(snapshot));
                         }
@@ -412,6 +414,10 @@ async fn run_as_client(
                 };
                 match command {
                     SyncCommand::SetSnapshot(snapshot) => {
+                        let Some(snapshot) = outgoing_snapshot(snapshot, latest_snapshot.as_ref())
+                        else {
+                            continue;
+                        };
                         *latest_snapshot = Some(snapshot.clone());
                         if synced_with_master && write_frame(&mut writer, &WireMessage::Snapshot(snapshot)).await.is_err() {
                             return Err(());
@@ -634,6 +640,26 @@ fn is_newer(candidate: &SharedState, current: Option<&SharedState>) -> bool {
         .unwrap_or(true)
 }
 
+fn outgoing_snapshot(
+    mut snapshot: SharedState,
+    current: Option<&SharedState>,
+) -> Option<SharedState> {
+    let Some(current) = current else {
+        return Some(snapshot);
+    };
+
+    if snapshot.revision > current.revision {
+        return Some(snapshot);
+    }
+
+    if snapshot == *current {
+        return None;
+    }
+
+    snapshot.revision = current.revision.saturating_add(1);
+    Some(snapshot)
+}
+
 fn statistics_payload_is_newer(
     candidate: &StatisticsSyncPayload,
     current: Option<&StatisticsSyncPayload>,
@@ -717,5 +743,25 @@ mod tests {
         let candidate = snapshot(5);
 
         assert!(!is_newer(&candidate, Some(&current)));
+    }
+
+    #[test]
+    fn outgoing_snapshot_bumps_equal_revision_local_change() {
+        let current = snapshot(5);
+        let mut candidate = snapshot(5);
+        candidate.pricing.bw_first_input = "0.30".to_string();
+
+        let outgoing = outgoing_snapshot(candidate, Some(&current)).expect("outgoing snapshot");
+
+        assert_eq!(outgoing.revision, 6);
+        assert_eq!(outgoing.pricing.bw_first_input, "0.30");
+    }
+
+    #[test]
+    fn outgoing_snapshot_ignores_unchanged_equal_revision() {
+        let current = snapshot(5);
+        let candidate = snapshot(5);
+
+        assert!(outgoing_snapshot(candidate, Some(&current)).is_none());
     }
 }
