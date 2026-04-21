@@ -188,6 +188,45 @@ fn prefer_local_poll_state(local: &SnmpPollStatus, incoming: &SnmpPollStatus) ->
     }
 }
 
+fn poll_response_values_are_all_zero(varbinds: &[SnmpVarBind]) -> bool {
+    let mut saw_zero_value = false;
+
+    for varbind in varbinds {
+        if varbind.value.is_missing() {
+            continue;
+        }
+
+        if poll_value_is_zero(&varbind.value) {
+            saw_zero_value = true;
+        } else {
+            return false;
+        }
+    }
+
+    saw_zero_value
+}
+
+fn poll_value_is_zero(value: &SnmpValue) -> bool {
+    match value {
+        SnmpValue::Null
+        | SnmpValue::EndOfMibView
+        | SnmpValue::NoSuchObject
+        | SnmpValue::NoSuchInstance => false,
+        SnmpValue::Integer(value) => *value == 0,
+        SnmpValue::Unsigned32(value)
+        | SnmpValue::Counter32(value)
+        | SnmpValue::Timeticks(value) => *value == 0,
+        SnmpValue::Counter64(value) => *value == 0,
+        SnmpValue::OctetString(_) | SnmpValue::Opaque(_) => value.as_u64() == Some(0),
+        SnmpValue::ObjectIdentifier(oid) => oid.as_slice().iter().all(|arc| *arc == 0),
+        SnmpValue::IpAddress(bytes) => bytes.iter().all(|byte| *byte == 0),
+        SnmpValue::Other(value) => {
+            let trimmed = value.trim();
+            trimmed == "0" || trimmed == "0.0"
+        }
+    }
+}
+
 fn manual_pricing_backup_path(path: &Path, index: usize) -> std::path::PathBuf {
     std::path::PathBuf::from(format!("{}.bak{index}", path.to_string_lossy()))
 }
@@ -1777,6 +1816,15 @@ impl PrintCountApp {
         let mut sys_object_id = None;
 
         let (state, status, last_seen) = match result {
+            Ok(response) if poll_response_values_are_all_zero(&response.varbinds) => (
+                SnmpPollStatus::Error {
+                    received_at,
+                    summary: "SNMP poll returned only zero values.".to_string(),
+                    detail: "All returned SNMP values were zero, so the response was treated as an offline printer instead of a valid online poll.".to_string(),
+                },
+                PrinterStatus::Offline,
+                None,
+            ),
             Ok(response) => {
                 let printer_name = varbind_text_value(
                     &response.varbinds,
@@ -2078,11 +2126,11 @@ impl PrintCountApp {
     }
 
     fn recent_poll_is_fresh(&self, printer_id: &PrinterId) -> bool {
-        let Some(received_at) = self.poll_states.get(printer_id).and_then(poll_received_at) else {
+        let Some(SnmpPollStatus::Ok { received_at, .. }) = self.poll_states.get(printer_id) else {
             return false;
         };
 
-        now_epoch_seconds().saturating_sub(received_at) <= 3
+        now_epoch_seconds().saturating_sub(*received_at) <= 3
     }
 
     fn request_remote_poll(&self, printer_id: &PrinterId) {
@@ -2967,6 +3015,103 @@ mod tests {
     }
 
     #[test]
+    fn all_zero_poll_marks_printer_offline() {
+        let mut app = test_app();
+        let record = printer_record(PrinterStatus::Online, Some(123));
+        let printer_id = record.id.clone();
+
+        app.replace_printers(vec![record]);
+        app.handle_snmp_polled(
+            printer_id.clone(),
+            Ok(SnmpResponse {
+                address: SnmpAddress::with_default_port("192.0.2.10"),
+                varbinds: vec![
+                    SnmpVarBind {
+                        oid: Oid::from_slice(&SYS_DESCR_OID),
+                        value: SnmpValue::OctetString(b"0".to_vec()),
+                    },
+                    SnmpVarBind {
+                        oid: Oid::from_slice(&SYS_OBJECT_ID_OID),
+                        value: SnmpValue::ObjectIdentifier(Oid::from_slice(&[0, 0])),
+                    },
+                    SnmpVarBind {
+                        oid: Oid::from_slice(&SYS_NAME_OID),
+                        value: SnmpValue::OctetString(b"0".to_vec()),
+                    },
+                    SnmpVarBind {
+                        oid: Oid::from_slice(&SYS_UPTIME_OID),
+                        value: SnmpValue::Timeticks(0),
+                    },
+                    SnmpVarBind {
+                        oid: Oid::from_slice(&RICOH_BW_PRINTER_COUNT_OID),
+                        value: SnmpValue::Counter32(0),
+                    },
+                ],
+            }),
+        );
+
+        let record = app
+            .printers
+            .iter()
+            .find(|record| record.id == printer_id)
+            .expect("printer record");
+        assert_eq!(record.status, PrinterStatus::Offline);
+        assert_eq!(record.last_seen, Some(123));
+        assert!(record.sys_descr.is_none());
+        assert!(record.sys_object_id.is_none());
+        assert!(matches!(
+            app.poll_states.get(&printer_id),
+            Some(SnmpPollStatus::Error { summary, .. })
+                if summary.contains("zero values")
+        ));
+        assert!(app.statistics_store.entry(&printer_id).is_none());
+    }
+
+    #[test]
+    fn zero_counters_with_identity_still_mark_printer_online() {
+        let mut app = test_app();
+        let record = printer_record(PrinterStatus::Offline, Some(123));
+        let printer_id = record.id.clone();
+
+        app.replace_printers(vec![record]);
+        app.handle_snmp_polled(
+            printer_id.clone(),
+            Ok(SnmpResponse {
+                address: SnmpAddress::with_default_port("192.0.2.10"),
+                varbinds: vec![
+                    SnmpVarBind {
+                        oid: Oid::from_slice(&SYS_DESCR_OID),
+                        value: SnmpValue::OctetString(b"RICOH Test Printer".to_vec()),
+                    },
+                    SnmpVarBind {
+                        oid: Oid::from_slice(&SYS_OBJECT_ID_OID),
+                        value: SnmpValue::ObjectIdentifier(Oid::from_slice(&[
+                            1, 3, 6, 1, 4, 1, 367,
+                        ])),
+                    },
+                    SnmpVarBind {
+                        oid: Oid::from_slice(&RICOH_BW_PRINTER_COUNT_OID),
+                        value: SnmpValue::Counter32(0),
+                    },
+                ],
+            }),
+        );
+
+        let record = app
+            .printers
+            .iter()
+            .find(|record| record.id == printer_id)
+            .expect("printer record");
+        assert_eq!(record.status, PrinterStatus::Online);
+        assert_ne!(record.last_seen, Some(123));
+        assert_eq!(record.sys_descr.as_deref(), Some("RICOH Test Printer"));
+        assert!(matches!(
+            app.poll_states.get(&printer_id),
+            Some(SnmpPollStatus::Ok { .. })
+        ));
+    }
+
+    #[test]
     fn statistics_tab_requires_advanced_mode() {
         let mut app = test_app();
 
@@ -3096,6 +3241,40 @@ mod tests {
         assert_eq!(app.selected_printer, Some(printer_a.id));
         assert!(app.pending_printer_drag.is_none());
         assert!(app.active_printer_drag.is_none());
+    }
+
+    #[test]
+    fn selecting_offline_printer_requests_repoll_even_with_recent_error_state() {
+        let mut app = test_app();
+        let printer_a = printer_record_with_id("printer-a");
+        let mut printer_b = printer_record_with_id("printer-b");
+        printer_b.status = PrinterStatus::Offline;
+        let printer_b_id = printer_b.id.clone();
+
+        app.replace_printers(vec![printer_a.clone(), printer_b]);
+        app.selected_printer = Some(printer_a.id.clone());
+        app.sync_role = SyncRole::Client;
+        app.poll_states.insert(
+            printer_b_id.clone(),
+            SnmpPollStatus::Error {
+                received_at: now_epoch_seconds(),
+                summary: "SNMP request timed out.".to_string(),
+                detail: "SNMP timeout.".to_string(),
+            },
+        );
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        app.sync_sender = Some(sender);
+
+        app.start_printer_reorder_drag(printer_b_id.clone());
+        let _ = app.complete_printer_card_press(printer_b_id.clone());
+
+        assert_eq!(app.selected_printer, Some(printer_b_id.clone()));
+        match receiver.try_recv() {
+            Ok(SyncCommand::RequestPoll(requested_id)) => {
+                assert_eq!(requested_id, printer_b_id);
+            }
+            other => panic!("expected remote poll request, got {other:?}"),
+        }
     }
 
     #[test]

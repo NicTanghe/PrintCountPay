@@ -17,7 +17,7 @@ use time::{Date, Month};
 
 use printcountpay_core::{
     CidrRange, CounterOidSet, DEFAULT_SNMP_PORT, Oid, PrinterId, PrinterRecord, PrinterStatus,
-    SnmpAddress, SnmpConfig, SnmpRequest, SnmpResponse, SnmpV2cClient, SnmpVarBind,
+    SnmpAddress, SnmpConfig, SnmpRequest, SnmpResponse, SnmpV2cClient, SnmpValue, SnmpVarBind,
     SnmpWalkRequest, default_discovery_cidr, probe_printer, resolve_counters, targets,
     varbind_display_value, varbind_numeric_value, varbind_text_value,
 };
