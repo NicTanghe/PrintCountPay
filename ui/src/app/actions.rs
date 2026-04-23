@@ -592,6 +592,13 @@ impl PrintCountApp {
         pricing
     }
 
+    fn synced_manual_pricing_settings(&self) -> ManualPricingSettings {
+        let mut manual_pricing = self.manual_pricing.clone();
+        manual_pricing.normalize();
+        manual_pricing.reset_calculator_state();
+        manual_pricing
+    }
+
     fn current_manual_pricing_workspace(&mut self) -> ManualPricingWorkspace {
         self.manual_pricing.normalize();
         self.normalize_manual_bills();
@@ -2810,9 +2817,9 @@ impl PrintCountApp {
             printers: self.printers.clone(),
             poll_states,
             recording_sessions,
-            pricing: self.synced_pricing_settings(),
-            manual_pricing_sync_supported: true,
+            pricing: self.pricing.clone(),
             bill_sync_supported: true,
+            manual_pricing_settings: Some(self.synced_manual_pricing_settings()),
             manual_bills: self.manual_bills.clone(),
             manual_bill_tombstones: self.manual_bill_tombstones.clone(),
         }
@@ -2831,8 +2838,8 @@ impl PrintCountApp {
             poll_states,
             recording_sessions,
             pricing,
-            manual_pricing_sync_supported,
             bill_sync_supported,
+            manual_pricing_settings,
             manual_bills,
             manual_bill_tombstones,
         } = snapshot;
@@ -2842,11 +2849,9 @@ impl PrintCountApp {
 
         self.printers = printers;
         self.pricing = pricing;
-        if manual_pricing_sync_supported {
-            let mut manual_pricing = self.pricing.manual_pricing.clone();
+        if let Some(mut manual_pricing) = manual_pricing_settings {
             manual_pricing.normalize();
             manual_pricing.reset_calculator_state();
-            self.pricing.manual_pricing = manual_pricing.clone();
             self.manual_pricing = manual_pricing;
             self.manual_pricing_dirty = true;
         }
@@ -3343,8 +3348,8 @@ mod tests {
             ],
             recording_sessions: Vec::new(),
             pricing: app.pricing.clone(),
-            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
+            manual_pricing_settings: None,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
         });
@@ -3380,8 +3385,8 @@ mod tests {
             ],
             recording_sessions: Vec::new(),
             pricing: app.pricing.clone(),
-            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
+            manual_pricing_settings: None,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
         });
@@ -3421,8 +3426,8 @@ mod tests {
                 session: remote_session,
             }],
             pricing: app.pricing.clone(),
-            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
+            manual_pricing_settings: None,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
         });
@@ -3486,8 +3491,8 @@ mod tests {
                 session: remote_session,
             }],
             pricing: app.pricing.clone(),
-            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
+            manual_pricing_settings: None,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
         });
@@ -3533,8 +3538,8 @@ mod tests {
             }],
             recording_sessions: Vec::new(),
             pricing: app.pricing.clone(),
-            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
+            manual_pricing_settings: None,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
         });
@@ -3599,8 +3604,8 @@ mod tests {
                 session: remote_session,
             }],
             pricing: app.pricing.clone(),
-            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
+            manual_pricing_settings: None,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
         });
@@ -3687,8 +3692,8 @@ mod tests {
                 session: remote_session,
             }],
             pricing: app.pricing.clone(),
-            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
+            manual_pricing_settings: None,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
         });
@@ -3753,8 +3758,8 @@ mod tests {
                 session: remote_session,
             }],
             pricing: app.pricing.clone(),
-            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
+            manual_pricing_settings: None,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
         });
@@ -3797,8 +3802,8 @@ mod tests {
             }],
             recording_sessions: Vec::new(),
             pricing: app.pricing.clone(),
-            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
+            manual_pricing_settings: None,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
         });
@@ -3845,8 +3850,8 @@ mod tests {
             poll_states: Vec::new(),
             recording_sessions: Vec::new(),
             pricing: app.pricing.clone(),
-            manual_pricing_sync_supported: false,
             bill_sync_supported: true,
+            manual_pricing_settings: None,
             manual_bills: vec![ManualPricingBill {
                 id: "shared-bill".to_string(),
                 subject: "Remote older".to_string(),
@@ -3931,8 +3936,8 @@ mod tests {
             poll_states: Vec::new(),
             recording_sessions: Vec::new(),
             pricing: app.pricing.clone(),
-            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
+            manual_pricing_settings: None,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
         });
@@ -3969,6 +3974,7 @@ mod tests {
             a4_price_input: "0.20".to_string(),
             ..ManualPaperModifier::default()
         }];
+        let manual_pricing_settings = pricing.manual_pricing.clone();
 
         app.apply_shared_state(sync::SharedState {
             revision: 2,
@@ -3976,8 +3982,8 @@ mod tests {
             poll_states: Vec::new(),
             recording_sessions: Vec::new(),
             pricing,
-            manual_pricing_sync_supported: true,
             bill_sync_supported: false,
+            manual_pricing_settings: Some(manual_pricing_settings),
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
         });
