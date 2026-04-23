@@ -592,11 +592,10 @@ impl PrintCountApp {
         pricing
     }
 
-    fn synced_manual_pricing_settings(&self) -> ManualPricingSettings {
-        let mut manual_pricing = self.manual_pricing.clone();
-        manual_pricing.normalize();
-        manual_pricing.reset_calculator_state();
-        manual_pricing
+    fn shared_snapshot_pricing_settings(&self) -> PricingSettings {
+        let mut pricing = self.pricing.clone();
+        pricing.manual_pricing = ManualPricingSettings::default();
+        pricing
     }
 
     fn current_manual_pricing_workspace(&mut self) -> ManualPricingWorkspace {
@@ -669,9 +668,11 @@ impl PrintCountApp {
         let workspace = self.current_manual_pricing_workspace();
         match self.persist_manual_pricing_workspace(&workspace) {
             Ok(path) => {
-                self.last_manual_pricing_sync_id = manual_pricing_version_id(Path::new(&path))
+                let sync_id = manual_pricing_version_id(Path::new(&path))
                     .or_else(|| Some(current_pricing_sync_id()));
+                self.last_manual_pricing_sync_id = sync_id.clone();
                 self.manual_pricing_dirty = false;
+                self.send_pricing_sync(workspace, sync_id, Some(&path), false);
             }
             Err(error) => tracing::warn!(
                 target: targets::STORAGE,
@@ -811,17 +812,17 @@ impl PrintCountApp {
         }
     }
 
-    fn sync_prices_to_network(&mut self) {
-        let workspace = self.current_manual_pricing_workspace();
-        let path = match self.persist_manual_pricing_workspace(&workspace) {
-            Ok(path) => path,
-            Err(error) => {
-                self.manual_pricing_status = Some(format!("Sync failed: {error}"));
-                return;
-            }
-        };
+    fn send_pricing_sync(
+        &mut self,
+        mut workspace: ManualPricingWorkspace,
+        sync_id: Option<String>,
+        path: Option<&str>,
+        update_status: bool,
+    ) -> bool {
+        workspace.bills.clear();
+        workspace.bill_tombstones.clear();
 
-        let sync_id = current_pricing_sync_id();
+        let sync_id = sync_id.unwrap_or_else(current_pricing_sync_id);
         let payload = sync::PricingSyncPayload {
             id: sync_id.clone(),
             pricing: self.synced_pricing_settings(),
@@ -834,11 +835,32 @@ impl PrintCountApp {
             .as_ref()
             .is_some_and(|sender| sender.send(SyncCommand::SyncPrices(payload)).is_ok());
 
-        self.manual_pricing_status = Some(if synced {
-            format!("Saved manual pricing to {path} and synced prices across the network.")
-        } else {
-            format!("Saved manual pricing to {path}. Sync unavailable.")
-        });
+        if update_status {
+            let path_label = path.unwrap_or(self.manual_pricing_path.trim());
+            self.manual_pricing_status = Some(if synced {
+                format!("Saved manual pricing to {path_label} and synced prices across the network.")
+            } else {
+                format!("Saved manual pricing to {path_label}. Sync unavailable.")
+            });
+        }
+
+        synced
+    }
+
+    fn sync_prices_to_network(&mut self) {
+        let workspace = self.current_manual_pricing_workspace();
+        let path = match self.persist_manual_pricing_workspace(&workspace) {
+            Ok(path) => path,
+            Err(error) => {
+                self.manual_pricing_status = Some(format!("Sync failed: {error}"));
+                return;
+            }
+        };
+
+        let sync_id =
+            manual_pricing_version_id(Path::new(&path)).or_else(|| Some(current_pricing_sync_id()));
+        self.manual_pricing_dirty = false;
+        self.send_pricing_sync(workspace, sync_id, Some(&path), true);
     }
 
     fn apply_statistics_sync(&mut self, payload: sync::StatisticsSyncPayload) {
@@ -879,44 +901,22 @@ impl PrintCountApp {
             pricing,
             mut workspace,
         } = payload;
-        let incoming_bills = workspace.bills.clone();
-        let incoming_tombstones = workspace.bill_tombstones.clone();
-        let merged_store = canonical_manual_bill_store(
-            self.manual_bills
-                .iter()
-                .cloned()
-                .chain(workspace.bills.into_iter())
-                .collect(),
-            self.manual_bill_tombstones
-                .iter()
-                .cloned()
-                .chain(workspace.bill_tombstones.into_iter())
-                .collect(),
-        );
-        workspace.bills = merged_store.bills.clone();
-        workspace.bill_tombstones = merged_store.bill_tombstones.clone();
         self.last_manual_pricing_sync_id = Some(id);
         self.pricing = pricing;
         workspace.settings.reset_calculator_state();
         self.pricing.manual_pricing = workspace.settings.clone();
         self.manual_pricing = workspace.settings.clone();
-        self.manual_bills = merged_store.bills;
-        self.manual_bill_tombstones = merged_store.bill_tombstones;
-        self.normalize_manual_bills();
-        self.sync_selected_manual_bill();
-        self.manual_bills_dirty = true;
         self.manual_pricing_dirty = false;
 
-        self.manual_pricing_status =
-            Some(match self.persist_manual_pricing_workspace(&workspace) {
-                Ok(path) => format!("Applied synced prices and saved manual pricing to {path}."),
-                Err(error) => format!("Applied synced prices, but save failed: {error}"),
-            });
+        let persisted_workspace = self.current_manual_pricing_workspace();
+        self.manual_pricing_status = Some(
+            match self.persist_manual_pricing_workspace(&persisted_workspace) {
+                Ok(path) => format!("Applied synced pricing config and saved manual pricing to {path}."),
+                Err(error) => format!("Applied synced pricing config, but save failed: {error}"),
+            },
+        );
 
-        let mut applied_snapshot = self.build_shared_state(self.last_shared_state.revision);
-        applied_snapshot.manual_bills = incoming_bills;
-        applied_snapshot.manual_bill_tombstones = incoming_tombstones;
-        self.last_shared_state = applied_snapshot;
+        self.last_shared_state = self.build_shared_state(self.last_shared_state.revision);
     }
 
     fn active_manual_pricing(&self) -> &ManualPricingSettings {
@@ -2723,6 +2723,13 @@ impl PrintCountApp {
                 self.last_shared_state = self.build_shared_state(self.last_shared_state.revision);
                 self.send_shared_state(self.last_shared_state.clone());
                 self.send_statistics_state();
+                let workspace = self.current_manual_pricing_workspace();
+                let sync_id = self
+                    .last_manual_pricing_sync_id
+                    .clone()
+                    .or_else(|| manual_pricing_version_id(Path::new(self.manual_pricing_path.trim())))
+                    .or_else(|| Some(current_pricing_sync_id()));
+                self.send_pricing_sync(workspace, sync_id, None, false);
                 Command::none()
             }
             SyncEvent::StatusChanged(status) => {
@@ -2817,9 +2824,9 @@ impl PrintCountApp {
             printers: self.printers.clone(),
             poll_states,
             recording_sessions,
-            pricing: self.pricing.clone(),
+            pricing: self.shared_snapshot_pricing_settings(),
             bill_sync_supported: true,
-            manual_pricing_settings: Some(self.synced_manual_pricing_settings()),
+            manual_pricing_settings: None,
             manual_bills: self.manual_bills.clone(),
             manual_bill_tombstones: self.manual_bill_tombstones.clone(),
         }
@@ -2839,7 +2846,7 @@ impl PrintCountApp {
             recording_sessions,
             pricing,
             bill_sync_supported,
-            manual_pricing_settings,
+            manual_pricing_settings: _manual_pricing_settings,
             manual_bills,
             manual_bill_tombstones,
         } = snapshot;
@@ -2849,12 +2856,6 @@ impl PrintCountApp {
 
         self.printers = printers;
         self.pricing = pricing;
-        if let Some(mut manual_pricing) = manual_pricing_settings {
-            manual_pricing.normalize();
-            manual_pricing.reset_calculator_state();
-            self.manual_pricing = manual_pricing;
-            self.manual_pricing_dirty = true;
-        }
         if bill_sync_supported {
             self.manual_bills.extend(manual_bills);
             self.manual_bill_tombstones.extend(manual_bill_tombstones);
@@ -3948,14 +3949,16 @@ mod tests {
     }
 
     #[test]
-    fn shared_snapshot_syncs_manual_prices_tab_configuration_when_supported() {
+    fn shared_snapshot_ignores_manual_prices_tab_configuration() {
         let mut app = test_app();
-        let root = temp_test_dir("manual-pricing-shared-snapshot");
+        let root = temp_test_dir("manual-pricing-shared-snapshot-ignore");
         fs::create_dir_all(&root).expect("create temp root");
         let path = root.join("manual_pricing.ron");
         write_manual_pricing_workspace(&path, &ManualPricingWorkspace::default())
             .expect("seed workspace");
         app.manual_pricing_path = path.to_string_lossy().to_string();
+        app.manual_pricing.a3_color_rest_input = "1.10".to_string();
+        app.manual_pricing.modifiers[0].name_input = "local".to_string();
 
         let mut pricing = PricingSettings::default();
         pricing.color_input = "0.85".to_string();
@@ -3987,16 +3990,10 @@ mod tests {
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
         });
-        app.persist_manual_pricing_if_dirty();
 
         assert_eq!(app.pricing.color_input, "0.85");
-        assert_eq!(app.manual_pricing.a3_color_rest_input, "1.40");
-        assert_eq!(app.manual_pricing.modifiers[0].name_input, "linen");
-
-        let persisted_workspace = read_manual_pricing_workspace(&path);
-        assert_eq!(persisted_workspace.recording_pricing.color_input, "0.85");
-        assert_eq!(persisted_workspace.settings.a3_color_rest_input, "1.40");
-        assert_eq!(persisted_workspace.settings.modifiers[0].name_input, "linen");
+        assert_eq!(app.manual_pricing.a3_color_rest_input, "1.10");
+        assert_eq!(app.manual_pricing.modifiers[0].name_input, "local");
 
         let _ = fs::remove_dir_all(root);
     }
@@ -4293,8 +4290,15 @@ mod tests {
 
         let mut existing_workspace = ManualPricingWorkspace::default();
         existing_workspace.settings.a0_input = "10".to_string();
+        existing_workspace.bills = vec![ManualPricingBill {
+            id: "local-bill".to_string(),
+            subject: "Local Bill".to_string(),
+            pricing: ManualPricingSettings::default(),
+            updated_at_millis: 100,
+        }];
         write_manual_pricing_workspace(&path, &existing_workspace).expect("seed workspace");
         app.manual_pricing_path = path.to_string_lossy().to_string();
+        app.load_manual_pricing_from_path();
 
         let mut pricing = PricingSettings::default();
         pricing.color_input = "0.75".to_string();
@@ -4312,8 +4316,8 @@ mod tests {
                 ..ManualPricingSettings::default()
             },
             bills: vec![ManualPricingBill {
-                id: "shared-bill".to_string(),
-                subject: "Shared Bill".to_string(),
+                id: "remote-bill".to_string(),
+                subject: "Remote Bill".to_string(),
                 pricing: ManualPricingSettings {
                     discount_input: "5".to_string(),
                     ..ManualPricingSettings::default()
@@ -4341,7 +4345,7 @@ mod tests {
             ManualRoundingMode::FiveCents
         );
         assert_eq!(app.manual_bills.len(), 1);
-        assert_eq!(app.manual_bills[0].id, "shared-bill");
+        assert_eq!(app.manual_bills[0].id, "local-bill");
         let persisted_workspace = read_manual_pricing_workspace(&path);
         assert_eq!(persisted_workspace.settings.a0_input, "99");
         assert_eq!(
@@ -4353,7 +4357,7 @@ mod tests {
             persisted_workspace.settings.rounding_mode,
             ManualRoundingMode::FiveCents
         );
-        assert_eq!(persisted_workspace.bills, workspace.bills);
+        assert_eq!(persisted_workspace.bills, existing_workspace.bills);
         assert_eq!(
             read_manual_pricing_workspace(&manual_pricing_backup_path(&path, 1))
                 .settings
@@ -4365,9 +4369,9 @@ mod tests {
     }
 
     #[test]
-    fn apply_pricing_sync_merges_local_newer_bills_and_rebroadcasts_them() {
+    fn apply_pricing_sync_preserves_local_bills_and_snapshot_state() {
         let mut app = test_app();
-        let root = temp_test_dir("apply-pricing-sync-merge");
+        let root = temp_test_dir("apply-pricing-sync-preserve-bills");
         fs::create_dir_all(&root).expect("create temp root");
         let path = root.join("manual_pricing.ron");
         write_manual_pricing_workspace(&path, &ManualPricingWorkspace::default())
@@ -4389,7 +4393,10 @@ mod tests {
         ];
         app.last_shared_state = app.build_shared_state(9);
 
-        let incoming_workspace = ManualPricingWorkspace {
+        app.apply_pricing_sync(sync::PricingSyncPayload {
+            id: "sync-2".to_string(),
+            pricing: PricingSettings::default(),
+            workspace: ManualPricingWorkspace {
             recording_pricing: RecordingPricingSettings::default(),
             settings: ManualPricingSettings::default(),
             bills: vec![
@@ -4407,15 +4414,10 @@ mod tests {
                 },
             ],
             bill_tombstones: Vec::new(),
-        };
-
-        app.apply_pricing_sync(sync::PricingSyncPayload {
-            id: "sync-2".to_string(),
-            pricing: PricingSettings::default(),
-            workspace: incoming_workspace.clone(),
+        },
         });
 
-        assert_eq!(app.manual_bills.len(), 3);
+        assert_eq!(app.manual_bills.len(), 2);
         assert_eq!(
             app.manual_bills
                 .iter()
@@ -4424,10 +4426,10 @@ mod tests {
             Some("Local Newer")
         );
         assert!(app.manual_bills.iter().any(|bill| bill.id == "local-only"));
-        assert!(app.manual_bills.iter().any(|bill| bill.id == "remote-only"));
+        assert!(!app.manual_bills.iter().any(|bill| bill.id == "remote-only"));
 
         let persisted_workspace = read_manual_pricing_workspace(&path);
-        assert_eq!(persisted_workspace.bills.len(), 3);
+        assert_eq!(persisted_workspace.bills.len(), 2);
         assert_eq!(
             persisted_workspace
                 .bills
@@ -4438,20 +4440,50 @@ mod tests {
         );
 
         assert_eq!(app.last_shared_state.revision, 9);
-        assert_eq!(app.last_shared_state.manual_bills, incoming_workspace.bills);
+        assert_eq!(app.last_shared_state.manual_bills, app.manual_bills);
 
-        app.flush_shared_state();
+        let _ = fs::remove_dir_all(root);
+    }
 
-        assert_eq!(app.last_shared_state.revision, 10);
-        assert_eq!(app.last_shared_state.manual_bills.len(), 3);
+    #[test]
+    fn persist_manual_pricing_if_dirty_auto_syncs_prices_without_bills() {
+        let mut app = test_app();
+        let root = temp_test_dir("manual-pricing-auto-sync");
+        fs::create_dir_all(&root).expect("create temp root");
+        let path = root.join("manual_pricing.ron");
+        app.manual_pricing_path = path.to_string_lossy().to_string();
+        app.manual_pricing.a3_color_rest_input = "1.40".to_string();
+        app.manual_pricing.line_items[0].sides_input = "12".to_string();
+        app.manual_pricing.line_items[0].sync_sheets_from_sides();
+        app.manual_bills = vec![ManualPricingBill {
+            id: "saved-bill".to_string(),
+            subject: "Saved Bill".to_string(),
+            pricing: ManualPricingSettings::default(),
+            updated_at_millis: 10,
+        }];
+        app.manual_pricing_dirty = true;
+
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        app.sync_sender = Some(sender);
+
+        app.persist_manual_pricing_if_dirty();
+
+        let payload = match receiver.try_recv() {
+            Ok(SyncCommand::SyncPrices(payload)) => payload,
+            other => panic!("expected pricing sync payload, got {other:?}"),
+        };
+        assert_eq!(payload.workspace.settings.a3_color_rest_input, "1.40");
         assert_eq!(
-            app.last_shared_state
-                .manual_bills
-                .iter()
-                .find(|bill| bill.id == "shared-bill")
-                .map(|bill| bill.subject.as_str()),
-            Some("Local Newer")
+            payload.workspace.settings.line_items,
+            vec![ManualPricingLineItem::default()]
         );
+        assert!(payload.workspace.bills.is_empty());
+        assert!(payload.workspace.bill_tombstones.is_empty());
+        assert!(!app.manual_pricing_dirty);
+
+        let persisted_workspace = read_manual_pricing_workspace(&path);
+        assert_eq!(persisted_workspace.bills.len(), 1);
+        assert_eq!(persisted_workspace.bills[0].id, "saved-bill");
 
         let _ = fs::remove_dir_all(root);
     }
