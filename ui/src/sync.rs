@@ -54,6 +54,8 @@ pub(crate) struct SharedState {
     pub(crate) recording_sessions: Vec<RecordingSessionEntry>,
     pub(crate) pricing: PricingSettings,
     #[serde(default)]
+    pub(crate) manual_pricing_sync_supported: bool,
+    #[serde(default)]
     pub(crate) bill_sync_supported: bool,
     #[serde(default)]
     pub(crate) manual_bills: Vec<ManualPricingBill>,
@@ -69,6 +71,7 @@ impl Default for SharedState {
             poll_states: Vec::new(),
             recording_sessions: Vec::new(),
             pricing: PricingSettings::default(),
+            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),

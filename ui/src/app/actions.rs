@@ -38,6 +38,7 @@ fn parse_manual_pricing_contents(contents: &str) -> Result<ManualPricingWorkspac
             Ok(mut settings) => {
                 settings.normalize();
                 Ok(ManualPricingWorkspace {
+                    recording_pricing: RecordingPricingSettings::default(),
                     settings,
                     bills: Vec::new(),
                     bill_tombstones: Vec::new(),
@@ -555,7 +556,9 @@ impl PrintCountApp {
 
         match fs::read_to_string(&path) {
             Ok(contents) => match parse_manual_pricing_contents(&contents) {
-                Ok(workspace) => {
+                Ok(mut workspace) => {
+                    workspace.normalize();
+                    workspace.recording_pricing.apply_to_pricing(&mut self.pricing);
                     let mut settings = workspace.settings;
                     settings.reset_calculator_state();
                     self.manual_pricing = settings;
@@ -566,6 +569,7 @@ impl PrintCountApp {
                     self.normalize_manual_bills();
                     self.sync_selected_manual_bill();
                     self.manual_bills_dirty = true;
+                    self.manual_pricing_dirty = false;
                     self.manual_pricing_status =
                         Some(format!("Loaded manual pricing from {path}."));
                 }
@@ -581,15 +585,21 @@ impl PrintCountApp {
 
     fn synced_pricing_settings(&self) -> PricingSettings {
         let mut pricing = self.pricing.clone();
-        pricing.manual_pricing = self.manual_pricing.clone();
+        let mut manual_pricing = self.manual_pricing.clone();
+        manual_pricing.normalize();
+        manual_pricing.reset_calculator_state();
+        pricing.manual_pricing = manual_pricing;
         pricing
     }
 
     fn current_manual_pricing_workspace(&mut self) -> ManualPricingWorkspace {
         self.manual_pricing.normalize();
         self.normalize_manual_bills();
+        let mut settings = self.manual_pricing.clone();
+        settings.reset_calculator_state();
         ManualPricingWorkspace {
-            settings: self.manual_pricing.clone(),
+            recording_pricing: RecordingPricingSettings::from_pricing(&self.pricing),
+            settings,
             bills: self.manual_bills.clone(),
             bill_tombstones: self.manual_bill_tombstones.clone(),
         }
@@ -639,6 +649,26 @@ impl PrintCountApp {
             Err(error) => tracing::warn!(
                 target: targets::STORAGE,
                 "Failed to persist manual bill store: {}",
+                error
+            ),
+        }
+    }
+
+    fn persist_manual_pricing_if_dirty(&mut self) {
+        if !self.manual_pricing_dirty {
+            return;
+        }
+
+        let workspace = self.current_manual_pricing_workspace();
+        match self.persist_manual_pricing_workspace(&workspace) {
+            Ok(path) => {
+                self.last_manual_pricing_sync_id = manual_pricing_version_id(Path::new(&path))
+                    .or_else(|| Some(current_pricing_sync_id()));
+                self.manual_pricing_dirty = false;
+            }
+            Err(error) => tracing::warn!(
+                target: targets::STORAGE,
+                "Failed to persist manual pricing workspace: {}",
                 error
             ),
         }
@@ -765,6 +795,7 @@ impl PrintCountApp {
             Ok(path) => {
                 self.last_manual_pricing_sync_id = manual_pricing_version_id(Path::new(&path))
                     .or_else(|| Some(current_pricing_sync_id()));
+                self.manual_pricing_dirty = false;
                 self.manual_pricing_status = Some(format!("Saved manual pricing to {path}."));
             }
             Err(error) => {
@@ -860,12 +891,14 @@ impl PrintCountApp {
         self.last_manual_pricing_sync_id = Some(id);
         self.pricing = pricing;
         workspace.settings.reset_calculator_state();
+        self.pricing.manual_pricing = workspace.settings.clone();
         self.manual_pricing = workspace.settings.clone();
         self.manual_bills = merged_store.bills;
         self.manual_bill_tombstones = merged_store.bill_tombstones;
         self.normalize_manual_bills();
         self.sync_selected_manual_bill();
         self.manual_bills_dirty = true;
+        self.manual_pricing_dirty = false;
 
         self.manual_pricing_status =
             Some(match self.persist_manual_pricing_workspace(&workspace) {
@@ -2777,7 +2810,8 @@ impl PrintCountApp {
             printers: self.printers.clone(),
             poll_states,
             recording_sessions,
-            pricing: self.pricing.clone(),
+            pricing: self.synced_pricing_settings(),
+            manual_pricing_sync_supported: true,
             bill_sync_supported: true,
             manual_bills: self.manual_bills.clone(),
             manual_bill_tombstones: self.manual_bill_tombstones.clone(),
@@ -2797,6 +2831,7 @@ impl PrintCountApp {
             poll_states,
             recording_sessions,
             pricing,
+            manual_pricing_sync_supported,
             bill_sync_supported,
             manual_bills,
             manual_bill_tombstones,
@@ -2807,6 +2842,14 @@ impl PrintCountApp {
 
         self.printers = printers;
         self.pricing = pricing;
+        if manual_pricing_sync_supported {
+            let mut manual_pricing = self.pricing.manual_pricing.clone();
+            manual_pricing.normalize();
+            manual_pricing.reset_calculator_state();
+            self.pricing.manual_pricing = manual_pricing.clone();
+            self.manual_pricing = manual_pricing;
+            self.manual_pricing_dirty = true;
+        }
         if bill_sync_supported {
             self.manual_bills.extend(manual_bills);
             self.manual_bill_tombstones.extend(manual_bill_tombstones);
@@ -3300,6 +3343,7 @@ mod tests {
             ],
             recording_sessions: Vec::new(),
             pricing: app.pricing.clone(),
+            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
@@ -3336,6 +3380,7 @@ mod tests {
             ],
             recording_sessions: Vec::new(),
             pricing: app.pricing.clone(),
+            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
@@ -3376,6 +3421,7 @@ mod tests {
                 session: remote_session,
             }],
             pricing: app.pricing.clone(),
+            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
@@ -3440,6 +3486,7 @@ mod tests {
                 session: remote_session,
             }],
             pricing: app.pricing.clone(),
+            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
@@ -3486,6 +3533,7 @@ mod tests {
             }],
             recording_sessions: Vec::new(),
             pricing: app.pricing.clone(),
+            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
@@ -3551,6 +3599,7 @@ mod tests {
                 session: remote_session,
             }],
             pricing: app.pricing.clone(),
+            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
@@ -3638,6 +3687,7 @@ mod tests {
                 session: remote_session,
             }],
             pricing: app.pricing.clone(),
+            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
@@ -3703,6 +3753,7 @@ mod tests {
                 session: remote_session,
             }],
             pricing: app.pricing.clone(),
+            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
@@ -3746,6 +3797,7 @@ mod tests {
             }],
             recording_sessions: Vec::new(),
             pricing: app.pricing.clone(),
+            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
@@ -3793,6 +3845,7 @@ mod tests {
             poll_states: Vec::new(),
             recording_sessions: Vec::new(),
             pricing: app.pricing.clone(),
+            manual_pricing_sync_supported: false,
             bill_sync_supported: true,
             manual_bills: vec![ManualPricingBill {
                 id: "shared-bill".to_string(),
@@ -3878,6 +3931,7 @@ mod tests {
             poll_states: Vec::new(),
             recording_sessions: Vec::new(),
             pricing: app.pricing.clone(),
+            manual_pricing_sync_supported: false,
             bill_sync_supported: false,
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
@@ -3889,6 +3943,59 @@ mod tests {
     }
 
     #[test]
+    fn shared_snapshot_syncs_manual_prices_tab_configuration_when_supported() {
+        let mut app = test_app();
+        let root = temp_test_dir("manual-pricing-shared-snapshot");
+        fs::create_dir_all(&root).expect("create temp root");
+        let path = root.join("manual_pricing.ron");
+        write_manual_pricing_workspace(&path, &ManualPricingWorkspace::default())
+            .expect("seed workspace");
+        app.manual_pricing_path = path.to_string_lossy().to_string();
+
+        let mut pricing = PricingSettings::default();
+        pricing.color_input = "0.85".to_string();
+        pricing.manual_pricing.a3_color_rest_input = "1.40".to_string();
+        pricing.manual_pricing.modifiers = vec![ManualPaperModifier {
+            name_input: "linen".to_string(),
+            applies_a0: false,
+            a0_price_input: "0.00".to_string(),
+            applies_a1: false,
+            a1_price_input: "0.00".to_string(),
+            applies_a2: false,
+            a2_price_input: "0.00".to_string(),
+            applies_a3: true,
+            a3_price_input: "0.35".to_string(),
+            applies_a4: true,
+            a4_price_input: "0.20".to_string(),
+            ..ManualPaperModifier::default()
+        }];
+
+        app.apply_shared_state(sync::SharedState {
+            revision: 2,
+            printers: Vec::new(),
+            poll_states: Vec::new(),
+            recording_sessions: Vec::new(),
+            pricing,
+            manual_pricing_sync_supported: true,
+            bill_sync_supported: false,
+            manual_bills: Vec::new(),
+            manual_bill_tombstones: Vec::new(),
+        });
+        app.persist_manual_pricing_if_dirty();
+
+        assert_eq!(app.pricing.color_input, "0.85");
+        assert_eq!(app.manual_pricing.a3_color_rest_input, "1.40");
+        assert_eq!(app.manual_pricing.modifiers[0].name_input, "linen");
+
+        let persisted_workspace = read_manual_pricing_workspace(&path);
+        assert_eq!(persisted_workspace.recording_pricing.color_input, "0.85");
+        assert_eq!(persisted_workspace.settings.a3_color_rest_input, "1.40");
+        assert_eq!(persisted_workspace.settings.modifiers[0].name_input, "linen");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn load_manual_pricing_from_path_clears_main_calculator_preserving_prices_and_bills() {
         let mut app = test_app();
         let root = temp_test_dir("load-manual-pricing-reset");
@@ -3896,6 +4003,7 @@ mod tests {
         let path = root.join("manual_pricing.ron");
 
         let workspace = ManualPricingWorkspace {
+            recording_pricing: RecordingPricingSettings::default(),
             settings: ManualPricingSettings {
                 a0_input: "30".to_string(),
                 a3_input: "3.25".to_string(),
@@ -3961,6 +4069,28 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn current_manual_pricing_workspace_persists_recording_pricing_and_resets_calculator() {
+        let mut app = test_app();
+        app.pricing.bw_first_input = "0.30".to_string();
+        app.pricing.color_input = "0.75".to_string();
+        app.manual_pricing.a0_input = "30".to_string();
+        app.manual_pricing.discount_input = "12".to_string();
+        app.manual_pricing.line_items[0].sides_input = "7".to_string();
+        app.manual_pricing.line_items[0].sync_sheets_from_sides();
+
+        let workspace = app.current_manual_pricing_workspace();
+
+        assert_eq!(workspace.recording_pricing.bw_first_input, "0.30");
+        assert_eq!(workspace.recording_pricing.color_input, "0.75");
+        assert_eq!(workspace.settings.a0_input, "30");
+        assert_eq!(
+            workspace.settings.line_items,
+            vec![ManualPricingLineItem::default()]
+        );
+        assert!(workspace.settings.discount_input.is_empty());
     }
 
     #[test]
@@ -4063,6 +4193,7 @@ mod tests {
         let store_path = root.join("manual_bills.ron");
 
         let workspace = ManualPricingWorkspace {
+            recording_pricing: RecordingPricingSettings::default(),
             settings: ManualPricingSettings::default(),
             bills: vec![ManualPricingBill {
                 id: "saved-bill".to_string(),
@@ -4162,6 +4293,7 @@ mod tests {
         let mut pricing = PricingSettings::default();
         pricing.color_input = "0.75".to_string();
         let workspace = ManualPricingWorkspace {
+            recording_pricing: RecordingPricingSettings::default(),
             settings: ManualPricingSettings {
                 a0_input: "99".to_string(),
                 discount_input: "12".to_string(),
@@ -4252,6 +4384,7 @@ mod tests {
         app.last_shared_state = app.build_shared_state(9);
 
         let incoming_workspace = ManualPricingWorkspace {
+            recording_pricing: RecordingPricingSettings::default(),
             settings: ManualPricingSettings::default(),
             bills: vec![
                 ManualPricingBill {

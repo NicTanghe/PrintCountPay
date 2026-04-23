@@ -740,9 +740,53 @@ impl ManualBillStore {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct RecordingPricingSettings {
+    pub(crate) bw_first_input: String,
+    pub(crate) bw_next_input: String,
+    pub(crate) bw_rest_input: String,
+    pub(crate) color_input: String,
+    #[serde(rename = "round_to_half_euro", alias = "round_to_five_cents")]
+    pub(crate) round_to_five_cents: bool,
+}
+
+impl RecordingPricingSettings {
+    pub(crate) fn from_pricing(pricing: &PricingSettings) -> Self {
+        Self {
+            bw_first_input: pricing.bw_first_input.clone(),
+            bw_next_input: pricing.bw_next_input.clone(),
+            bw_rest_input: pricing.bw_rest_input.clone(),
+            color_input: pricing.color_input.clone(),
+            round_to_five_cents: pricing.round_to_five_cents,
+        }
+    }
+
+    pub(crate) fn apply_to_pricing(&self, pricing: &mut PricingSettings) {
+        pricing.bw_first_input = self.bw_first_input.clone();
+        pricing.bw_next_input = self.bw_next_input.clone();
+        pricing.bw_rest_input = self.bw_rest_input.clone();
+        pricing.color_input = self.color_input.clone();
+        pricing.round_to_five_cents = self.round_to_five_cents;
+    }
+}
+
+impl Default for RecordingPricingSettings {
+    fn default() -> Self {
+        Self {
+            bw_first_input: "0.25".to_string(),
+            bw_next_input: "0.10".to_string(),
+            bw_rest_input: "0.06".to_string(),
+            color_input: "0.50".to_string(),
+            round_to_five_cents: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ManualPricingWorkspace {
+    #[serde(default)]
+    pub(crate) recording_pricing: RecordingPricingSettings,
     #[serde(default)]
     pub(crate) settings: ManualPricingSettings,
     #[serde(default)]

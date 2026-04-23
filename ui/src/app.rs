@@ -149,6 +149,7 @@ pub struct PrintCountApp {
     manual_bills: Vec<ManualPricingBill>,
     manual_bill_tombstones: Vec<ManualPricingBillTombstone>,
     manual_bills_dirty: bool,
+    manual_pricing_dirty: bool,
     poll_states: HashMap<PrinterId, SnmpPollStatus>,
     poll_in_flight: HashSet<PrinterId>,
     poll_export_path: String,
@@ -276,6 +277,7 @@ impl PrintCountApp {
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
             manual_bills_dirty: false,
+            manual_pricing_dirty: false,
             poll_states,
             poll_in_flight: HashSet::new(),
             poll_export_path: display_path(&poll_export_file),
@@ -695,22 +697,27 @@ impl PrintCountApp {
             }
             Message::PricingBwFirstChanged(value) => {
                 self.pricing.bw_first_input = value;
+                self.manual_pricing_dirty = true;
                 Command::none()
             }
             Message::PricingBwNextChanged(value) => {
                 self.pricing.bw_next_input = value;
+                self.manual_pricing_dirty = true;
                 Command::none()
             }
             Message::PricingBwRestChanged(value) => {
                 self.pricing.bw_rest_input = value;
+                self.manual_pricing_dirty = true;
                 Command::none()
             }
             Message::PricingColorChanged(value) => {
                 self.pricing.color_input = value;
+                self.manual_pricing_dirty = true;
                 Command::none()
             }
             Message::PricingRoundChanged(value) => {
                 self.pricing.round_to_five_cents = value;
+                self.manual_pricing_dirty = true;
                 Command::none()
             }
             Message::SaveManualPricingAsBill => {
@@ -849,29 +856,35 @@ impl PrintCountApp {
             Message::ManualPricingBasePriceChanged(size, value) => {
                 self.active_manual_pricing_mut()
                     .set_size_price_input(size, value);
+                self.manual_pricing_dirty = true;
                 Command::none()
             }
             Message::ManualPricingBwTierChanged(size, tier, value) => {
                 self.active_manual_pricing_mut()
                     .set_bw_tier_input(size, tier, value);
+                self.manual_pricing_dirty = true;
                 Command::none()
             }
             Message::ManualPricingColorTierChanged(size, tier, value) => {
                 self.active_manual_pricing_mut()
                     .set_color_tier_input(size, tier, value);
+                self.manual_pricing_dirty = true;
                 Command::none()
             }
             Message::ManualPricingLaminatePriceChanged(size, value) => {
                 self.active_manual_pricing_mut()
                     .set_laminate_price_input(size, value);
+                self.manual_pricing_dirty = true;
                 Command::none()
             }
             Message::ManualPricingFoldingPriceChanged(value) => {
                 self.active_manual_pricing_mut().folding_input = value;
+                self.manual_pricing_dirty = true;
                 Command::none()
             }
             Message::ManualPricingBindingPriceChanged(value) => {
                 self.active_manual_pricing_mut().binding_input = value;
+                self.manual_pricing_dirty = true;
                 Command::none()
             }
             Message::ManualPricingModifierAdded => {
@@ -882,6 +895,7 @@ impl PrintCountApp {
                         line_item.modifier_index = Some(selected + 1);
                     }
                 }
+                self.manual_pricing_dirty = true;
                 Command::none()
             }
             Message::ManualPricingModifierRemoved(index) => {
@@ -909,17 +923,20 @@ impl PrintCountApp {
                 } else {
                     manual.modifiers.push(ManualPaperModifier::default());
                 }
+                self.manual_pricing_dirty = true;
                 Command::none()
             }
             Message::ManualPricingModifierNameChanged(index, value) => {
                 if let Some(modifier) = self.active_manual_pricing_mut().modifiers.get_mut(index) {
                     modifier.name_input = value;
+                    self.manual_pricing_dirty = true;
                 }
                 Command::none()
             }
             Message::ManualPricingModifierPriceChanged(index, size, value) => {
                 if let Some(modifier) = self.active_manual_pricing_mut().modifiers.get_mut(index) {
                     modifier.set_price_input(size, value);
+                    self.manual_pricing_dirty = true;
                 }
                 Command::none()
             }
@@ -934,6 +951,7 @@ impl PrintCountApp {
                             }
                         }
                     }
+                    self.manual_pricing_dirty = true;
                 }
                 Command::none()
             }
@@ -975,6 +993,7 @@ impl PrintCountApp {
             }
         };
 
+        self.persist_manual_pricing_if_dirty();
         self.persist_manual_bill_store_if_dirty();
         self.flush_shared_state();
         command
