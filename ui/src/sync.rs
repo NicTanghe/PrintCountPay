@@ -1,7 +1,11 @@
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use iced::Subscription;
 use iced::futures::SinkExt;
@@ -14,7 +18,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::time::{MissedTickBehavior, sleep, timeout};
+use tokio::task::JoinHandle;
+use tokio::time::{Instant, MissedTickBehavior, sleep, timeout};
 
 use crate::app::{
     ManualPricingBill, ManualPricingBillTombstone, ManualPricingSettings, ManualPricingWorkspace,
@@ -32,7 +37,11 @@ const DISCOVERY_WAIT: Duration = Duration::from_millis(450);
 const ROLE_RETRY_DELAY: Duration = Duration::from_secs(1);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const MASTER_STALE_TIMEOUT: Duration = Duration::from_secs(15);
+const MASTER_PEER_CHECK_INTERVAL: Duration = Duration::from_secs(2);
 const SYNC_TARGET: &str = "sync";
+const NODE_ID_PREFIX: &str = ";node=";
+
+static NEXT_NODE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct PollStateEntry {
@@ -137,12 +146,19 @@ enum MasterEvent {
     Accepted(TcpStream, SocketAddr),
     ClientMessage(u64, WireMessage),
     ClientClosed(u64),
+    PeerDiscovered(DiscoveryCandidate),
 }
 
 #[derive(Debug)]
 enum ClientEvent {
     Message(WireMessage),
     Disconnected(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DiscoveryCandidate {
+    addr: SocketAddr,
+    node_id: Option<u64>,
 }
 
 pub(crate) fn subscription() -> Subscription<SyncEvent> {
@@ -152,6 +168,7 @@ pub(crate) fn subscription() -> Subscription<SyncEvent> {
 fn sync_worker() -> impl iced::futures::Stream<Item = SyncEvent> {
     stream::channel(100, async |mut output| {
         let (command_tx, mut command_rx) = mpsc::unbounded_channel::<SyncCommand>();
+        let node_id = generate_node_id();
         let mut latest_snapshot = None::<SharedState>;
         let mut latest_pricing_sync = None::<PricingSyncPayload>;
         let mut latest_statistics_sync = None::<StatisticsSyncPayload>;
@@ -177,11 +194,11 @@ fn sync_worker() -> impl iced::futures::Stream<Item = SyncEvent> {
                 break;
             }
 
-            match discover_master().await {
-                Ok(Some(master_addr)) => {
-                    tracing::info!(target: SYNC_TARGET, "Discovered sync host at {master_addr}");
+            match discover_master(Some(node_id)).await {
+                Ok(Some(master)) => {
+                    tracing::info!(target: SYNC_TARGET, "Discovered sync host at {}", master.addr);
                     if run_as_client(
-                        master_addr,
+                        master.addr,
                         &mut output,
                         &mut command_rx,
                         &mut latest_snapshot,
@@ -205,6 +222,7 @@ fn sync_worker() -> impl iced::futures::Stream<Item = SyncEvent> {
                         );
                         if run_as_master(
                             master,
+                            node_id,
                             &mut output,
                             &mut command_rx,
                             &mut latest_snapshot,
@@ -242,6 +260,7 @@ fn sync_worker() -> impl iced::futures::Stream<Item = SyncEvent> {
 
 async fn run_as_master(
     sockets: MasterSockets,
+    node_id: u64,
     output: &mut (impl iced::futures::Sink<SyncEvent> + Unpin),
     command_rx: &mut mpsc::UnboundedReceiver<SyncCommand>,
     latest_snapshot: &mut Option<SharedState>,
@@ -262,8 +281,11 @@ async fn run_as_master(
 
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MasterEvent>();
     let MasterSockets { tcp, discovery } = sockets;
-    spawn_discovery_responder(discovery);
-    spawn_accept_loop(tcp, event_tx.clone());
+    let _background_tasks = MasterBackgroundTasks {
+        accept: spawn_accept_loop(tcp, event_tx.clone()),
+        discovery: spawn_discovery_responder(discovery, node_id),
+        peer_monitor: spawn_master_peer_monitor(node_id, event_tx.clone()),
+    };
 
     let mut next_client_id = 1u64;
     let mut clients = HashMap::<u64, UnboundedSender<WireMessage>>::new();
@@ -363,6 +385,16 @@ async fn run_as_master(
                     }
                     MasterEvent::ClientClosed(client_id) => {
                         clients.remove(&client_id);
+                    }
+                    MasterEvent::PeerDiscovered(candidate) => {
+                        if should_yield_to_master(node_id, &candidate) {
+                            tracing::info!(
+                                target: SYNC_TARGET,
+                                "Another sync host was found at {}; reconnecting as client",
+                                candidate.addr
+                            );
+                            return Err(());
+                        }
                     }
                 }
             }
@@ -489,7 +521,7 @@ async fn run_as_client(
     }
 }
 
-async fn discover_master() -> io::Result<Option<SocketAddr>> {
+async fn discover_master(local_node_id: Option<u64>) -> io::Result<Option<DiscoveryCandidate>> {
     let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).await?;
     socket.set_broadcast(true)?;
 
@@ -498,16 +530,29 @@ async fn discover_master() -> io::Result<Option<SocketAddr>> {
 
     for _ in 0..DISCOVERY_ATTEMPTS {
         socket.send_to(DISCOVERY_MAGIC.as_bytes(), target).await?;
+        let wait_until = Instant::now() + DISCOVERY_WAIT;
 
-        match timeout(DISCOVERY_WAIT, socket.recv_from(&mut buffer)).await {
-            Ok(Ok((len, addr))) => {
-                let reply = std::str::from_utf8(&buffer[..len]).unwrap_or_default();
-                if reply == DISCOVERY_RESPONSE {
-                    return Ok(Some(addr));
-                }
+        loop {
+            let Some(remaining) = wait_until.checked_duration_since(Instant::now()) else {
+                break;
+            };
+            if remaining.is_zero() {
+                break;
             }
-            Ok(Err(error)) => return Err(error),
-            Err(_) => {}
+
+            match timeout(remaining, socket.recv_from(&mut buffer)).await {
+                Ok(Ok((len, addr))) => {
+                    let reply = std::str::from_utf8(&buffer[..len]).unwrap_or_default();
+                    if let Some(node_id) = parse_discovery_response(reply) {
+                        if local_node_id.is_some() && local_node_id == node_id {
+                            continue;
+                        }
+                        return Ok(Some(DiscoveryCandidate { addr, node_id }));
+                    }
+                }
+                Ok(Err(error)) => return Err(error),
+                Err(_) => break,
+            }
         }
     }
 
@@ -528,7 +573,24 @@ impl MasterSockets {
     }
 }
 
-fn spawn_accept_loop(tcp: TcpListener, event_tx: mpsc::UnboundedSender<MasterEvent>) {
+struct MasterBackgroundTasks {
+    accept: JoinHandle<()>,
+    discovery: JoinHandle<()>,
+    peer_monitor: JoinHandle<()>,
+}
+
+impl Drop for MasterBackgroundTasks {
+    fn drop(&mut self) {
+        self.accept.abort();
+        self.discovery.abort();
+        self.peer_monitor.abort();
+    }
+}
+
+fn spawn_accept_loop(
+    tcp: TcpListener,
+    event_tx: mpsc::UnboundedSender<MasterEvent>,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         loop {
             match tcp.accept().await {
@@ -541,17 +603,18 @@ fn spawn_accept_loop(tcp: TcpListener, event_tx: mpsc::UnboundedSender<MasterEve
                 }
             }
         }
-    });
+    })
 }
 
-fn spawn_discovery_responder(discovery: UdpSocket) {
+fn spawn_discovery_responder(discovery: UdpSocket, node_id: u64) -> JoinHandle<()> {
     tokio::spawn(async move {
+        let response = discovery_response(node_id);
         let mut buffer = [0u8; 256];
         loop {
             match discovery.recv_from(&mut buffer).await {
                 Ok((len, addr)) => {
                     if &buffer[..len] == DISCOVERY_MAGIC.as_bytes() {
-                        let _ = discovery.send_to(DISCOVERY_RESPONSE.as_bytes(), addr).await;
+                        let _ = discovery.send_to(response.as_bytes(), addr).await;
                     }
                 }
                 Err(error) => {
@@ -564,7 +627,36 @@ fn spawn_discovery_responder(discovery: UdpSocket) {
                 }
             }
         }
-    });
+    })
+}
+
+fn spawn_master_peer_monitor(
+    node_id: u64,
+    event_tx: mpsc::UnboundedSender<MasterEvent>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            sleep(MASTER_PEER_CHECK_INTERVAL).await;
+            match discover_master(Some(node_id)).await {
+                Ok(Some(candidate)) => {
+                    if event_tx
+                        .send(MasterEvent::PeerDiscovered(candidate))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(
+                        target: SYNC_TARGET,
+                        "Sync host peer check failed: {}",
+                        error
+                    );
+                }
+            }
+        }
+    })
 }
 
 fn spawn_master_client(
@@ -637,6 +729,44 @@ fn broadcast(clients: &mut HashMap<u64, UnboundedSender<WireMessage>>, message: 
     for client_id in dead {
         clients.remove(&client_id);
     }
+}
+
+fn generate_node_id() -> u64 {
+    let sequence = NEXT_NODE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let stack_marker = &sequence as *const u64 as usize;
+    let mut hasher = DefaultHasher::new();
+    now.hash(&mut hasher);
+    std::process::id().hash(&mut hasher);
+    sequence.hash(&mut hasher);
+    stack_marker.hash(&mut hasher);
+    hasher.finish().max(1)
+}
+
+fn discovery_response(node_id: u64) -> String {
+    format!("{DISCOVERY_RESPONSE}{NODE_ID_PREFIX}{node_id:016x}")
+}
+
+fn parse_discovery_response(reply: &str) -> Option<Option<u64>> {
+    if reply == DISCOVERY_RESPONSE {
+        return Some(None);
+    }
+
+    let node_id = reply
+        .strip_prefix(DISCOVERY_RESPONSE)?
+        .strip_prefix(NODE_ID_PREFIX)
+        .and_then(|node_id| u64::from_str_radix(node_id, 16).ok())?;
+    Some(Some(node_id))
+}
+
+fn should_yield_to_master(local_node_id: u64, candidate: &DiscoveryCandidate) -> bool {
+    candidate
+        .node_id
+        .map(|remote_node_id| remote_node_id < local_node_id)
+        .unwrap_or(true)
 }
 
 fn incoming_snapshot(
@@ -737,6 +867,45 @@ mod tests {
             revision,
             ..SharedState::default()
         }
+    }
+
+    #[test]
+    fn discovery_response_round_trips_node_id() {
+        let response = discovery_response(0x1234_abcd);
+
+        assert_eq!(parse_discovery_response(&response), Some(Some(0x1234_abcd)));
+    }
+
+    #[test]
+    fn discovery_response_accepts_legacy_master_response() {
+        assert_eq!(parse_discovery_response(DISCOVERY_RESPONSE), Some(None));
+    }
+
+    #[test]
+    fn master_yields_to_lower_or_legacy_peer_only() {
+        let addr = SocketAddr::from(([192, 168, 1, 25], SYNC_DISCOVERY_PORT));
+
+        assert!(should_yield_to_master(
+            10,
+            &DiscoveryCandidate {
+                addr,
+                node_id: Some(5)
+            }
+        ));
+        assert!(!should_yield_to_master(
+            10,
+            &DiscoveryCandidate {
+                addr,
+                node_id: Some(15)
+            }
+        ));
+        assert!(should_yield_to_master(
+            10,
+            &DiscoveryCandidate {
+                addr,
+                node_id: None
+            }
+        ));
     }
 
     #[test]
