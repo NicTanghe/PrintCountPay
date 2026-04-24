@@ -172,6 +172,19 @@ pub(crate) fn manual_icon_button_style() -> impl Fn(&Theme, button::Status) -> b
     }
 }
 
+pub(crate) fn sync_role_indicator_style(accent: Color) -> impl Fn(&Theme) -> container::Style {
+    move |_theme| container::Style {
+        background: Some(Background::Color(Color::from_rgb8(0xe8, 0xeb, 0xf0))),
+        border: Border {
+            color: accent,
+            width: 1.0,
+            radius: 6.0.into(),
+        },
+        shadow: Shadow::default(),
+        ..container::Style::default()
+    }
+}
+
 pub(crate) fn manual_pricing_header_button_style(
     selected: bool,
 ) -> impl Fn(&Theme, button::Status) -> button::Style {

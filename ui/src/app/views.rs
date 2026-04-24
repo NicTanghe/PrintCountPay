@@ -27,6 +27,7 @@ impl PrintCountApp {
 
     fn window_controls_bar(&self) -> Element<'_, Message> {
         let right_controls = row![
+            self.sync_role_indicator(),
             self.advanced_toggle_button(),
             self.window_button("-", Message::MinimizeWindow),
             self.window_button("x", Message::CloseWindow),
@@ -37,6 +38,31 @@ impl PrintCountApp {
         row![horizontal_space(), right_controls]
             .spacing(8)
             .align_items(Alignment::Center)
+            .into()
+    }
+
+    fn sync_role_indicator(&self) -> Element<'_, Message> {
+        let (mark, label, color) = match self.sync_role {
+            SyncRole::Master => ("I", "Master", sampled_brand_color(CONTROLS_BRAND_SAMPLE)),
+            SyncRole::Client => ("II", "Client", Color::from_rgb8(0x48, 0x8d, 0x6b)),
+            SyncRole::Searching => ("...", "Sync", Color::from_rgb8(0x8c, 0x94, 0xa3)),
+        };
+
+        let content = row![
+            text(mark)
+                .size(12)
+                .style(theme::Text::Color(color)),
+            text(label)
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x2a, 0x2f, 0x39))),
+        ]
+        .spacing(6)
+        .align_items(Alignment::Center);
+
+        container(content)
+            .height(Length::Fixed(24.0))
+            .padding([4, 8])
+            .style(theme::Container::Custom(sync_role_indicator_style(color)))
             .into()
     }
 

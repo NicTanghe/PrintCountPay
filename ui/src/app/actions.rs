@@ -148,6 +148,41 @@ fn should_preserve_local_active_session(
     incoming_latest_at < local_start_at
 }
 
+fn prefer_local_when_both_recording(
+    local: &RecordingSession,
+    incoming: &RecordingSession,
+) -> Option<bool> {
+    if !local.active || !incoming.active {
+        return None;
+    }
+
+    match (
+        local.manual_state_changed_at_millis,
+        incoming.manual_state_changed_at_millis,
+    ) {
+        (local_changed_at, incoming_changed_at)
+            if local_changed_at != 0
+                && incoming_changed_at != 0
+                && local_changed_at != incoming_changed_at =>
+        {
+            return Some(local_changed_at < incoming_changed_at);
+        }
+        _ => {}
+    }
+
+    match (
+        local.start.as_ref().map(|snapshot| snapshot.received_at),
+        incoming.start.as_ref().map(|snapshot| snapshot.received_at),
+    ) {
+        (Some(local_start_at), Some(incoming_start_at)) if local_start_at != incoming_start_at => {
+            Some(local_start_at < incoming_start_at)
+        }
+        (Some(_), None) => Some(true),
+        (None, Some(_)) => Some(false),
+        _ => None,
+    }
+}
+
 fn prefer_local_recording_session(
     local: &RecordingSession,
     incoming: Option<&RecordingSession>,
@@ -155,6 +190,10 @@ fn prefer_local_recording_session(
     let Some(incoming) = incoming else {
         return local.has_state();
     };
+
+    if let Some(prefer_local) = prefer_local_when_both_recording(local, incoming) {
+        return prefer_local;
+    }
 
     let local_manual_state_changed_at = local.manual_state_changed_at_millis;
     let incoming_manual_state_changed_at = incoming.manual_state_changed_at_millis;
@@ -2740,6 +2779,7 @@ impl PrintCountApp {
             }
             SyncEvent::SnapshotReceived(snapshot) => {
                 if snapshot.revision < self.last_shared_state.revision {
+                    self.send_shared_state(self.last_shared_state.clone());
                     return Command::none();
                 }
                 self.apply_shared_state(snapshot);
@@ -3709,6 +3749,70 @@ mod tests {
             applied.end.as_ref().map(|snapshot| snapshot.received_at),
             Some(200)
         );
+    }
+
+    #[test]
+    fn apply_shared_state_keeps_earlier_active_recording_when_local_start_is_later() {
+        let mut app = test_app();
+        let record = printer_record(PrinterStatus::Online, Some(123));
+        let printer_id = record.id.clone();
+        app.replace_printers(vec![record.clone()]);
+
+        let mut local_session = RecordingSession::default();
+        local_session.active = true;
+        local_session.start = Some(RecordingSnapshot {
+            received_at: 200,
+            bw_printer: Some(120),
+            bw_copier: None,
+            color_printer: None,
+            color_copier: None,
+        });
+        local_session.manual_state_changed_at_millis = 2_000;
+        local_session.updated_at_millis = 2_000;
+        app.recording_sessions
+            .insert(printer_id.clone(), local_session);
+        app.last_shared_state = app.build_shared_state(2);
+
+        let mut remote_session = RecordingSession::default();
+        remote_session.active = true;
+        remote_session.start = Some(RecordingSnapshot {
+            received_at: 100,
+            bw_printer: Some(100),
+            bw_copier: None,
+            color_printer: None,
+            color_copier: None,
+        });
+        remote_session.manual_state_changed_at_millis = 1_000;
+        remote_session.updated_at_millis = 1_000;
+
+        app.apply_shared_state(sync::SharedState {
+            revision: 3,
+            printers: vec![record],
+            poll_states: vec![sync::PollStateEntry {
+                printer_id: printer_id.clone(),
+                state: SnmpPollStatus::Idle,
+            }],
+            recording_sessions: vec![sync::RecordingSessionEntry {
+                printer_id: printer_id.clone(),
+                session: remote_session,
+            }],
+            pricing: app.pricing.clone(),
+            bill_sync_supported: false,
+            manual_pricing_settings: None,
+            manual_bills: Vec::new(),
+            manual_bill_tombstones: Vec::new(),
+        });
+
+        let applied = app
+            .recording_sessions
+            .get(&printer_id)
+            .expect("recording session should exist");
+        assert!(applied.active);
+        assert_eq!(
+            applied.start.as_ref().map(|snapshot| snapshot.received_at),
+            Some(100)
+        );
+        assert_eq!(applied.manual_state_changed_at_millis, 1_000);
     }
 
     #[test]
