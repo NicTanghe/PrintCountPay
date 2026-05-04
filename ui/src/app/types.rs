@@ -70,6 +70,10 @@ pub enum ManualPricingTab {
     Finishers,
 }
 
+fn default_manual_booklet_copies_input() -> String {
+    "1".to_string()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ManualPrintSize {
     A0,
@@ -268,6 +272,70 @@ impl Default for ManualFinisherLineItem {
     }
 }
 
+fn normalize_manual_line_items(line_items: &mut Vec<ManualPricingLineItem>, modifier_count: usize) {
+    if line_items.is_empty() {
+        line_items.push(ManualPricingLineItem::default());
+    }
+
+    for line_item in line_items {
+        if line_item
+            .modifier_index
+            .is_some_and(|index| index >= modifier_count)
+        {
+            line_item.modifier_index = None;
+        }
+        line_item.sync_sheets_from_sides();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManualBooklet {
+    #[serde(default)]
+    pub(crate) name_input: String,
+    #[serde(default = "default_manual_booklet_copies_input")]
+    pub(crate) copies_input: String,
+    #[serde(default)]
+    pub(crate) line_items: Vec<ManualPricingLineItem>,
+    #[serde(default)]
+    pub(crate) finisher_items: Vec<ManualFinisherLineItem>,
+}
+
+impl ManualBooklet {
+    pub(crate) fn named(name: impl Into<String>) -> Self {
+        Self {
+            name_input: name.into(),
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn display_name(&self, index: usize) -> String {
+        let name = self.name_input.trim();
+        if name.is_empty() {
+            format!("Booklet {}", index + 1)
+        } else {
+            name.to_string()
+        }
+    }
+
+    pub(crate) fn normalize(&mut self, modifier_count: usize) {
+        if self.copies_input.trim().is_empty() {
+            self.copies_input = default_manual_booklet_copies_input();
+        }
+        normalize_manual_line_items(&mut self.line_items, modifier_count);
+    }
+}
+
+impl Default for ManualBooklet {
+    fn default() -> Self {
+        Self {
+            name_input: String::new(),
+            copies_input: default_manual_booklet_copies_input(),
+            line_items: vec![ManualPricingLineItem::default()],
+            finisher_items: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManualPaperModifier {
     pub(crate) name_input: String,
@@ -432,6 +500,12 @@ pub struct ManualPricingSettings {
     #[serde(default)]
     pub(crate) finisher_items: Vec<ManualFinisherLineItem>,
     #[serde(default)]
+    pub(crate) booklets: Vec<ManualBooklet>,
+    #[serde(default, skip_serializing)]
+    pub(crate) booklet_enabled: bool,
+    #[serde(default = "default_manual_booklet_copies_input", skip_serializing)]
+    pub(crate) booklet_copies_input: String,
+    #[serde(default)]
     pub(crate) cutting_enabled: bool,
     #[serde(default)]
     pub(crate) discount_input: String,
@@ -543,6 +617,9 @@ impl ManualPricingSettings {
     pub(crate) fn reset_calculator_state(&mut self) {
         self.line_items = vec![ManualPricingLineItem::default()];
         self.finisher_items.clear();
+        self.booklets.clear();
+        self.booklet_enabled = false;
+        self.booklet_copies_input = default_manual_booklet_copies_input();
         self.cutting_enabled = false;
         self.discount_input.clear();
         self.rounding_mode = ManualRoundingMode::FiveCents;
@@ -552,10 +629,6 @@ impl ManualPricingSettings {
         if self.modifiers.is_empty() {
             self.modifiers = default_manual_paper_modifiers();
         }
-        if self.line_items.is_empty() {
-            self.line_items = vec![ManualPricingLineItem::default()];
-        }
-
         for modifier in &mut self.modifiers {
             if !modifier.legacy_price_input.trim().is_empty() {
                 for size in ManualPrintSize::ALL {
@@ -592,15 +665,67 @@ impl ManualPricingSettings {
             }
         }
 
-        for line_item in &mut self.line_items {
-            if line_item
-                .modifier_index
-                .is_some_and(|index| index >= self.modifiers.len())
-            {
-                line_item.modifier_index = None;
-            }
-            line_item.sync_sheets_from_sides();
+        if self.booklet_enabled {
+            let name = format!("Booklet {}", self.booklets.len() + 1);
+            self.booklets.push(ManualBooklet {
+                name_input: name,
+                copies_input: self.booklet_copies_input.clone(),
+                line_items: self.line_items.clone(),
+                finisher_items: self.finisher_items.clone(),
+            });
+            self.line_items = vec![ManualPricingLineItem::default()];
+            self.finisher_items.clear();
+            self.booklet_enabled = false;
+            self.booklet_copies_input = default_manual_booklet_copies_input();
         }
+
+        normalize_manual_line_items(&mut self.line_items, self.modifiers.len());
+        for booklet in &mut self.booklets {
+            booklet.normalize(self.modifiers.len());
+        }
+    }
+
+    pub(crate) fn line_items(&self, booklet_index: Option<usize>) -> &Vec<ManualPricingLineItem> {
+        booklet_index
+            .and_then(|index| self.booklets.get(index))
+            .map(|booklet| &booklet.line_items)
+            .unwrap_or(&self.line_items)
+    }
+
+    pub(crate) fn line_items_mut(
+        &mut self,
+        booklet_index: Option<usize>,
+    ) -> &mut Vec<ManualPricingLineItem> {
+        if let Some(index) = booklet_index
+            && let Some(booklet) = self.booklets.get_mut(index)
+        {
+            return &mut booklet.line_items;
+        }
+
+        &mut self.line_items
+    }
+
+    pub(crate) fn finisher_items(
+        &self,
+        booklet_index: Option<usize>,
+    ) -> &Vec<ManualFinisherLineItem> {
+        booklet_index
+            .and_then(|index| self.booklets.get(index))
+            .map(|booklet| &booklet.finisher_items)
+            .unwrap_or(&self.finisher_items)
+    }
+
+    pub(crate) fn finisher_items_mut(
+        &mut self,
+        booklet_index: Option<usize>,
+    ) -> &mut Vec<ManualFinisherLineItem> {
+        if let Some(index) = booklet_index
+            && let Some(booklet) = self.booklets.get_mut(index)
+        {
+            return &mut booklet.finisher_items;
+        }
+
+        &mut self.finisher_items
     }
 }
 
@@ -633,6 +758,9 @@ impl Default for ManualPricingSettings {
             modifiers: default_manual_paper_modifiers(),
             line_items: vec![ManualPricingLineItem::default()],
             finisher_items: Vec::new(),
+            booklets: Vec::new(),
+            booklet_enabled: false,
+            booklet_copies_input: default_manual_booklet_copies_input(),
             cutting_enabled: false,
             discount_input: String::new(),
             rounding_mode: ManualRoundingMode::FiveCents,
@@ -921,6 +1049,11 @@ pub(crate) enum Message {
     ManualPricingFinisherTypeChanged(usize, ManualFinisherType),
     ManualPricingFinisherSizeChanged(usize, ManualLaminateSize),
     ManualPricingFinisherAmountChanged(usize, String),
+    SelectManualBookletTab(Option<usize>),
+    ManualPricingBookletAdded,
+    ManualPricingBookletRemoved(usize),
+    ManualPricingBookletNameChanged(usize, String),
+    ManualPricingBookletCopiesChanged(usize, String),
     ManualPricingBasePriceChanged(ManualPrintSize, String),
     ManualPricingBwTierChanged(ManualPrintSize, ManualBwTier, String),
     ManualPricingColorTierChanged(ManualPrintSize, ManualColorTier, String),
@@ -1275,6 +1408,9 @@ mod tests {
             default_settings.line_items,
             vec![ManualPricingLineItem::default()]
         );
+        assert!(default_settings.booklets.is_empty());
+        assert!(!default_settings.booklet_enabled);
+        assert_eq!(default_settings.booklet_copies_input, "1");
     }
 
     #[test]
@@ -1314,6 +1450,9 @@ mod tests {
                 laminate_size: ManualLaminateSize::A4,
                 amount_input: "3".to_string(),
             }],
+            booklet_enabled: true,
+            booklet_copies_input: "25".to_string(),
+            booklets: vec![ManualBooklet::named("Program")],
             cutting_enabled: true,
             discount_input: "12".to_string(),
             rounding_mode: ManualRoundingMode::HalfEuro,
@@ -1328,6 +1467,9 @@ mod tests {
         assert_eq!(settings.modifiers, modifiers);
         assert_eq!(settings.line_items, vec![ManualPricingLineItem::default()]);
         assert!(settings.finisher_items.is_empty());
+        assert!(settings.booklets.is_empty());
+        assert!(!settings.booklet_enabled);
+        assert_eq!(settings.booklet_copies_input, "1");
         assert!(!settings.cutting_enabled);
         assert!(settings.discount_input.is_empty());
         assert_eq!(settings.rounding_mode, ManualRoundingMode::FiveCents);

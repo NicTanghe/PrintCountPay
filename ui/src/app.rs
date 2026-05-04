@@ -35,7 +35,7 @@ mod styles;
 mod types;
 
 pub use types::{
-    DiscoveryOutcome, DiscoveryProbeResult, Flags, ManualBwTier, ManualColorTier,
+    DiscoveryOutcome, DiscoveryProbeResult, Flags, ManualBooklet, ManualBwTier, ManualColorTier,
     ManualFinisherLineItem, ManualFinisherType, ManualLaminateSize, ManualModifierChoice,
     ManualPaperModifier, ManualPricingBill, ManualPricingBillTombstone, ManualPricingLineItem,
     ManualPricingSettings, ManualPricingTab, ManualPrintMode, ManualPrintSize, ManualRoundingMode,
@@ -144,6 +144,7 @@ pub struct PrintCountApp {
     statistics_axis_inputs_by_series: HashMap<String, StatisticsSeriesAxisInputs>,
     manual_pricing_selected: bool,
     selected_manual_bill_id: Option<String>,
+    selected_manual_booklet_index: Option<usize>,
     manual_pricing_tab: ManualPricingTab,
     manual_pricing: ManualPricingSettings,
     manual_bills: Vec<ManualPricingBill>,
@@ -272,6 +273,7 @@ impl PrintCountApp {
             statistics_axis_inputs_by_series: HashMap::new(),
             manual_pricing_selected: false,
             selected_manual_bill_id: None,
+            selected_manual_booklet_index: None,
             manual_pricing_tab: ManualPricingTab::Calculator,
             manual_pricing: ManualPricingSettings::default(),
             manual_bills: Vec::new(),
@@ -440,12 +442,14 @@ impl PrintCountApp {
                 self.active_tab = Tab::Printers;
                 self.manual_pricing_selected = true;
                 self.selected_manual_bill_id = None;
+                self.selected_manual_booklet_index = None;
                 Command::none()
             }
             Message::SelectManualPricingBill(bill_id) => {
                 self.active_tab = Tab::Printers;
                 self.manual_pricing_selected = true;
                 self.selected_manual_bill_id = Some(bill_id);
+                self.selected_manual_booklet_index = None;
                 Command::none()
             }
             Message::SelectManualPricingTab(tab) => {
@@ -462,6 +466,7 @@ impl PrintCountApp {
             Message::SelectPrinter(printer_id) => {
                 self.manual_pricing_selected = false;
                 self.selected_manual_bill_id = None;
+                self.selected_manual_booklet_index = None;
                 self.selected_printer = Some(printer_id.clone());
                 self.apply_profile_for_printer(&printer_id, None);
                 self.poll_selected_printer()
@@ -739,28 +744,28 @@ impl PrintCountApp {
                 Command::none()
             }
             Message::ManualPricingLineAdded => {
-                self.active_manual_pricing_mut()
-                    .line_items
+                self.active_manual_line_items_mut()
                     .push(ManualPricingLineItem::default());
                 Command::none()
             }
             Message::ManualPricingLineRemoved(index) => {
-                let manual = self.active_manual_pricing_mut();
-                if manual.line_items.len() > 1 {
-                    if index < manual.line_items.len() {
-                        manual.line_items.remove(index);
+                let line_items = self.active_manual_line_items_mut();
+                if line_items.len() > 1 {
+                    if index < line_items.len() {
+                        line_items.remove(index);
                     }
-                } else if let Some(line_item) = manual.line_items.first_mut() {
+                } else if let Some(line_item) = line_items.first_mut() {
                     *line_item = ManualPricingLineItem::default();
                 } else {
-                    manual.line_items.push(ManualPricingLineItem::default());
+                    line_items.push(ManualPricingLineItem::default());
                 }
                 Command::none()
             }
             Message::ManualPricingLineSizeChanged(index, size) => {
+                let booklet_index = self.active_manual_booklet_index();
                 let clear_modifier = self
                     .active_manual_pricing()
-                    .line_items
+                    .line_items(booklet_index)
                     .get(index)
                     .and_then(|line_item| line_item.modifier_index)
                     .is_some_and(|modifier_index| {
@@ -772,7 +777,7 @@ impl PrintCountApp {
                     });
 
                 let manual = self.active_manual_pricing_mut();
-                if let Some(line_item) = manual.line_items.get_mut(index) {
+                if let Some(line_item) = manual.line_items_mut(booklet_index).get_mut(index) {
                     line_item.size = size;
                     if clear_modifier {
                         line_item.modifier_index = None;
@@ -781,75 +786,105 @@ impl PrintCountApp {
                 Command::none()
             }
             Message::ManualPricingLinePrintModeChanged(index, print_mode) => {
-                if let Some(line_item) = self.active_manual_pricing_mut().line_items.get_mut(index)
-                {
+                if let Some(line_item) = self.active_manual_line_items_mut().get_mut(index) {
                     line_item.print_mode = print_mode;
                 }
                 Command::none()
             }
             Message::ManualPricingLineModifierChanged(index, modifier_index) => {
-                if let Some(line_item) = self.active_manual_pricing_mut().line_items.get_mut(index)
-                {
+                if let Some(line_item) = self.active_manual_line_items_mut().get_mut(index) {
                     line_item.modifier_index = modifier_index;
                 }
                 Command::none()
             }
             Message::ManualPricingLineSidesChanged(index, value) => {
-                if let Some(line_item) = self.active_manual_pricing_mut().line_items.get_mut(index)
-                {
+                if let Some(line_item) = self.active_manual_line_items_mut().get_mut(index) {
                     line_item.sides_input = value;
                     line_item.sync_sheets_from_sides();
                 }
                 Command::none()
             }
             Message::ManualPricingLineDoubleSidedChanged(index, value) => {
-                if let Some(line_item) = self.active_manual_pricing_mut().line_items.get_mut(index)
-                {
+                if let Some(line_item) = self.active_manual_line_items_mut().get_mut(index) {
                     line_item.double_sided = value;
                     line_item.sync_sheets_from_sides();
                 }
                 Command::none()
             }
             Message::ManualPricingFinisherAdded => {
-                self.active_manual_pricing_mut()
-                    .finisher_items
+                self.active_manual_finisher_items_mut()
                     .push(Default::default());
                 Command::none()
             }
             Message::ManualPricingFinisherRemoved(index) => {
-                let manual = self.active_manual_pricing_mut();
-                if index < manual.finisher_items.len() {
-                    manual.finisher_items.remove(index);
+                let finisher_items = self.active_manual_finisher_items_mut();
+                if index < finisher_items.len() {
+                    finisher_items.remove(index);
                 }
                 Command::none()
             }
             Message::ManualPricingFinisherTypeChanged(index, finisher_type) => {
-                if let Some(finisher_item) = self
-                    .active_manual_pricing_mut()
-                    .finisher_items
-                    .get_mut(index)
+                if let Some(finisher_item) = self.active_manual_finisher_items_mut().get_mut(index)
                 {
                     finisher_item.finisher_type = finisher_type;
                 }
                 Command::none()
             }
             Message::ManualPricingFinisherSizeChanged(index, laminate_size) => {
-                if let Some(finisher_item) = self
-                    .active_manual_pricing_mut()
-                    .finisher_items
-                    .get_mut(index)
+                if let Some(finisher_item) = self.active_manual_finisher_items_mut().get_mut(index)
                 {
                     finisher_item.laminate_size = laminate_size;
                 }
                 Command::none()
             }
             Message::ManualPricingFinisherAmountChanged(index, value) => {
-                if let Some(finisher_item) = self
-                    .active_manual_pricing_mut()
-                    .finisher_items
-                    .get_mut(index)
+                if let Some(finisher_item) = self.active_manual_finisher_items_mut().get_mut(index)
                 {
                     finisher_item.amount_input = value;
+                }
+                Command::none()
+            }
+            Message::SelectManualBookletTab(index) => {
+                self.selected_manual_booklet_index = index
+                    .filter(|index| self.active_manual_pricing().booklets.get(*index).is_some());
+                Command::none()
+            }
+            Message::ManualPricingBookletAdded => {
+                let new_index = {
+                    let manual = self.active_manual_pricing_mut();
+                    let index = manual.booklets.len();
+                    manual
+                        .booklets
+                        .push(ManualBooklet::named(format!("Booklet {}", index + 1)));
+                    index
+                };
+                self.selected_manual_booklet_index = Some(new_index);
+                Command::none()
+            }
+            Message::ManualPricingBookletRemoved(index) => {
+                let remaining_booklets = {
+                    let manual = self.active_manual_pricing_mut();
+                    if index < manual.booklets.len() {
+                        manual.booklets.remove(index);
+                    }
+                    manual.booklets.len()
+                };
+                self.selected_manual_booklet_index = if remaining_booklets == 0 {
+                    None
+                } else {
+                    Some(index.saturating_sub(1).min(remaining_booklets - 1))
+                };
+                Command::none()
+            }
+            Message::ManualPricingBookletNameChanged(index, value) => {
+                if let Some(booklet) = self.active_manual_pricing_mut().booklets.get_mut(index) {
+                    booklet.name_input = value;
+                }
+                Command::none()
+            }
+            Message::ManualPricingBookletCopiesChanged(index, value) => {
+                if let Some(booklet) = self.active_manual_pricing_mut().booklets.get_mut(index) {
+                    booklet.copies_input = value;
                 }
                 Command::none()
             }
@@ -895,6 +930,13 @@ impl PrintCountApp {
                         line_item.modifier_index = Some(selected + 1);
                     }
                 }
+                for booklet in &mut manual.booklets {
+                    for line_item in &mut booklet.line_items {
+                        if let Some(selected) = line_item.modifier_index {
+                            line_item.modifier_index = Some(selected + 1);
+                        }
+                    }
+                }
                 self.manual_pricing_dirty = true;
                 Command::none()
             }
@@ -914,11 +956,29 @@ impl PrintCountApp {
                                 _ => {}
                             }
                         }
+                        for booklet in &mut manual.booklets {
+                            for line_item in &mut booklet.line_items {
+                                match line_item.modifier_index {
+                                    Some(selected) if selected == index => {
+                                        line_item.modifier_index = None
+                                    }
+                                    Some(selected) if selected > index => {
+                                        line_item.modifier_index = Some(selected - 1);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
                     }
                 } else if let Some(modifier) = manual.modifiers.first_mut() {
                     *modifier = ManualPaperModifier::default();
                     for line_item in &mut manual.line_items {
                         line_item.modifier_index = None;
+                    }
+                    for booklet in &mut manual.booklets {
+                        for line_item in &mut booklet.line_items {
+                            line_item.modifier_index = None;
+                        }
                     }
                 } else {
                     manual.modifiers.push(ManualPaperModifier::default());
@@ -948,6 +1008,14 @@ impl PrintCountApp {
                         for line_item in &mut manual.line_items {
                             if line_item.size == size && line_item.modifier_index == Some(index) {
                                 line_item.modifier_index = None;
+                            }
+                        }
+                        for booklet in &mut manual.booklets {
+                            for line_item in &mut booklet.line_items {
+                                if line_item.size == size && line_item.modifier_index == Some(index)
+                                {
+                                    line_item.modifier_index = None;
+                                }
                             }
                         }
                     }

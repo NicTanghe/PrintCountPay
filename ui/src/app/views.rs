@@ -940,6 +940,45 @@ impl PrintCountApp {
             .into()
     }
 
+    fn manual_booklet_tabs_view(
+        &self,
+        manual: &ManualPricingSettings,
+        active_booklet_index: Option<usize>,
+    ) -> Element<'_, Message> {
+        let mut tabs = row![
+            button(text("Order").size(12))
+                .padding([4, 10])
+                .style(theme::Button::custom(firefox_tab_style(
+                    active_booklet_index.is_none(),
+                )))
+                .on_press(Message::SelectManualBookletTab(None))
+        ]
+        .spacing(4)
+        .align_items(Alignment::Center);
+
+        for (index, booklet) in manual.booklets.iter().enumerate() {
+            let label = booklet.display_name(index);
+            tabs = tabs.push(
+                button(text(label).size(12))
+                    .padding([4, 10])
+                    .style(theme::Button::custom(firefox_tab_style(
+                        active_booklet_index == Some(index),
+                    )))
+                    .on_press(Message::SelectManualBookletTab(Some(index))),
+            );
+        }
+
+        tabs = tabs.push(
+            button("New booklet")
+                .style(theme::Button::custom(solid_brand_button_style(
+                    CONTENT_BRAND_SAMPLE,
+                )))
+                .on_press(Message::ManualPricingBookletAdded),
+        );
+
+        tabs.into()
+    }
+
     fn manual_pricing_body_view(&self) -> Element<'_, Message> {
         let manual = self.active_manual_pricing();
         let totals = manual_pricing_totals(manual);
@@ -1007,39 +1046,113 @@ impl PrintCountApp {
             .width(Length::Fill)
             .style(theme::Container::Box);
 
+        let active_booklet_index = self
+            .selected_manual_booklet_index
+            .filter(|index| manual.booklets.get(*index).is_some());
+        let active_booklet = active_booklet_index.and_then(|index| manual.booklets.get(index));
+        let active_booklet_totals =
+            active_booklet_index.and_then(|index| totals.booklet_totals.get(index));
+        let line_items = manual.line_items(active_booklet_index);
+        let finisher_items = manual.finisher_items(active_booklet_index);
+        let line_states = active_booklet_totals
+            .map(|booklet_totals| &booklet_totals.line_states)
+            .unwrap_or(&totals.line_states);
+        let finisher_states = active_booklet_totals
+            .map(|booklet_totals| &booklet_totals.finisher_states)
+            .unwrap_or(&totals.finisher_states);
+        let per_book = active_booklet_index.is_some();
+        let active_title = active_booklet_index
+            .and_then(|index| manual.booklets.get(index).map(|booklet| booklet.display_name(index)))
+            .unwrap_or_else(|| "Order lines".to_string());
+        let line_hint = if per_book {
+            "Set printed sides, paper type, and finishers for one booklet. The multiplier is applied in the summary."
+        } else {
+            "Use sheets for paper count and printed sides for actual printed faces."
+        };
+
+        let mut header_actions = row![
+            button("Add finisher")
+                .style(theme::Button::custom(solid_brand_button_style(
+                    CONTENT_BRAND_SAMPLE,
+                )))
+                .on_press(Message::ManualPricingFinisherAdded),
+            button("Add line")
+                .style(theme::Button::custom(solid_brand_button_style(
+                    CONTENT_BRAND_SAMPLE,
+                )))
+                .on_press(Message::ManualPricingLineAdded),
+        ]
+        .spacing(10)
+        .align_items(Alignment::Center);
+
+        if let Some(index) = active_booklet_index {
+            header_actions = header_actions.push(
+                button("Delete booklet")
+                    .style(theme::Button::custom(muted_content_button_style()))
+                    .on_press(Message::ManualPricingBookletRemoved(index)),
+            );
+        }
+
         let mut calculator_section = column![
+            self.manual_booklet_tabs_view(manual, active_booklet_index),
             row![
-                text("Order lines")
+                text(active_title)
                     .size(15)
                     .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
                 horizontal_space(),
-                button("Add finisher")
-                    .style(theme::Button::custom(solid_brand_button_style(
-                        CONTENT_BRAND_SAMPLE,
-                    )))
-                    .on_press(Message::ManualPricingFinisherAdded),
-                button("Add line")
-                    .style(theme::Button::custom(solid_brand_button_style(
-                        CONTENT_BRAND_SAMPLE,
-                    )))
-                    .on_press(Message::ManualPricingLineAdded),
+                header_actions,
             ]
             .spacing(10)
             .align_items(Alignment::Center),
-            text("Use sheets for paper count and printed sides for actual printed faces.")
+            text(line_hint)
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
         ]
         .spacing(8);
 
-        for (index, line_item) in manual.line_items.iter().enumerate() {
-            let line_state = totals
-                .line_states
+        if let (Some(index), Some(booklet)) = (active_booklet_index, active_booklet) {
+            let name_input = text_input("Booklet name", &booklet.name_input)
+                .on_input(move |value| Message::ManualPricingBookletNameChanged(index, value))
+                .padding(6)
+                .size(12)
+                .width(Length::Fill);
+            let copies_input = text_input("1", &booklet.copies_input)
+                .on_input(move |value| Message::ManualPricingBookletCopiesChanged(index, value))
+                .padding(6)
+                .size(12)
+                .width(Length::Fixed(96.0));
+
+            calculator_section = calculator_section.push(
+                row![
+                    column![
+                        text("Name")
+                            .size(12)
+                            .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                        name_input,
+                    ]
+                    .spacing(4)
+                    .width(Length::Fill),
+                    column![
+                        text("Multiplier")
+                            .size(12)
+                            .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                        copies_input,
+                    ]
+                    .spacing(4),
+                ]
+                .spacing(12)
+                .align_items(Alignment::Center),
+            );
+        }
+
+        for (index, line_item) in line_items.iter().enumerate() {
+            let line_state = line_states
                 .get(index)
                 .cloned()
                 .unwrap_or(ManualLineState::Invalid);
-            calculator_section = calculator_section
-                .push(self.manual_pricing_line_item_row(index, line_item, line_state));
+            calculator_section = calculator_section.push(self.manual_pricing_line_item_row(
+                index, line_item, line_state, per_book,
+            ));
         }
 
         calculator_section = calculator_section.push(
@@ -1048,16 +1161,15 @@ impl PrintCountApp {
                 .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
         );
 
-        if manual.finisher_items.is_empty() {
+        if finisher_items.is_empty() {
             calculator_section = calculator_section.push(
                 text("No finishers added. Use Add finisher for laminate, folding, or binding.")
                     .size(12)
                     .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
             );
         } else {
-            for (index, finisher_item) in manual.finisher_items.iter().enumerate() {
-                let finisher_state = totals
-                    .finisher_states
+            for (index, finisher_item) in finisher_items.iter().enumerate() {
+                let finisher_state = finisher_states
                     .get(index)
                     .cloned()
                     .unwrap_or(ManualFinisherState::Invalid);
@@ -1065,12 +1177,13 @@ impl PrintCountApp {
                     index,
                     finisher_item,
                     finisher_state,
+                    per_book,
                 ));
             }
         }
 
-        calculator_section = calculator_section
-            .push(
+        if !per_book {
+            calculator_section = calculator_section.push(
                 checkbox(manual.cutting_enabled)
                     .label("Cutting (+3 EUR)")
                     .on_toggle(Message::ManualPricingCuttingChanged)
@@ -1078,7 +1191,10 @@ impl PrintCountApp {
                     .style(theme::Checkbox::custom(brand_checkbox_style(
                         CONTENT_BRAND_SAMPLE,
                     ))),
-            )
+            );
+        }
+
+        calculator_section = calculator_section
             .push(self.manual_input(
                 "Discount (%)",
                 "0",
@@ -1157,6 +1273,14 @@ impl PrintCountApp {
             .finishers_total_cents
             .map(format_cents)
             .unwrap_or_else(|| "Invalid finisher input".to_string());
+        let booklets_subtotal_label = totals
+            .booklets_subtotal_cents
+            .map(format_cents)
+            .unwrap_or_else(|| "Invalid booklet input".to_string());
+        let booklets_total_label = totals
+            .booklets_total_cents
+            .map(format_cents)
+            .unwrap_or_else(|| "Invalid booklet input".to_string());
         let subtotal_label = totals
             .subtotal_cents
             .map(format_cents)
@@ -1175,7 +1299,7 @@ impl PrintCountApp {
             .unwrap_or_else(|| "N/A".to_string());
         let warning = if totals.total_cents.is_none() {
             Some(
-                text("Fix any invalid line, finisher, size price, modifier price, finisher price, or discount input to calculate the total.")
+                text("Fix any invalid line, booklet multiplier, finisher, size price, modifier price, finisher price, or discount input to calculate the total.")
                     .size(12)
                     .style(theme::Text::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f))),
             )
@@ -1187,23 +1311,91 @@ impl PrintCountApp {
             text("Summary")
                 .size(15)
                 .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-            self.value_line("Lines total", Some(lines_total_label)),
-            self.value_line("Finishers total", Some(finishers_total_label)),
-            self.value_line(
-                "Cutting fee",
-                Some(if totals.cutting_cents == 0 {
-                    "0.00 EUR".to_string()
-                } else {
-                    format_cents(totals.cutting_cents)
-                }),
-            ),
-            self.value_line("Subtotal before discount", Some(subtotal_label)),
-            self.value_line("Discount", Some(discount_label)),
-            self.value_line("Before rounding", Some(before_rounding_label)),
-            self.value_line("Rounding", Some(manual.rounding_mode.to_string()),),
-            self.value_line("Final total", Some(total_label)),
         ]
         .spacing(6);
+
+        if let Some(booklet_totals) = active_booklet_totals {
+            let booklet_lines_label = booklet_totals
+                .lines_total_cents
+                .map(format_cents)
+                .unwrap_or_else(|| "Invalid line input".to_string());
+            let booklet_finishers_label = booklet_totals
+                .finishers_total_cents
+                .map(format_cents)
+                .unwrap_or_else(|| "Invalid finisher input".to_string());
+            let booklet_subtotal_label = booklet_totals
+                .subtotal_cents
+                .map(format_cents)
+                .unwrap_or_else(|| "Invalid booklet input".to_string());
+            let booklet_discount_label = booklet_totals
+                .discount_cents
+                .map(|value| format!("-{}", format_cents(value)))
+                .unwrap_or_else(|| "Invalid discount input".to_string());
+            let price_per_booklet_label = booklet_totals
+                .price_per_booklet_cents
+                .map(format_cents)
+                .unwrap_or_else(|| "N/A".to_string());
+            let copies_label = booklet_totals
+                .copies
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "Invalid multiplier".to_string());
+            let booklet_total_label = booklet_totals
+                .total_cents
+                .map(format_cents)
+                .unwrap_or_else(|| "N/A".to_string());
+
+            summary = summary
+                .push(self.value_line("Lines per booklet", Some(booklet_lines_label)))
+                .push(self.value_line("Finishers per booklet", Some(booklet_finishers_label)))
+                .push(self.value_line("1 booklet before discount", Some(booklet_subtotal_label)))
+                .push(self.value_line("Discount per booklet", Some(booklet_discount_label)))
+                .push(self.value_line("Price of 1 booklet", Some(price_per_booklet_label)))
+                .push(self.value_line("Multiplier", Some(copies_label)))
+                .push(self.value_line("Booklet total", Some(booklet_total_label)))
+                .push(self.value_line("Final total", Some(total_label)));
+        } else {
+            summary = summary
+                .push(self.value_line("Lines total", Some(lines_total_label)))
+                .push(self.value_line("Finishers total", Some(finishers_total_label)))
+                .push(self.value_line(
+                    "Cutting fee",
+                    Some(if totals.cutting_cents == 0 {
+                        "0.00 EUR".to_string()
+                    } else {
+                        format_cents(totals.cutting_cents)
+                    }),
+                ));
+
+            for (index, booklet) in manual.booklets.iter().enumerate() {
+                let label = booklet.display_name(index);
+                let value = totals
+                    .booklet_totals
+                    .get(index)
+                    .and_then(|booklet_totals| {
+                        Some(format!(
+                            "{} x {} = {}",
+                            format_cents(booklet_totals.price_per_booklet_cents?),
+                            booklet_totals.copies?,
+                            format_cents(booklet_totals.total_cents?)
+                        ))
+                    })
+                    .unwrap_or_else(|| "Invalid booklet input".to_string());
+                summary = summary.push(self.value_line(&label, Some(value)));
+            }
+
+            if !manual.booklets.is_empty() {
+                summary = summary
+                    .push(self.value_line("Booklets before discount", Some(booklets_subtotal_label)))
+                    .push(self.value_line("Booklets total", Some(booklets_total_label)));
+            }
+
+            summary = summary
+                .push(self.value_line("Subtotal before discount", Some(subtotal_label)))
+                .push(self.value_line("Discount", Some(discount_label)))
+                .push(self.value_line("Before rounding", Some(before_rounding_label)))
+                .push(self.value_line("Rounding", Some(manual.rounding_mode.to_string())))
+                .push(self.value_line("Final total", Some(total_label)));
+        }
 
         if let Some(warning) = warning {
             summary = summary.push(warning);
@@ -1427,6 +1619,7 @@ impl PrintCountApp {
         index: usize,
         line_item: &ManualPricingLineItem,
         line_state: ManualLineState,
+        per_book: bool,
     ) -> Element<'_, Message> {
         let modifier_choices =
             self.manual_modifier_choices(line_item.size, line_item.modifier_index);
@@ -1459,8 +1652,7 @@ impl PrintCountApp {
         let sides_input = text_input("0", &line_item.sides_input)
             .on_input(move |value| Message::ManualPricingLineSidesChanged(index, value))
             .padding(6)
-            .size(12)
-            .width(Length::Fixed(42.0));
+            .size(12);
         let double_sided_toggle = checkbox(line_item.double_sided)
             .label("RV")
             .on_toggle(move |value| Message::ManualPricingLineDoubleSidedChanged(index, value))
@@ -1468,8 +1660,6 @@ impl PrintCountApp {
             .style(theme::Checkbox::custom(brand_checkbox_style(
                 CONTENT_BRAND_SAMPLE,
             )));
-        let sheets_value =
-            self.recording_readonly_value(&line_item.sheets_input, Length::Fixed(54.0));
         let remove_button =
             self.manual_remove_icon_button(Message::ManualPricingLineRemoved(index));
         let placeholder_label = || {
@@ -1477,6 +1667,22 @@ impl PrintCountApp {
                 .size(12)
                 .style(theme::Text::Color(Color::TRANSPARENT))
         };
+
+        let sides_label = if per_book {
+            "Sides/book"
+        } else {
+            "Zijden"
+        };
+        let sheets_label = if per_book {
+            "Sheets/book"
+        } else {
+            "Vellen"
+        };
+        let sides_width = if per_book { 68.0 } else { 42.0 };
+        let sheets_width = if per_book { 76.0 } else { 54.0 };
+        let sides_input = sides_input.width(Length::Fixed(sides_width));
+        let sheets_value =
+            self.recording_readonly_value(&line_item.sheets_input, Length::Fixed(sheets_width));
 
         let controls = row![
             column![
@@ -1504,21 +1710,21 @@ impl PrintCountApp {
             .spacing(4)
             .width(Length::Fill),
             column![
-                text("Zijden")
+                text(sides_label)
                     .size(12)
                     .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                 sides_input,
             ]
             .spacing(4)
-            .width(Length::Fixed(42.0)),
+            .width(Length::Fixed(sides_width)),
             column![
-                text("Vellen")
+                text(sheets_label)
                     .size(12)
                     .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                 sheets_value,
             ]
             .spacing(4)
-            .width(Length::Fixed(54.0)),
+            .width(Length::Fixed(sheets_width)),
             column![
                 placeholder_label(),
                 container(double_sided_toggle)
@@ -1571,6 +1777,7 @@ impl PrintCountApp {
         index: usize,
         finisher_item: &ManualFinisherLineItem,
         finisher_state: ManualFinisherState,
+        per_book: bool,
     ) -> Element<'_, Message> {
         let finisher_type_picker = pick_list(
             &ManualFinisherType::ALL[..],
@@ -1605,6 +1812,12 @@ impl PrintCountApp {
             .style(theme::Button::custom(muted_content_button_style()))
             .on_press(Message::ManualPricingFinisherRemoved(index));
 
+        let amount_label = if per_book {
+            "Per book"
+        } else {
+            "Amount"
+        };
+
         let controls = row![
             column![
                 text("Finisher")
@@ -1622,7 +1835,7 @@ impl PrintCountApp {
             ]
             .spacing(4),
             column![
-                text("Amount")
+                text(amount_label)
                     .size(12)
                     .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                 amount_input,
@@ -1640,14 +1853,24 @@ impl PrintCountApp {
             ManualFinisherState::Invalid => text("Enter a valid amount and finisher price.")
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0xe0, 0x4f, 0x4f))),
-            ManualFinisherState::Ready(finisher) => text(format!(
-                "{} x {} = {}",
-                finisher.amount,
-                finisher.label,
-                format_cents(finisher.total_cents),
-            ))
-            .size(12)
-            .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37))),
+            ManualFinisherState::Ready(finisher) => {
+                let amount_summary = if finisher.booklet_copies > 1 {
+                    format!(
+                        "{} ({} per book x {} booklets)",
+                        finisher.amount, finisher.amount_per_book, finisher.booklet_copies
+                    )
+                } else {
+                    finisher.amount.to_string()
+                };
+                text(format!(
+                    "{} x {} = {}",
+                    amount_summary,
+                    finisher.label,
+                    format_cents(finisher.total_cents),
+                ))
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37)))
+            }
         };
 
         container(column![controls, summary].spacing(8))

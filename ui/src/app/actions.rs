@@ -976,6 +976,24 @@ impl PrintCountApp {
         &mut self.manual_pricing
     }
 
+    fn active_manual_booklet_index(&self) -> Option<usize> {
+        let index = self.selected_manual_booklet_index?;
+        self.active_manual_pricing().booklets.get(index)?;
+        Some(index)
+    }
+
+    fn active_manual_line_items_mut(&mut self) -> &mut Vec<ManualPricingLineItem> {
+        let booklet_index = self.selected_manual_booklet_index;
+        self.active_manual_pricing_mut()
+            .line_items_mut(booklet_index)
+    }
+
+    fn active_manual_finisher_items_mut(&mut self) -> &mut Vec<ManualFinisherLineItem> {
+        let booklet_index = self.selected_manual_booklet_index;
+        self.active_manual_pricing_mut()
+            .finisher_items_mut(booklet_index)
+    }
+
     fn selected_manual_bill(&self) -> Option<&ManualPricingBill> {
         let selected_id = self.selected_manual_bill_id.as_deref()?;
         self.manual_bills.iter().find(|bill| bill.id == selected_id)
@@ -988,6 +1006,16 @@ impl PrintCountApp {
             .is_some_and(|selected_id| !self.manual_bills.iter().any(|bill| bill.id == selected_id))
         {
             self.selected_manual_bill_id = None;
+        }
+        self.sync_selected_manual_booklet();
+    }
+
+    fn sync_selected_manual_booklet(&mut self) {
+        if self
+            .selected_manual_booklet_index
+            .is_some_and(|index| self.active_manual_pricing().booklets.get(index).is_none())
+        {
+            self.selected_manual_booklet_index = None;
         }
     }
 
@@ -1084,6 +1112,7 @@ impl PrintCountApp {
         self.manual_pricing.reset_calculator_state();
         self.manual_pricing_selected = true;
         self.selected_manual_bill_id = None;
+        self.selected_manual_booklet_index = None;
         self.manual_pricing_tab = ManualPricingTab::Calculator;
         self.manual_pricing_status = Some(format!("Saved bill {id} and cleared calculator."));
     }
@@ -1109,6 +1138,7 @@ impl PrintCountApp {
         self.normalize_manual_bills();
         self.manual_bills_dirty = true;
         self.selected_manual_bill_id = None;
+        self.selected_manual_booklet_index = None;
         self.manual_pricing_selected = true;
         self.manual_pricing_status = Some(format!("Deleted bill {deleted_id}."));
     }
