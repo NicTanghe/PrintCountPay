@@ -979,6 +979,226 @@ impl PrintCountApp {
         tabs.into()
     }
 
+    fn manual_receipt_cell(value: &str, width: usize, align_right: bool) -> String {
+        if align_right {
+            format!("{value:>width$}")
+        } else {
+            format!("{value:<width$}")
+        }
+    }
+
+    fn manual_receipt_chunks(value: impl Into<String>, width: usize) -> Vec<String> {
+        let value = value.into().replace(" EUR", " €");
+        if value.trim().is_empty() {
+            return vec![String::new()];
+        }
+
+        let mut lines = Vec::new();
+        let mut current = String::new();
+
+        for word in value.split_whitespace() {
+            if word.chars().count() > width {
+                if !current.is_empty() {
+                    lines.push(current);
+                    current = String::new();
+                }
+                let mut chunk = String::new();
+                for character in word.chars() {
+                    if chunk.chars().count() == width {
+                        lines.push(chunk);
+                        chunk = String::new();
+                    }
+                    chunk.push(character);
+                }
+                if !chunk.is_empty() {
+                    current = chunk;
+                }
+                continue;
+            }
+
+            let next_len = if current.is_empty() {
+                word.chars().count()
+            } else {
+                current.chars().count() + 1 + word.chars().count()
+            };
+
+            if next_len > width && !current.is_empty() {
+                lines.push(current);
+                current = word.to_string();
+            } else {
+                if !current.is_empty() {
+                    current.push(' ');
+                }
+                current.push_str(word);
+            }
+        }
+
+        if !current.is_empty() {
+            lines.push(current);
+        }
+
+        if lines.is_empty() {
+            vec![String::new()]
+        } else {
+            lines
+        }
+    }
+
+    fn manual_receipt_rows(
+        what: impl Into<String>,
+        amount: impl Into<String>,
+        unit_price: impl Into<String>,
+        total_price: impl Into<String>,
+    ) -> Vec<String> {
+        const WHAT_WIDTH: usize = 34;
+        const AMOUNT_WIDTH: usize = 8;
+        const UNIT_WIDTH: usize = 12;
+        const TOTAL_WIDTH: usize = 12;
+
+        let what = Self::manual_receipt_chunks(what, WHAT_WIDTH);
+        let amount = Self::manual_receipt_chunks(amount, AMOUNT_WIDTH);
+        let unit_price = Self::manual_receipt_chunks(unit_price, UNIT_WIDTH);
+        let total_price = Self::manual_receipt_chunks(total_price, TOTAL_WIDTH);
+        let line_count = what
+            .len()
+            .max(amount.len())
+            .max(unit_price.len())
+            .max(total_price.len());
+
+        (0..line_count)
+            .map(|index| {
+                format!(
+                    "{} | {} | {} | {}",
+                    Self::manual_receipt_cell(
+                        what.get(index).map(String::as_str).unwrap_or(""),
+                        WHAT_WIDTH,
+                        false,
+                    ),
+                    Self::manual_receipt_cell(
+                        amount.get(index).map(String::as_str).unwrap_or(""),
+                        AMOUNT_WIDTH,
+                        true,
+                    ),
+                    Self::manual_receipt_cell(
+                        unit_price.get(index).map(String::as_str).unwrap_or(""),
+                        UNIT_WIDTH,
+                        true,
+                    ),
+                    Self::manual_receipt_cell(
+                        total_price.get(index).map(String::as_str).unwrap_or(""),
+                        TOTAL_WIDTH,
+                        true,
+                    ),
+                )
+            })
+            .collect()
+    }
+
+    fn manual_average_unit_price(total_cents: u64, amount: u64) -> String {
+        if amount == 0 {
+            return "N/A".to_string();
+        }
+
+        format_cents((total_cents.saturating_add(amount / 2)) / amount)
+    }
+
+    fn manual_receipt_line_label(
+        &self,
+        manual: &ManualPricingSettings,
+        line_item: &ManualPricingLineItem,
+    ) -> String {
+        let print_mode = match line_item.print_mode {
+            ManualPrintMode::Bw => "BW",
+            ManualPrintMode::Color => "FC",
+        };
+        let mut parts = vec![line_item.size.to_string(), print_mode.to_string()];
+        if let Some(modifier_index) = line_item.modifier_index
+            && let Some(modifier) = manual.modifiers.get(modifier_index)
+        {
+            parts.push(modifier.display_name());
+        }
+        if line_item.double_sided {
+            parts.push("RV".to_string());
+        }
+        parts.join(" ")
+    }
+
+    fn manual_receipt_finisher_label(finisher_item: &ManualFinisherLineItem) -> String {
+        match finisher_item.finisher_type {
+            ManualFinisherType::Laminate => format!("Laminate {}", finisher_item.laminate_size),
+            ManualFinisherType::Folding => "Folding".to_string(),
+            ManualFinisherType::Binding => "Binding".to_string(),
+        }
+    }
+
+    fn manual_order_summary_receipt_rows(
+        &self,
+        manual: &ManualPricingSettings,
+        totals: &ManualPricingTotals,
+    ) -> Vec<String> {
+        let mut rows = Self::manual_receipt_rows(
+            "What",
+            "Amount",
+            "Unit price",
+            "Total price",
+        );
+
+        for (index, line_item) in manual.line_items.iter().enumerate() {
+            let Some(ManualLineState::Ready(line)) = totals.line_states.get(index) else {
+                continue;
+            };
+            rows.extend(Self::manual_receipt_rows(
+                self.manual_receipt_line_label(manual, line_item),
+                line.sides.to_string(),
+                Self::manual_average_unit_price(line.total_cents, line.sides),
+                format_cents(line.total_cents),
+            ));
+        }
+
+        for (index, finisher_item) in manual.finisher_items.iter().enumerate() {
+            let Some(ManualFinisherState::Ready(finisher)) = totals.finisher_states.get(index)
+            else {
+                continue;
+            };
+            rows.extend(Self::manual_receipt_rows(
+                Self::manual_receipt_finisher_label(finisher_item),
+                finisher.amount.to_string(),
+                format_cents(finisher.unit_price_cents),
+                format_cents(finisher.total_cents),
+            ));
+        }
+
+        if manual.cutting_enabled {
+            rows.extend(Self::manual_receipt_rows(
+                "Cutting",
+                "1",
+                format_cents(totals.cutting_cents),
+                format_cents(totals.cutting_cents),
+            ));
+        }
+
+        for (index, booklet) in manual.booklets.iter().enumerate() {
+            let Some(booklet_totals) = totals.booklet_totals.get(index) else {
+                continue;
+            };
+            let (Some(price_per_booklet), Some(copies), Some(total_cents)) = (
+                booklet_totals.price_per_booklet_cents,
+                booklet_totals.copies,
+                booklet_totals.total_cents,
+            ) else {
+                continue;
+            };
+            rows.extend(Self::manual_receipt_rows(
+                booklet.display_name(index),
+                copies.to_string(),
+                format_cents(price_per_booklet),
+                format_cents(total_cents),
+            ));
+        }
+
+        rows
+    }
+
     fn manual_pricing_body_view(&self) -> Element<'_, Message> {
         let manual = self.active_manual_pricing();
         let totals = manual_pricing_totals(manual);
@@ -1265,22 +1485,6 @@ impl PrintCountApp {
             .width(Length::Fill)
             .style(theme::Container::Box);
 
-        let lines_total_label = totals
-            .lines_total_cents
-            .map(format_cents)
-            .unwrap_or_else(|| "Invalid line input".to_string());
-        let finishers_total_label = totals
-            .finishers_total_cents
-            .map(format_cents)
-            .unwrap_or_else(|| "Invalid finisher input".to_string());
-        let booklets_subtotal_label = totals
-            .booklets_subtotal_cents
-            .map(format_cents)
-            .unwrap_or_else(|| "Invalid booklet input".to_string());
-        let booklets_total_label = totals
-            .booklets_total_cents
-            .map(format_cents)
-            .unwrap_or_else(|| "Invalid booklet input".to_string());
         let subtotal_label = totals
             .subtotal_cents
             .map(format_cents)
@@ -1354,47 +1558,32 @@ impl PrintCountApp {
                 .push(self.value_line("Booklet total", Some(booklet_total_label)))
                 .push(self.value_line("Final total", Some(total_label)));
         } else {
-            summary = summary
-                .push(self.value_line("Lines total", Some(lines_total_label)))
-                .push(self.value_line("Finishers total", Some(finishers_total_label)))
-                .push(self.value_line(
-                    "Cutting fee",
-                    Some(if totals.cutting_cents == 0 {
-                        "0.00 EUR".to_string()
-                    } else {
-                        format_cents(totals.cutting_cents)
-                    }),
-                ));
-
-            for (index, booklet) in manual.booklets.iter().enumerate() {
-                let label = booklet.display_name(index);
-                let value = totals
-                    .booklet_totals
-                    .get(index)
-                    .and_then(|booklet_totals| {
-                        Some(format!(
-                            "{} x {} = {}",
-                            format_cents(booklet_totals.price_per_booklet_cents?),
-                            booklet_totals.copies?,
-                            format_cents(booklet_totals.total_cents?)
-                        ))
-                    })
-                    .unwrap_or_else(|| "Invalid booklet input".to_string());
-                summary = summary.push(self.value_line(&label, Some(value)));
+            for row_text in self.manual_order_summary_receipt_rows(manual, &totals) {
+                summary = summary.push(
+                    text(row_text)
+                        .size(12)
+                        .font(iced::Font::MONOSPACE)
+                        .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37))),
+                );
             }
 
-            if !manual.booklets.is_empty() {
-                summary = summary
-                    .push(self.value_line("Booklets before discount", Some(booklets_subtotal_label)))
-                    .push(self.value_line("Booklets total", Some(booklets_total_label)));
+            let footer_rows = [
+                ("Subtotal before discount", subtotal_label),
+                ("Discount", discount_label),
+                ("Before rounding", before_rounding_label),
+                ("Rounding", manual.rounding_mode.to_string()),
+                ("Final total", total_label),
+            ];
+            for (label, value) in footer_rows {
+                for row_text in Self::manual_receipt_rows(label, "", "", value) {
+                    summary = summary.push(
+                        text(row_text)
+                            .size(12)
+                            .font(iced::Font::MONOSPACE)
+                            .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37))),
+                    );
+                }
             }
-
-            summary = summary
-                .push(self.value_line("Subtotal before discount", Some(subtotal_label)))
-                .push(self.value_line("Discount", Some(discount_label)))
-                .push(self.value_line("Before rounding", Some(before_rounding_label)))
-                .push(self.value_line("Rounding", Some(manual.rounding_mode.to_string())))
-                .push(self.value_line("Final total", Some(total_label)));
         }
 
         if let Some(warning) = warning {

@@ -3,7 +3,7 @@ members = ["core", "ui", "app"]
 resolver = "2"
 
 [workspace.package]
-version = "3.2.16"
+version = "3.2.17"
 edition = "2024"
 
 [workspace.dependencies]
