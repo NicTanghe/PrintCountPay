@@ -1111,7 +1111,7 @@ impl PrintCountApp {
 
     pub(crate) fn view(&self) -> Element<'_, Message> {
         let sidebar = container(self.printer_list_view())
-            .width(Length::Fixed(367.0))
+            .width(Length::Fixed(348.0))
             .height(Length::Fill);
         let main_content = if self.advanced_mode && self.active_tab == Tab::Statistics {
             self.statistics_view()

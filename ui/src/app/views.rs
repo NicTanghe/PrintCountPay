@@ -1561,7 +1561,7 @@ impl PrintCountApp {
             for row_text in self.manual_order_summary_receipt_rows(manual, &totals) {
                 summary = summary.push(
                     text(row_text)
-                        .size(12)
+                        .size(10)
                         .font(iced::Font::MONOSPACE)
                         .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37))),
                 );
@@ -1578,7 +1578,7 @@ impl PrintCountApp {
                 for row_text in Self::manual_receipt_rows(label, "", "", value) {
                     summary = summary.push(
                         text(row_text)
-                            .size(12)
+                            .size(10)
                             .font(iced::Font::MONOSPACE)
                             .style(theme::Text::Color(Color::from_rgb8(0x1f, 0x2a, 0x37))),
                     );
