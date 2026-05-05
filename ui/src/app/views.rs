@@ -864,12 +864,12 @@ impl PrintCountApp {
                     text("Manual pricing")
                         .size(20)
                         .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-                    text("Use sheets for paper cost and printed sides for print cost, including recto verso.")
-                        .size(12)
-                        .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
                 ]
                 .spacing(4),
                 horizontal_space(),
+                button("Reset")
+                    .style(theme::Button::custom(muted_content_button_style()))
+                    .on_press(Message::ResetManualPricingCalculator),
                 button("Save as bill")
                     .style(theme::Button::custom(solid_brand_button_style(
                         CONTENT_BRAND_SAMPLE,

@@ -729,6 +729,15 @@ impl PrintCountApp {
                 self.save_manual_pricing_as_bill();
                 Command::none()
             }
+            Message::ResetManualPricingCalculator => {
+                if self.selected_manual_bill_id.is_none() {
+                    self.manual_pricing.reset_calculator_state();
+                    self.selected_manual_booklet_index = None;
+                    self.manual_pricing_tab = ManualPricingTab::Calculator;
+                    self.manual_pricing_status = Some("Cleared manual calculator.".to_string());
+                }
+                Command::none()
+            }
             Message::DeleteSelectedManualPricingBill => {
                 self.delete_selected_manual_pricing_bill();
                 Command::none()

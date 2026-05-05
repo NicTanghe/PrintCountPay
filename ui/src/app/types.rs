@@ -1035,6 +1035,7 @@ pub(crate) enum Message {
     PricingColorChanged(String),
     PricingRoundChanged(bool),
     SaveManualPricingAsBill,
+    ResetManualPricingCalculator,
     DeleteSelectedManualPricingBill,
     ManualPricingBillSubjectChanged(String),
     ManualPricingLineAdded,
