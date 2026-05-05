@@ -1478,6 +1478,22 @@
     ],
     bill_tombstones: [
         (
+            id: "zephyr-mirror",
+            deleted_at_millis: 1777903396657,
+        ),
+        (
+            id: "lilac-river",
+            deleted_at_millis: 1777903395489,
+        ),
+        (
+            id: "pearl-aurora",
+            deleted_at_millis: 1777903393914,
+        ),
+        (
+            id: "jade-aurora",
+            deleted_at_millis: 1777903392770,
+        ),
+        (
             id: "amber-cloud",
             deleted_at_millis: 1777445257906,
         ),
@@ -1536,10 +1552,6 @@
         (
             id: "soft-sketch",
             deleted_at_millis: 1776949458218,
-        ),
-        (
-            id: "lilac-river",
-            deleted_at_millis: 1776949446683,
         ),
         (
             id: "wild-field",
