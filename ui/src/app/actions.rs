@@ -746,7 +746,6 @@ impl PrintCountApp {
         self.sync_statistics_visible_series();
         self.persist_statistics_store_with_logging();
         self.send_statistics_state();
-        self.queue_statistics_cleanup();
     }
 
     fn remove_non_initial_zero_statistics_entries(&mut self) {
@@ -918,7 +917,6 @@ impl PrintCountApp {
         self.statistics_revision = self.statistics_revision.saturating_add(1);
         self.sync_statistics_visible_series();
         self.persist_statistics_store_with_logging();
-        self.queue_statistics_cleanup();
 
         if merge.differs_from_incoming {
             self.send_statistics_state();
@@ -4011,7 +4009,7 @@ mod tests {
     fn save_manual_pricing_as_bill_copies_current_calculator_state() {
         let mut app = test_app();
         app.manual_pricing.a3_input = "3.25".to_string();
-        app.manual_pricing.binding_input = "4.20".to_string();
+        app.manual_pricing.binding_modifiers[0].a4_price_input = "4.20".to_string();
         app.manual_pricing.line_items[0].sides_input = "12".to_string();
         app.manual_pricing.line_items[0].sync_sheets_from_sides();
         app.manual_pricing
@@ -4019,6 +4017,8 @@ mod tests {
             .push(ManualFinisherLineItem {
                 finisher_type: ManualFinisherType::Binding,
                 laminate_size: ManualLaminateSize::A4,
+                binding_size: ManualPrintSize::A4,
+                binding_modifier_index: Some(0),
                 amount_input: "2".to_string(),
             });
         app.manual_pricing.discount_input = "5".to_string();
@@ -4042,7 +4042,10 @@ mod tests {
             ManualRoundingMode::HalfEuro
         );
         assert_eq!(app.manual_pricing.a3_input, "3.25");
-        assert_eq!(app.manual_pricing.binding_input, "4.20");
+        assert_eq!(
+            app.manual_pricing.binding_modifiers[0].a4_price_input,
+            "4.20"
+        );
         assert_eq!(
             app.manual_pricing.line_items,
             vec![ManualPricingLineItem::default()]
@@ -4144,7 +4147,11 @@ mod tests {
             settings: ManualPricingSettings {
                 a0_input: "30".to_string(),
                 a3_input: "3.25".to_string(),
-                binding_input: "6.50".to_string(),
+                binding_modifiers: vec![ManualBindingModifier {
+                    name_input: "Spiral".to_string(),
+                    a4_price_input: "6.50".to_string(),
+                    ..ManualBindingModifier::default()
+                }],
                 line_items: vec![ManualPricingLineItem {
                     size: ManualPrintSize::A0,
                     print_mode: ManualPrintMode::Bw,
@@ -4156,6 +4163,8 @@ mod tests {
                 finisher_items: vec![ManualFinisherLineItem {
                     finisher_type: ManualFinisherType::Laminate,
                     laminate_size: ManualLaminateSize::A0,
+                    binding_size: ManualPrintSize::A4,
+                    binding_modifier_index: None,
                     amount_input: "10".to_string(),
                 }],
                 discount_input: "15".to_string(),
@@ -4186,7 +4195,10 @@ mod tests {
 
         assert_eq!(app.manual_pricing.a0_input, "30");
         assert_eq!(app.manual_pricing.a3_input, "3.25");
-        assert_eq!(app.manual_pricing.binding_input, "6.50");
+        assert_eq!(
+            app.manual_pricing.binding_modifiers[0].a4_price_input,
+            "6.50"
+        );
         assert_eq!(
             app.manual_pricing.line_items,
             vec![ManualPricingLineItem::default()]
@@ -4269,6 +4281,10 @@ mod tests {
         assert_eq!(
             workspace.settings.rounding_mode,
             ManualRoundingMode::HalfEuro
+        );
+        assert_eq!(
+            workspace.settings.binding_modifiers[0].a4_price_input,
+            "3.50"
         );
         assert!(workspace.bills.is_empty());
     }

@@ -1123,11 +1123,24 @@ impl PrintCountApp {
         parts.join(" ")
     }
 
-    fn manual_receipt_finisher_label(finisher_item: &ManualFinisherLineItem) -> String {
+    fn manual_receipt_finisher_label(
+        &self,
+        manual: &ManualPricingSettings,
+        finisher_item: &ManualFinisherLineItem,
+    ) -> String {
         match finisher_item.finisher_type {
             ManualFinisherType::Laminate => format!("Laminate {}", finisher_item.laminate_size),
             ManualFinisherType::Folding => "Folding".to_string(),
-            ManualFinisherType::Binding => "Binding".to_string(),
+            ManualFinisherType::Binding => manual
+                .binding_modifier(finisher_item.binding_modifier_index)
+                .map(|modifier| {
+                    format!(
+                        "Binding {} {}",
+                        finisher_item.binding_size,
+                        modifier.display_name()
+                    )
+                })
+                .unwrap_or_else(|| "Binding".to_string()),
         }
     }
 
@@ -1161,7 +1174,7 @@ impl PrintCountApp {
                 continue;
             };
             rows.extend(Self::manual_receipt_rows(
-                Self::manual_receipt_finisher_label(finisher_item),
+                self.manual_receipt_finisher_label(manual, finisher_item),
                 finisher.amount.to_string(),
                 format_cents(finisher.unit_price_cents),
                 format_cents(finisher.total_cents),
@@ -1702,12 +1715,12 @@ impl PrintCountApp {
             .width(Length::Fill)
             .style(theme::Container::Box);
 
-        let finishing_prices = container(
+        let folding_prices = container(
             column![
                 text("Other finishers")
                     .size(15)
                     .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-                text("Folding and binding use one flat unit price. The calculator amount field controls how many times they are applied.")
+                text("Folding uses one flat unit price. The calculator amount field controls how many times it is applied.")
                     .size(12)
                     .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
                 self.manual_input(
@@ -1716,12 +1729,6 @@ impl PrintCountApp {
                     &manual.folding_input,
                     Message::ManualPricingFoldingPriceChanged,
                 ),
-                self.manual_input(
-                    "Binding (EUR)",
-                    "0.00",
-                    &manual.binding_input,
-                    Message::ManualPricingBindingPriceChanged,
-                ),
             ]
             .spacing(8),
         )
@@ -1729,10 +1736,48 @@ impl PrintCountApp {
         .width(Length::Fill)
         .style(theme::Container::Box);
 
+        let mut binding_prices = column![
+            row![
+                text("Binding pricing")
+                    .size(15)
+                    .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+                horizontal_space(),
+                button("Add modifier")
+                    .style(theme::Button::custom(solid_brand_button_style(
+                        CONTENT_BRAND_SAMPLE,
+                    )))
+                    .on_press(Message::ManualPricingBindingModifierAdded),
+            ]
+            .align_items(Alignment::Center),
+            text("Binding modifiers are charged per binding. Configure A0, A1, A2, A3, and A4 separately for each modifier.")
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+        ]
+        .spacing(8);
+
+        if manual.binding_modifiers.is_empty() {
+            binding_prices = binding_prices.push(
+                text("No binding modifiers configured. Add a modifier before pricing binding finishers.")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            );
+        } else {
+            for (index, modifier) in manual.binding_modifiers.iter().enumerate() {
+                binding_prices =
+                    binding_prices.push(self.manual_pricing_binding_modifier_row(index, modifier));
+            }
+        }
+
+        let binding_prices = container(binding_prices)
+            .padding(12)
+            .width(Length::Fill)
+            .style(theme::Container::Box);
+
         column![
             self.manual_pricing_storage_controls_view(),
             laminate_prices,
-            finishing_prices,
+            folding_prices,
+            binding_prices,
         ]
         .spacing(12)
         .width(Length::Fill)
@@ -1977,20 +2022,65 @@ impl PrintCountApp {
         .text_size(11)
         .style(profile_pick_list_style())
         .menu_style(profile_pick_list_menu_style());
-        let size_control: Element<'_, Message> =
-            if finisher_item.finisher_type == ManualFinisherType::Laminate {
-                pick_list(
-                    &ManualLaminateSize::ALL[..],
-                    Some(finisher_item.laminate_size),
-                    move |size| Message::ManualPricingFinisherSizeChanged(index, size),
-                )
-                .placeholder("Size")
-                .text_size(11)
-                .style(profile_pick_list_style())
-                .menu_style(profile_pick_list_menu_style())
-                .into()
-            } else {
-                self.recording_readonly_value("n/a", Length::Fixed(84.0))
+        let (size_control, modifier_control): (Element<'_, Message>, Element<'_, Message>) =
+            match finisher_item.finisher_type {
+                ManualFinisherType::Laminate => (
+                    pick_list(
+                        &ManualLaminateSize::ALL[..],
+                        Some(finisher_item.laminate_size),
+                        move |size| Message::ManualPricingFinisherSizeChanged(index, size),
+                    )
+                    .placeholder("Size")
+                    .text_size(11)
+                    .width(Length::Fill)
+                    .style(profile_pick_list_style())
+                    .menu_style(profile_pick_list_menu_style())
+                    .into(),
+                    self.recording_readonly_value("n/a", Length::Fill),
+                ),
+                ManualFinisherType::Binding => {
+                    let binding_size_picker = pick_list(
+                        &ManualPrintSize::ALL[..],
+                        Some(finisher_item.binding_size),
+                        move |size| Message::ManualPricingFinisherBindingSizeChanged(index, size),
+                    )
+                    .placeholder("Size")
+                    .text_size(11)
+                    .width(Length::Fill)
+                    .style(profile_pick_list_style())
+                    .menu_style(profile_pick_list_menu_style());
+                    let binding_modifier_choices = self.manual_binding_modifier_choices(
+                        finisher_item.binding_size,
+                        finisher_item.binding_modifier_index,
+                    );
+                    let selected_binding_modifier = binding_modifier_choices
+                        .iter()
+                        .find(|choice| choice.index == finisher_item.binding_modifier_index)
+                        .cloned();
+                    (
+                        binding_size_picker.into(),
+                        pick_list(
+                            binding_modifier_choices,
+                            selected_binding_modifier,
+                            move |choice| {
+                                Message::ManualPricingFinisherBindingModifierChanged(
+                                    index,
+                                    choice.index,
+                                )
+                            },
+                        )
+                        .placeholder("Modifier")
+                        .text_size(11)
+                        .width(Length::Fill)
+                        .style(profile_pick_list_style())
+                        .menu_style(profile_pick_list_menu_style())
+                        .into(),
+                    )
+                }
+                ManualFinisherType::Folding => (
+                    self.recording_readonly_value("n/a", Length::Fixed(84.0)),
+                    self.recording_readonly_value("n/a", Length::Fill),
+                ),
             };
         let amount_input = text_input("0", &finisher_item.amount_input)
             .on_input(move |value| Message::ManualPricingFinisherAmountChanged(index, value))
@@ -2022,7 +2112,16 @@ impl PrintCountApp {
                     .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                 size_control,
             ]
-            .spacing(4),
+            .spacing(4)
+            .width(Length::FillPortion(2)),
+            column![
+                text("Modifier")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                modifier_control,
+            ]
+            .spacing(4)
+            .width(Length::FillPortion(2)),
             column![
                 text(amount_label)
                     .size(12)
@@ -2236,6 +2335,85 @@ impl PrintCountApp {
             .into()
     }
 
+    fn manual_pricing_binding_modifier_row(
+        &self,
+        index: usize,
+        modifier: &ManualBindingModifier,
+    ) -> Element<'_, Message> {
+        let name_input = text_input("Spiral", &modifier.name_input)
+            .on_input(move |value| Message::ManualPricingBindingModifierNameChanged(index, value))
+            .padding(6)
+            .size(12)
+            .width(Length::Fill);
+        let remove_button = button("Remove")
+            .style(theme::Button::custom(muted_content_button_style()))
+            .on_press(Message::ManualPricingBindingModifierRemoved(index));
+
+        let controls = row![
+            column![
+                text("Name")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                name_input,
+            ]
+            .spacing(4)
+            .width(Length::FillPortion(2)),
+            container(remove_button).align_y(iced::alignment::Vertical::Bottom),
+        ]
+        .spacing(10)
+        .align_items(Alignment::Center);
+
+        let size_row = |size: ManualPrintSize| {
+            let enabled = modifier.applies_to_size(size);
+            let price_value = modifier.price_input(size);
+            row![
+                text(size.to_string())
+                    .size(12)
+                    .width(Length::Fixed(28.0))
+                    .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                checkbox(enabled)
+                    .label("Applies")
+                    .on_toggle(move |value| {
+                        Message::ManualPricingBindingModifierAppliesChanged(index, size, value)
+                    })
+                    .size(12)
+                    .style(theme::Checkbox::custom(brand_checkbox_style(
+                        CONTENT_BRAND_SAMPLE,
+                    ))),
+                text_input("0.00", price_value)
+                    .on_input(move |value| {
+                        Message::ManualPricingBindingModifierPriceChanged(index, size, value)
+                    })
+                    .padding(6)
+                    .size(12)
+                    .width(Length::Fixed(110.0)),
+                text("EUR per binding")
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+            ]
+            .spacing(10)
+            .align_items(Alignment::Center)
+        };
+
+        let applies = column![
+            text("Per-size setup")
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+            size_row(ManualPrintSize::A0),
+            size_row(ManualPrintSize::A1),
+            size_row(ManualPrintSize::A2),
+            size_row(ManualPrintSize::A3),
+            size_row(ManualPrintSize::A4),
+        ]
+        .spacing(8);
+
+        container(column![controls, applies].spacing(8))
+            .padding(10)
+            .width(Length::Fill)
+            .style(theme::Container::Box)
+            .into()
+    }
+
     fn manual_modifier_choices(
         &self,
         size: ManualPrintSize,
@@ -2266,6 +2444,42 @@ impl PrintCountApp {
                 .get(selected_index)
                 .map(|modifier| format!("{} (not for {size})", modifier.display_name()))
                 .unwrap_or_else(|| "Missing modifier".to_string());
+            choices.push(ManualModifierChoice {
+                index: Some(selected_index),
+                label,
+            });
+        }
+
+        choices
+    }
+
+    fn manual_binding_modifier_choices(
+        &self,
+        size: ManualPrintSize,
+        selected_index: Option<usize>,
+    ) -> Vec<ManualModifierChoice> {
+        let manual = self.active_manual_pricing();
+        let mut choices = Vec::new();
+
+        for (index, modifier) in manual.binding_modifiers.iter().enumerate() {
+            if modifier.applies_to_size(size) {
+                choices.push(ManualModifierChoice {
+                    index: Some(index),
+                    label: modifier.display_name(),
+                });
+            }
+        }
+
+        if let Some(selected_index) = selected_index
+            && !choices
+                .iter()
+                .any(|choice| choice.index == Some(selected_index))
+        {
+            let label = manual
+                .binding_modifiers
+                .get(selected_index)
+                .map(|modifier| format!("{} (not for {size})", modifier.display_name()))
+                .unwrap_or_else(|| "Missing binding modifier".to_string());
             choices.push(ManualModifierChoice {
                 index: Some(selected_index),
                 label,

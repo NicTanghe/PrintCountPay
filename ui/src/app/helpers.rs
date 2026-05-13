@@ -1177,15 +1177,29 @@ pub(crate) fn manual_finisher_state(
             )
         }
         ManualFinisherType::Binding => {
-            let Some(price_cents) = parse_price_input(&settings.binding_input).ok().flatten()
+            let Some(modifier) = settings.binding_modifier(finisher_item.binding_modifier_index)
+            else {
+                return ManualFinisherState::Invalid;
+            };
+            if !modifier.applies_to_size(finisher_item.binding_size) {
+                return ManualFinisherState::Invalid;
+            }
+            let Some(price_cents) =
+                parse_price_input(modifier.price_input(finisher_item.binding_size))
+                    .ok()
+                    .flatten()
             else {
                 return ManualFinisherState::Invalid;
             };
 
-            (
-                price_cents,
-                format!("Binding @ {}", format_cents(price_cents)),
-            )
+            let label = format!(
+                "Binding {} {} @ {}",
+                finisher_item.binding_size,
+                modifier.display_name(),
+                format_cents(price_cents)
+            );
+
+            (price_cents, label)
         }
     };
 
@@ -2057,6 +2071,8 @@ mod tests {
             finisher_items: vec![ManualFinisherLineItem {
                 finisher_type: ManualFinisherType::Laminate,
                 laminate_size: ManualLaminateSize::A2,
+                binding_size: ManualPrintSize::A4,
+                binding_modifier_index: None,
                 amount_input: "3".to_string(),
             }],
             ..ManualPricingSettings::default()
@@ -2075,6 +2091,8 @@ mod tests {
             finisher_items: vec![ManualFinisherLineItem {
                 finisher_type: ManualFinisherType::Laminate,
                 laminate_size: ManualLaminateSize::A0,
+                binding_size: ManualPrintSize::A4,
+                binding_modifier_index: None,
                 amount_input: "2".to_string(),
             }],
             ..ManualPricingSettings::default()
@@ -2089,9 +2107,15 @@ mod tests {
     #[test]
     fn manual_pricing_counts_binding_amounts() {
         let settings = ManualPricingSettings {
-            binding_input: "4.00".to_string(),
+            binding_modifiers: vec![crate::app::types::ManualBindingModifier {
+                name_input: "Spiral".to_string(),
+                a4_price_input: "4.00".to_string(),
+                ..crate::app::types::ManualBindingModifier::default()
+            }],
             finisher_items: vec![ManualFinisherLineItem {
                 finisher_type: ManualFinisherType::Binding,
+                binding_size: ManualPrintSize::A4,
+                binding_modifier_index: Some(0),
                 amount_input: "2".to_string(),
                 ..ManualFinisherLineItem::default()
             }],
@@ -2102,6 +2126,33 @@ mod tests {
 
         assert_eq!(totals.finishers_total_cents, Some(800));
         assert_eq!(totals.subtotal_cents, Some(800));
+    }
+
+    #[test]
+    fn manual_pricing_counts_binding_modifier_amounts() {
+        let settings = ManualPricingSettings {
+            binding_modifiers: vec![crate::app::types::ManualBindingModifier {
+                name_input: "Wire".to_string(),
+                a3_price_input: "6.00".to_string(),
+                ..crate::app::types::ManualBindingModifier::default()
+            }],
+            finisher_items: vec![ManualFinisherLineItem {
+                finisher_type: ManualFinisherType::Binding,
+                binding_size: ManualPrintSize::A3,
+                binding_modifier_index: Some(0),
+                amount_input: "2".to_string(),
+                ..ManualFinisherLineItem::default()
+            }],
+            ..ManualPricingSettings::default()
+        };
+
+        let totals = manual_pricing_totals(&settings);
+
+        assert_eq!(totals.finishers_total_cents, Some(1200));
+        assert!(matches!(
+            totals.finisher_states.as_slice(),
+            [ManualFinisherState::Ready(finisher)] if finisher.label == "Binding A3 Wire @ 6.00 EUR"
+        ));
     }
 
     #[test]
@@ -2127,11 +2178,17 @@ mod tests {
                 }],
                 finisher_items: vec![ManualFinisherLineItem {
                     finisher_type: ManualFinisherType::Binding,
+                    binding_size: ManualPrintSize::A4,
+                    binding_modifier_index: Some(0),
                     amount_input: "1".to_string(),
                     ..ManualFinisherLineItem::default()
                 }],
             }],
-            binding_input: "3.00".to_string(),
+            binding_modifiers: vec![crate::app::types::ManualBindingModifier {
+                name_input: "Spiral".to_string(),
+                a4_price_input: "3.00".to_string(),
+                ..crate::app::types::ManualBindingModifier::default()
+            }],
             discount_input: "10".to_string(),
             ..ManualPricingSettings::default()
         };

@@ -1,4 +1,11 @@
 (
+    recording_pricing: (
+        bw_first_input: "0.25",
+        bw_next_input: "0.10",
+        bw_rest_input: "0.06",
+        color_input: "0.50",
+        round_to_half_euro: true,
+    ),
     settings: (
         a0_input: "30",
         a1_input: "20",
@@ -9,7 +16,7 @@
         a3_bw_next_input: "0.20",
         a3_bw_rest_input: "0.12",
         a3_color_first_input: "1.25",
-        a3_color_rest_input: "0.5",
+        a3_color_rest_input: "1",
         a4_bw_first_input: "0.25",
         a4_bw_next_input: "0.10",
         a4_bw_rest_input: "0.06",
@@ -21,9 +28,127 @@
         laminate_a3_input: "2",
         laminate_a4_input: "1",
         laminate_a5_input: "0.7",
-        folding_input: "0.2",
-        binding_input: "3.50",
+        folding_input: "0.10",
+        binding_modifiers: [
+            (
+                name_input: "GLue pro",
+                applies_a0: false,
+                a0_price_input: "0.00",
+                applies_a1: false,
+                a1_price_input: "0.00",
+                applies_a2: false,
+                a2_price_input: "0.00",
+                applies_a3: true,
+                a3_price_input: "8",
+                applies_a4: true,
+                a4_price_input: "7",
+            ),
+            (
+                name_input: "Glue simple",
+                applies_a0: false,
+                a0_price_input: "0.00",
+                applies_a1: false,
+                a1_price_input: "0.00",
+                applies_a2: false,
+                a2_price_input: "0.00",
+                applies_a3: false,
+                a3_price_input: "0.00",
+                applies_a4: true,
+                a4_price_input: "4,50",
+            ),
+            (
+                name_input: "A4 METAL Rings",
+                applies_a0: false,
+                a0_price_input: "",
+                applies_a1: false,
+                a1_price_input: "",
+                applies_a2: false,
+                a2_price_input: "",
+                applies_a3: true,
+                a3_price_input: "7,0",
+                applies_a4: true,
+                a4_price_input: "4,50",
+            ),
+        ],
         modifiers: [
+            (
+                name_input: "recycled",
+                applies_a0: false,
+                a0_price_input: "1.00",
+                applies_a1: false,
+                a1_price_input: "1.00",
+                applies_a2: false,
+                a2_price_input: "1.00",
+                applies_a3: false,
+                a3_price_input: "1.00",
+                applies_a4: true,
+                a4_price_input: "0.026",
+            ),
+            (
+                name_input: "160 gram papier kleur",
+                applies_a0: false,
+                a0_price_input: "1.00",
+                applies_a1: false,
+                a1_price_input: "1.00",
+                applies_a2: false,
+                a2_price_input: "1.00",
+                applies_a3: true,
+                a3_price_input: "0.20",
+                applies_a4: true,
+                a4_price_input: "0.10",
+            ),
+            (
+                name_input: "Canvas",
+                applies_a0: true,
+                a0_price_input: "30",
+                applies_a1: false,
+                a1_price_input: "1.00",
+                applies_a2: false,
+                a2_price_input: "1.00",
+                applies_a3: false,
+                a3_price_input: "1.00",
+                applies_a4: false,
+                a4_price_input: "1.00",
+            ),
+            (
+                name_input: "Digigloss 320g",
+                applies_a0: false,
+                a0_price_input: "1.00",
+                applies_a1: false,
+                a1_price_input: "1.00",
+                applies_a2: false,
+                a2_price_input: "1.00",
+                applies_a3: true,
+                a3_price_input: "1.50",
+                applies_a4: true,
+                a4_price_input: "0.75",
+            ),
+            (
+                name_input: "Digigloss 120g",
+                applies_a0: false,
+                a0_price_input: "1.00",
+                applies_a1: false,
+                a1_price_input: "1.00",
+                applies_a2: false,
+                a2_price_input: "1.00",
+                applies_a3: true,
+                a3_price_input: "0.30",
+                applies_a4: true,
+                a4_price_input: "0.15",
+            ),
+            (
+                name_input: "stickers",
+                applies_a0: false,
+                a0_price_input: "1.00",
+                applies_a1: false,
+                a1_price_input: "1.00",
+                applies_a2: false,
+                a2_price_input: "1.00",
+                applies_a3: true,
+                a3_price_input: "6",
+                applies_a4: false,
+                a4_price_input: "1.00",
+            ),
             (
                 name_input: "heavyweight coated180g",
                 applies_a0: true,
@@ -105,8 +230,8 @@
         ],
         line_items: [
             (
-                size: A3,
-                print_mode: Color,
+                size: A4,
+                print_mode: Bw,
                 modifier_index: None,
                 double_sided: false,
                 sheets_input: "0",
@@ -114,10 +239,304 @@
             ),
         ],
         finisher_items: [],
+        booklets: [],
         cutting_enabled: false,
         discount_input: "",
         rounding_mode: FiveCents,
     ),
     bills: [],
-    bill_tombstones: [],
+    bill_tombstones: [
+        (
+            id: "stone-wind",
+            deleted_at_millis: 1778657498845,
+        ),
+        (
+            id: "granite-meadow",
+            deleted_at_millis: 1778657497302,
+        ),
+        (
+            id: "lilac-brook",
+            deleted_at_millis: 1778657492141,
+        ),
+        (
+            id: "hidden-circuit",
+            deleted_at_millis: 1778657490126,
+        ),
+        (
+            id: "satin-flame",
+            deleted_at_millis: 1778657488101,
+        ),
+        (
+            id: "ember-prairie",
+            deleted_at_millis: 1778657486069,
+        ),
+        (
+            id: "misty-quartz",
+            deleted_at_millis: 1778596443536,
+        ),
+        (
+            id: "woodland-journal",
+            deleted_at_millis: 1778583892632,
+        ),
+        (
+            id: "satin-comet",
+            deleted_at_millis: 1778580598112,
+        ),
+        (
+            id: "crisp-dawn",
+            deleted_at_millis: 1778579804992,
+        ),
+        (
+            id: "linen-shadow",
+            deleted_at_millis: 1778577032568,
+        ),
+        (
+            id: "winter-vista",
+            deleted_at_millis: 1778576816448,
+        ),
+        (
+            id: "river-bloom",
+            deleted_at_millis: 1778568914501,
+        ),
+        (
+            id: "river-terrace",
+            deleted_at_millis: 1778568912477,
+        ),
+        (
+            id: "jade-grove",
+            deleted_at_millis: 1778501896938,
+        ),
+        (
+            id: "hazel-cove",
+            deleted_at_millis: 1778501894650,
+        ),
+        (
+            id: "olive-atlas",
+            deleted_at_millis: 1778491051595,
+        ),
+        (
+            id: "calm-quartz",
+            deleted_at_millis: 1778245107859,
+        ),
+        (
+            id: "bright-sketch",
+            deleted_at_millis: 1778237993850,
+        ),
+        (
+            id: "hidden-shadow",
+            deleted_at_millis: 1778237988634,
+        ),
+        (
+            id: "willow-mesa",
+            deleted_at_millis: 1778237542266,
+        ),
+        (
+            id: "soft-garden",
+            deleted_at_millis: 1778226744609,
+        ),
+        (
+            id: "rustic-flame",
+            deleted_at_millis: 1778153729094,
+        ),
+        (
+            id: "misty-journal",
+            deleted_at_millis: 1778153723479,
+        ),
+        (
+            id: "quiet-beacon",
+            deleted_at_millis: 1778151138086,
+        ),
+        (
+            id: "stone-terrace",
+            deleted_at_millis: 1778050307872,
+        ),
+        (
+            id: "wild-trail",
+            deleted_at_millis: 1778050305904,
+        ),
+        (
+            id: "solar-atlas",
+            deleted_at_millis: 1778050298424,
+        ),
+        (
+            id: "opal-breeze",
+            deleted_at_millis: 1778050296545,
+        ),
+        (
+            id: "rustic-orbit",
+            deleted_at_millis: 1778050294880,
+        ),
+        (
+            id: "tender-cove",
+            deleted_at_millis: 1778050293160,
+        ),
+        (
+            id: "zephyr-lantern",
+            deleted_at_millis: 1778050284624,
+        ),
+        (
+            id: "zephyr-mirror",
+            deleted_at_millis: 1777903396657,
+        ),
+        (
+            id: "lilac-river",
+            deleted_at_millis: 1777903395489,
+        ),
+        (
+            id: "pearl-aurora",
+            deleted_at_millis: 1777903393914,
+        ),
+        (
+            id: "jade-aurora",
+            deleted_at_millis: 1777903392770,
+        ),
+        (
+            id: "amber-cloud",
+            deleted_at_millis: 1777445257906,
+        ),
+        (
+            id: "crisp-vista",
+            deleted_at_millis: 1777445253747,
+        ),
+        (
+            id: "steady-quartz",
+            deleted_at_millis: 1777445242098,
+        ),
+        (
+            id: "gentle-brook",
+            deleted_at_millis: 1777044859108,
+        ),
+        (
+            id: "summer-comet",
+            deleted_at_millis: 1777014028816,
+        ),
+        (
+            id: "summer-shadow",
+            deleted_at_millis: 1776958238603,
+        ),
+        (
+            id: "solar-brook",
+            deleted_at_millis: 1776958236275,
+        ),
+        (
+            id: "lunar-sketch",
+            deleted_at_millis: 1776956367062,
+        ),
+        (
+            id: "dusty-thicket",
+            deleted_at_millis: 1776951326858,
+        ),
+        (
+            id: "woodland-wonder",
+            deleted_at_millis: 1776951184484,
+        ),
+        (
+            id: "calm-garden",
+            deleted_at_millis: 1776950455251,
+        ),
+        (
+            id: "crisp-pine",
+            deleted_at_millis: 1776950453610,
+        ),
+        (
+            id: "steady-sketch",
+            deleted_at_millis: 1776949461284,
+        ),
+        (
+            id: "ivory-trail",
+            deleted_at_millis: 1776949459508,
+        ),
+        (
+            id: "soft-sketch",
+            deleted_at_millis: 1776949458218,
+        ),
+        (
+            id: "wild-field",
+            deleted_at_millis: 1776949441771,
+        ),
+        (
+            id: "olive-terrace",
+            deleted_at_millis: 1776949437490,
+        ),
+        (
+            id: "saffron-signal",
+            deleted_at_millis: 1776841050727,
+        ),
+        (
+            id: "pearl-flame",
+            deleted_at_millis: 1776841043399,
+        ),
+        (
+            id: "hazel-glow",
+            deleted_at_millis: 1776841032839,
+        ),
+        (
+            id: "summer-wonder",
+            deleted_at_millis: 1776694958348,
+        ),
+        (
+            id: "saffron-stone",
+            deleted_at_millis: 1776684708247,
+        ),
+        (
+            id: "woodland-canvas",
+            deleted_at_millis: 1776684061084,
+        ),
+        (
+            id: "rustic-crest",
+            deleted_at_millis: 1776668601948,
+        ),
+        (
+            id: "quiet-harbor",
+            deleted_at_millis: 1776668589869,
+        ),
+        (
+            id: "copper-summit",
+            deleted_at_millis: 1776668578853,
+        ),
+        (
+            id: "wild-cinder",
+            deleted_at_millis: 1776428586644,
+        ),
+        (
+            id: "zephyr-harbor",
+            deleted_at_millis: 1776418030450,
+        ),
+        (
+            id: "noble-trail",
+            deleted_at_millis: 1776350233033,
+        ),
+        (
+            id: "wild-forest",
+            deleted_at_millis: 1776324688974,
+        ),
+        (
+            id: "soft-summit",
+            deleted_at_millis: 1776324020077,
+        ),
+        (
+            id: "crisp-meadow",
+            deleted_at_millis: 1776323920766,
+        ),
+        (
+            id: "vivid-cloud",
+            deleted_at_millis: 1776174399848,
+        ),
+        (
+            id: "satin-crest",
+            deleted_at_millis: 1776173221768,
+        ),
+        (
+            id: "fern-crest",
+            deleted_at_millis: 1775743303100,
+        ),
+        (
+            id: "ochre-quartz",
+            deleted_at_millis: 1775741911578,
+        ),
+        (
+            id: "hidden-horizon",
+            deleted_at_millis: 1775741909986,
+        ),
+    ],
 )

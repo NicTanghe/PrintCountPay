@@ -99,6 +99,10 @@ impl std::fmt::Display for ManualPrintSize {
     }
 }
 
+fn default_manual_print_size() -> ManualPrintSize {
+    ManualPrintSize::A4
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ManualPrintMode {
     #[default]
@@ -220,8 +224,8 @@ pub struct ManualPricingLineItem {
 impl Default for ManualPricingLineItem {
     fn default() -> Self {
         Self {
-            size: ManualPrintSize::A3,
-            print_mode: ManualPrintMode::Color,
+            size: ManualPrintSize::A4,
+            print_mode: ManualPrintMode::Bw,
             modifier_index: None,
             double_sided: false,
             sheets_input: "0".to_string(),
@@ -259,6 +263,10 @@ pub struct ManualFinisherLineItem {
     pub(crate) finisher_type: ManualFinisherType,
     #[serde(default)]
     pub(crate) laminate_size: ManualLaminateSize,
+    #[serde(default = "default_manual_print_size")]
+    pub(crate) binding_size: ManualPrintSize,
+    #[serde(default)]
+    pub(crate) binding_modifier_index: Option<usize>,
     pub(crate) amount_input: String,
 }
 
@@ -267,6 +275,8 @@ impl Default for ManualFinisherLineItem {
         Self {
             finisher_type: ManualFinisherType::Laminate,
             laminate_size: ManualLaminateSize::A4,
+            binding_size: ManualPrintSize::A4,
+            binding_modifier_index: None,
             amount_input: String::new(),
         }
     }
@@ -285,6 +295,60 @@ fn normalize_manual_line_items(line_items: &mut Vec<ManualPricingLineItem>, modi
             line_item.modifier_index = None;
         }
         line_item.sync_sheets_from_sides();
+    }
+}
+
+fn normalize_manual_finisher_items(
+    finisher_items: &mut Vec<ManualFinisherLineItem>,
+    binding_modifiers: &[ManualBindingModifier],
+) {
+    for finisher_item in finisher_items {
+        if finisher_item.binding_modifier_index.is_some_and(|index| {
+            binding_modifiers
+                .get(index)
+                .map(|modifier| !modifier.applies_to_size(finisher_item.binding_size))
+                .unwrap_or(true)
+        }) {
+            finisher_item.binding_modifier_index = None;
+        }
+
+        if finisher_item.finisher_type == ManualFinisherType::Binding
+            && finisher_item.binding_modifier_index.is_none()
+        {
+            finisher_item.binding_modifier_index = binding_modifiers
+                .iter()
+                .position(|modifier| modifier.applies_to_size(finisher_item.binding_size));
+        }
+    }
+}
+
+fn shift_binding_modifier_indices_after_insert(
+    finisher_items: &mut Vec<ManualFinisherLineItem>,
+    inserted_index: usize,
+) {
+    for finisher_item in finisher_items {
+        if let Some(selected_index) = finisher_item.binding_modifier_index
+            && selected_index >= inserted_index
+        {
+            finisher_item.binding_modifier_index = Some(selected_index + 1);
+        }
+    }
+}
+
+fn shift_binding_modifier_indices_after_remove(
+    finisher_items: &mut Vec<ManualFinisherLineItem>,
+    removed_index: usize,
+) {
+    for finisher_item in finisher_items {
+        match finisher_item.binding_modifier_index {
+            Some(selected_index) if selected_index == removed_index => {
+                finisher_item.binding_modifier_index = None;
+            }
+            Some(selected_index) if selected_index > removed_index => {
+                finisher_item.binding_modifier_index = Some(selected_index - 1);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -317,11 +381,16 @@ impl ManualBooklet {
         }
     }
 
-    pub(crate) fn normalize(&mut self, modifier_count: usize) {
+    pub(crate) fn normalize(
+        &mut self,
+        modifier_count: usize,
+        binding_modifiers: &[ManualBindingModifier],
+    ) {
         if self.copies_input.trim().is_empty() {
             self.copies_input = default_manual_booklet_copies_input();
         }
         normalize_manual_line_items(&mut self.line_items, modifier_count);
+        normalize_manual_finisher_items(&mut self.finisher_items, binding_modifiers);
     }
 }
 
@@ -437,6 +506,107 @@ fn default_manual_paper_modifiers() -> Vec<ManualPaperModifier> {
     vec![ManualPaperModifier::default()]
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManualBindingModifier {
+    pub(crate) name_input: String,
+    #[serde(default, rename = "price_input", skip_serializing)]
+    pub(crate) legacy_price_input: String,
+    #[serde(default)]
+    pub(crate) applies_a0: bool,
+    #[serde(default)]
+    pub(crate) a0_price_input: String,
+    #[serde(default)]
+    pub(crate) applies_a1: bool,
+    #[serde(default)]
+    pub(crate) a1_price_input: String,
+    #[serde(default)]
+    pub(crate) applies_a2: bool,
+    #[serde(default)]
+    pub(crate) a2_price_input: String,
+    #[serde(default)]
+    pub(crate) applies_a3: bool,
+    #[serde(default)]
+    pub(crate) a3_price_input: String,
+    #[serde(default)]
+    pub(crate) applies_a4: bool,
+    #[serde(default)]
+    pub(crate) a4_price_input: String,
+}
+
+impl ManualBindingModifier {
+    pub(crate) fn applies_to_size(&self, size: ManualPrintSize) -> bool {
+        match size {
+            ManualPrintSize::A0 => self.applies_a0,
+            ManualPrintSize::A1 => self.applies_a1,
+            ManualPrintSize::A2 => self.applies_a2,
+            ManualPrintSize::A3 => self.applies_a3,
+            ManualPrintSize::A4 => self.applies_a4,
+        }
+    }
+
+    pub(crate) fn set_applies_to_size(&mut self, size: ManualPrintSize, value: bool) {
+        match size {
+            ManualPrintSize::A0 => self.applies_a0 = value,
+            ManualPrintSize::A1 => self.applies_a1 = value,
+            ManualPrintSize::A2 => self.applies_a2 = value,
+            ManualPrintSize::A3 => self.applies_a3 = value,
+            ManualPrintSize::A4 => self.applies_a4 = value,
+        }
+    }
+
+    pub(crate) fn price_input(&self, size: ManualPrintSize) -> &str {
+        match size {
+            ManualPrintSize::A0 => &self.a0_price_input,
+            ManualPrintSize::A1 => &self.a1_price_input,
+            ManualPrintSize::A2 => &self.a2_price_input,
+            ManualPrintSize::A3 => &self.a3_price_input,
+            ManualPrintSize::A4 => &self.a4_price_input,
+        }
+    }
+
+    pub(crate) fn set_price_input(&mut self, size: ManualPrintSize, value: String) {
+        match size {
+            ManualPrintSize::A0 => self.a0_price_input = value,
+            ManualPrintSize::A1 => self.a1_price_input = value,
+            ManualPrintSize::A2 => self.a2_price_input = value,
+            ManualPrintSize::A3 => self.a3_price_input = value,
+            ManualPrintSize::A4 => self.a4_price_input = value,
+        }
+    }
+
+    pub(crate) fn display_name(&self) -> String {
+        let trimmed = self.name_input.trim();
+        if trimmed.is_empty() {
+            "Unnamed binding modifier".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+}
+
+impl Default for ManualBindingModifier {
+    fn default() -> Self {
+        Self {
+            name_input: "Spiral".to_string(),
+            legacy_price_input: String::new(),
+            applies_a0: true,
+            a0_price_input: "0.00".to_string(),
+            applies_a1: true,
+            a1_price_input: "0.00".to_string(),
+            applies_a2: true,
+            a2_price_input: "0.00".to_string(),
+            applies_a3: true,
+            a3_price_input: "0.00".to_string(),
+            applies_a4: true,
+            a4_price_input: "0.00".to_string(),
+        }
+    }
+}
+
+fn default_manual_binding_modifiers() -> Vec<ManualBindingModifier> {
+    vec![ManualBindingModifier::default()]
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManualModifierChoice {
     pub(crate) index: Option<usize>,
@@ -491,8 +661,10 @@ pub struct ManualPricingSettings {
     pub(crate) laminate_a5_input: String,
     #[serde(default)]
     pub(crate) folding_input: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub(crate) binding_input: String,
+    #[serde(default)]
+    pub(crate) binding_modifiers: Vec<ManualBindingModifier>,
     #[serde(default = "default_manual_paper_modifiers")]
     pub(crate) modifiers: Vec<ManualPaperModifier>,
     #[serde(default)]
@@ -614,6 +786,48 @@ impl ManualPricingSettings {
         }
     }
 
+    pub(crate) fn binding_modifier(
+        &self,
+        selected_index: Option<usize>,
+    ) -> Option<&ManualBindingModifier> {
+        selected_index.and_then(|index| self.binding_modifiers.get(index))
+    }
+
+    pub(crate) fn first_binding_modifier_index_for_size(
+        &self,
+        size: ManualPrintSize,
+    ) -> Option<usize> {
+        self.binding_modifiers
+            .iter()
+            .position(|modifier| modifier.applies_to_size(size))
+    }
+
+    pub(crate) fn insert_binding_modifier(
+        &mut self,
+        index: usize,
+        modifier: ManualBindingModifier,
+    ) {
+        let index = index.min(self.binding_modifiers.len());
+        self.binding_modifiers.insert(index, modifier);
+        shift_binding_modifier_indices_after_insert(&mut self.finisher_items, index);
+        for booklet in &mut self.booklets {
+            shift_binding_modifier_indices_after_insert(&mut booklet.finisher_items, index);
+        }
+    }
+
+    pub(crate) fn remove_binding_modifier(&mut self, index: usize) -> bool {
+        if index >= self.binding_modifiers.len() {
+            return false;
+        }
+
+        self.binding_modifiers.remove(index);
+        shift_binding_modifier_indices_after_remove(&mut self.finisher_items, index);
+        for booklet in &mut self.booklets {
+            shift_binding_modifier_indices_after_remove(&mut booklet.finisher_items, index);
+        }
+        true
+    }
+
     pub(crate) fn reset_calculator_state(&mut self) {
         self.line_items = vec![ManualPricingLineItem::default()];
         self.finisher_items.clear();
@@ -629,7 +843,31 @@ impl ManualPricingSettings {
         if self.modifiers.is_empty() {
             self.modifiers = default_manual_paper_modifiers();
         }
+        if self.binding_modifiers.is_empty() {
+            let mut modifier = ManualBindingModifier::default();
+            let price = if self.binding_input.trim().is_empty() {
+                modifier.a4_price_input.clone()
+            } else {
+                self.binding_input.clone()
+            };
+            for size in ManualPrintSize::ALL {
+                modifier.set_applies_to_size(size, true);
+                modifier.set_price_input(size, price.clone());
+            }
+            self.binding_modifiers = vec![modifier];
+        }
         for modifier in &mut self.modifiers {
+            if !modifier.legacy_price_input.trim().is_empty() {
+                for size in ManualPrintSize::ALL {
+                    if modifier.applies_to_size(size)
+                        && modifier.price_input(size).trim().is_empty()
+                    {
+                        modifier.set_price_input(size, modifier.legacy_price_input.clone());
+                    }
+                }
+            }
+        }
+        for modifier in &mut self.binding_modifiers {
             if !modifier.legacy_price_input.trim().is_empty() {
                 for size in ManualPrintSize::ALL {
                     if modifier.applies_to_size(size)
@@ -680,8 +918,9 @@ impl ManualPricingSettings {
         }
 
         normalize_manual_line_items(&mut self.line_items, self.modifiers.len());
+        normalize_manual_finisher_items(&mut self.finisher_items, &self.binding_modifiers);
         for booklet in &mut self.booklets {
-            booklet.normalize(self.modifiers.len());
+            booklet.normalize(self.modifiers.len(), &self.binding_modifiers);
         }
     }
 
@@ -754,7 +993,8 @@ impl Default for ManualPricingSettings {
             laminate_a4_input: "0.00".to_string(),
             laminate_a5_input: "0.00".to_string(),
             folding_input: "0.00".to_string(),
-            binding_input: "0.00".to_string(),
+            binding_input: String::new(),
+            binding_modifiers: default_manual_binding_modifiers(),
             modifiers: default_manual_paper_modifiers(),
             line_items: vec![ManualPricingLineItem::default()],
             finisher_items: Vec::new(),
@@ -1049,6 +1289,8 @@ pub(crate) enum Message {
     ManualPricingFinisherRemoved(usize),
     ManualPricingFinisherTypeChanged(usize, ManualFinisherType),
     ManualPricingFinisherSizeChanged(usize, ManualLaminateSize),
+    ManualPricingFinisherBindingSizeChanged(usize, ManualPrintSize),
+    ManualPricingFinisherBindingModifierChanged(usize, Option<usize>),
     ManualPricingFinisherAmountChanged(usize, String),
     SelectManualBookletTab(Option<usize>),
     ManualPricingBookletAdded,
@@ -1060,7 +1302,11 @@ pub(crate) enum Message {
     ManualPricingColorTierChanged(ManualPrintSize, ManualColorTier, String),
     ManualPricingLaminatePriceChanged(ManualLaminateSize, String),
     ManualPricingFoldingPriceChanged(String),
-    ManualPricingBindingPriceChanged(String),
+    ManualPricingBindingModifierAdded,
+    ManualPricingBindingModifierRemoved(usize),
+    ManualPricingBindingModifierNameChanged(usize, String),
+    ManualPricingBindingModifierPriceChanged(usize, ManualPrintSize, String),
+    ManualPricingBindingModifierAppliesChanged(usize, ManualPrintSize, bool),
     ManualPricingModifierAdded,
     ManualPricingModifierRemoved(usize),
     ManualPricingModifierNameChanged(usize, String),
@@ -1372,11 +1618,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn manual_pricing_line_item_defaults_to_color_a3_with_zero_sides() {
+    fn manual_pricing_line_item_defaults_to_bw_a4_with_zero_sides() {
         let default_line = ManualPricingLineItem::default();
 
-        assert_eq!(default_line.size, ManualPrintSize::A3);
-        assert_eq!(default_line.print_mode, ManualPrintMode::Color);
+        assert_eq!(default_line.size, ManualPrintSize::A4);
+        assert_eq!(default_line.print_mode, ManualPrintMode::Bw);
         assert_eq!(default_line.modifier_index, None);
         assert_eq!(default_line.sides_input, "0");
         assert_eq!(default_line.sheets_input, "0");
@@ -1430,6 +1676,11 @@ mod tests {
             applies_a4: true,
             a4_price_input: "1.25".to_string(),
         }];
+        let binding_modifiers = vec![ManualBindingModifier {
+            name_input: "Wire".to_string(),
+            a4_price_input: "8.00".to_string(),
+            ..ManualBindingModifier::default()
+        }];
         let mut settings = ManualPricingSettings {
             a0_input: "30.00".to_string(),
             a1_input: "20.00".to_string(),
@@ -1437,6 +1688,7 @@ mod tests {
             a3_input: "3.25".to_string(),
             a4_input: "1.50".to_string(),
             binding_input: "7.50".to_string(),
+            binding_modifiers: binding_modifiers.clone(),
             modifiers: modifiers.clone(),
             line_items: vec![ManualPricingLineItem {
                 size: ManualPrintSize::A0,
@@ -1449,6 +1701,8 @@ mod tests {
             finisher_items: vec![ManualFinisherLineItem {
                 finisher_type: ManualFinisherType::Binding,
                 laminate_size: ManualLaminateSize::A4,
+                binding_size: ManualPrintSize::A4,
+                binding_modifier_index: Some(0),
                 amount_input: "3".to_string(),
             }],
             booklet_enabled: true,
@@ -1465,6 +1719,7 @@ mod tests {
         assert_eq!(settings.a0_input, "30.00");
         assert_eq!(settings.a3_input, "3.25");
         assert_eq!(settings.binding_input, "7.50");
+        assert_eq!(settings.binding_modifiers, binding_modifiers);
         assert_eq!(settings.modifiers, modifiers);
         assert_eq!(settings.line_items, vec![ManualPricingLineItem::default()]);
         assert!(settings.finisher_items.is_empty());
@@ -1474,6 +1729,64 @@ mod tests {
         assert!(!settings.cutting_enabled);
         assert!(settings.discount_input.is_empty());
         assert_eq!(settings.rounding_mode, ManualRoundingMode::FiveCents);
+    }
+
+    #[test]
+    fn binding_modifier_insert_and_remove_updates_finisher_selections() {
+        let mut settings = ManualPricingSettings {
+            binding_modifiers: vec![ManualBindingModifier {
+                name_input: "Wire".to_string(),
+                a4_price_input: "6.00".to_string(),
+                ..ManualBindingModifier::default()
+            }],
+            finisher_items: vec![ManualFinisherLineItem {
+                finisher_type: ManualFinisherType::Binding,
+                binding_modifier_index: Some(0),
+                amount_input: "1".to_string(),
+                ..ManualFinisherLineItem::default()
+            }],
+            booklets: vec![ManualBooklet {
+                finisher_items: vec![ManualFinisherLineItem {
+                    finisher_type: ManualFinisherType::Binding,
+                    binding_modifier_index: Some(0),
+                    amount_input: "1".to_string(),
+                    ..ManualFinisherLineItem::default()
+                }],
+                ..ManualBooklet::default()
+            }],
+            ..ManualPricingSettings::default()
+        };
+
+        settings.insert_binding_modifier(
+            0,
+            ManualBindingModifier {
+                name_input: "Spiral".to_string(),
+                a4_price_input: "4.00".to_string(),
+                ..ManualBindingModifier::default()
+            },
+        );
+
+        assert_eq!(settings.finisher_items[0].binding_modifier_index, Some(1));
+        assert_eq!(
+            settings.booklets[0].finisher_items[0].binding_modifier_index,
+            Some(1)
+        );
+
+        assert!(settings.remove_binding_modifier(0));
+
+        assert_eq!(settings.finisher_items[0].binding_modifier_index, Some(0));
+        assert_eq!(
+            settings.booklets[0].finisher_items[0].binding_modifier_index,
+            Some(0)
+        );
+
+        assert!(settings.remove_binding_modifier(0));
+
+        assert_eq!(settings.finisher_items[0].binding_modifier_index, None);
+        assert_eq!(
+            settings.booklets[0].finisher_items[0].binding_modifier_index,
+            None
+        );
     }
 
     #[test]

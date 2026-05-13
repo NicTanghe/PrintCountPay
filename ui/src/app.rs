@@ -35,11 +35,12 @@ mod styles;
 mod types;
 
 pub use types::{
-    DiscoveryOutcome, DiscoveryProbeResult, Flags, ManualBooklet, ManualBwTier, ManualColorTier,
-    ManualFinisherLineItem, ManualFinisherType, ManualLaminateSize, ManualModifierChoice,
-    ManualPaperModifier, ManualPricingBill, ManualPricingBillTombstone, ManualPricingLineItem,
-    ManualPricingSettings, ManualPricingTab, ManualPrintMode, ManualPrintSize, ManualRoundingMode,
-    PrinterTab, ProfileChoice, RecordingCategory, SnmpErrorInfo, Tab,
+    DiscoveryOutcome, DiscoveryProbeResult, Flags, ManualBindingModifier, ManualBooklet,
+    ManualBwTier, ManualColorTier, ManualFinisherLineItem, ManualFinisherType, ManualLaminateSize,
+    ManualModifierChoice, ManualPaperModifier, ManualPricingBill, ManualPricingBillTombstone,
+    ManualPricingLineItem, ManualPricingSettings, ManualPricingTab, ManualPrintMode,
+    ManualPrintSize, ManualRoundingMode, PrinterTab, ProfileChoice, RecordingCategory,
+    SnmpErrorInfo, Tab,
 };
 pub(crate) use types::{
     ManualBillStore, ManualPricingWorkspace, Message, PricingSettings, RecordingSession,
@@ -317,7 +318,6 @@ impl PrintCountApp {
         app.load_statistics_if_present();
         app.ensure_statistics_selection();
         app.sync_statistics_visible_series();
-        app.queue_statistics_cleanup();
         app.persist_manual_bill_store_if_dirty();
         app.last_shared_state = app.build_shared_state(app.last_shared_state.revision);
 
@@ -833,9 +833,19 @@ impl PrintCountApp {
                 Command::none()
             }
             Message::ManualPricingFinisherTypeChanged(index, finisher_type) => {
+                let default_binding_modifier_index = if finisher_type == ManualFinisherType::Binding
+                {
+                    self.active_manual_pricing()
+                        .first_binding_modifier_index_for_size(ManualPrintSize::A4)
+                } else {
+                    None
+                };
                 if let Some(finisher_item) = self.active_manual_finisher_items_mut().get_mut(index)
                 {
                     finisher_item.finisher_type = finisher_type;
+                    if finisher_type == ManualFinisherType::Binding {
+                        finisher_item.binding_modifier_index = default_binding_modifier_index;
+                    }
                 }
                 Command::none()
             }
@@ -843,6 +853,38 @@ impl PrintCountApp {
                 if let Some(finisher_item) = self.active_manual_finisher_items_mut().get_mut(index)
                 {
                     finisher_item.laminate_size = laminate_size;
+                }
+                Command::none()
+            }
+            Message::ManualPricingFinisherBindingSizeChanged(index, binding_size) => {
+                let selected_modifier_still_applies = self
+                    .active_manual_pricing()
+                    .finisher_items(self.active_manual_booklet_index())
+                    .get(index)
+                    .and_then(|finisher_item| finisher_item.binding_modifier_index)
+                    .and_then(|modifier_index| {
+                        self.active_manual_pricing()
+                            .binding_modifiers
+                            .get(modifier_index)
+                    })
+                    .is_some_and(|modifier| modifier.applies_to_size(binding_size));
+                let fallback_modifier_index = self
+                    .active_manual_pricing()
+                    .first_binding_modifier_index_for_size(binding_size);
+
+                if let Some(finisher_item) = self.active_manual_finisher_items_mut().get_mut(index)
+                {
+                    finisher_item.binding_size = binding_size;
+                    if !selected_modifier_still_applies {
+                        finisher_item.binding_modifier_index = fallback_modifier_index;
+                    }
+                }
+                Command::none()
+            }
+            Message::ManualPricingFinisherBindingModifierChanged(index, binding_modifier_index) => {
+                if let Some(finisher_item) = self.active_manual_finisher_items_mut().get_mut(index)
+                {
+                    finisher_item.binding_modifier_index = binding_modifier_index;
                 }
                 Command::none()
             }
@@ -926,9 +968,67 @@ impl PrintCountApp {
                 self.manual_pricing_dirty = true;
                 Command::none()
             }
-            Message::ManualPricingBindingPriceChanged(value) => {
-                self.active_manual_pricing_mut().binding_input = value;
+            Message::ManualPricingBindingModifierAdded => {
+                self.active_manual_pricing_mut()
+                    .insert_binding_modifier(0, ManualBindingModifier::default());
                 self.manual_pricing_dirty = true;
+                Command::none()
+            }
+            Message::ManualPricingBindingModifierRemoved(index) => {
+                if self
+                    .active_manual_pricing_mut()
+                    .remove_binding_modifier(index)
+                {
+                    self.manual_pricing_dirty = true;
+                }
+                Command::none()
+            }
+            Message::ManualPricingBindingModifierNameChanged(index, value) => {
+                if let Some(modifier) = self
+                    .active_manual_pricing_mut()
+                    .binding_modifiers
+                    .get_mut(index)
+                {
+                    modifier.name_input = value;
+                    self.manual_pricing_dirty = true;
+                }
+                Command::none()
+            }
+            Message::ManualPricingBindingModifierPriceChanged(index, size, value) => {
+                if let Some(modifier) = self
+                    .active_manual_pricing_mut()
+                    .binding_modifiers
+                    .get_mut(index)
+                {
+                    modifier.set_price_input(size, value);
+                    self.manual_pricing_dirty = true;
+                }
+                Command::none()
+            }
+            Message::ManualPricingBindingModifierAppliesChanged(index, size, value) => {
+                let manual = self.active_manual_pricing_mut();
+                if let Some(modifier) = manual.binding_modifiers.get_mut(index) {
+                    modifier.set_applies_to_size(size, value);
+                    if !value {
+                        for finisher_item in &mut manual.finisher_items {
+                            if finisher_item.binding_size == size
+                                && finisher_item.binding_modifier_index == Some(index)
+                            {
+                                finisher_item.binding_modifier_index = None;
+                            }
+                        }
+                        for booklet in &mut manual.booklets {
+                            for finisher_item in &mut booklet.finisher_items {
+                                if finisher_item.binding_size == size
+                                    && finisher_item.binding_modifier_index == Some(index)
+                                {
+                                    finisher_item.binding_modifier_index = None;
+                                }
+                            }
+                        }
+                    }
+                    self.manual_pricing_dirty = true;
+                }
                 Command::none()
             }
             Message::ManualPricingModifierAdded => {
@@ -1082,8 +1182,6 @@ impl PrintCountApp {
             iced::time::every(Duration::from_secs(5)).map(|_| Message::PollSelectedSnmp);
         let statistics_poll_tick =
             iced::time::every(STATISTICS_POLL_TICK).map(|_| Message::StatisticsPollTick);
-        let statistics_cleanup_tick =
-            iced::time::every(STATISTICS_CLEANUP_TICK).map(|_| Message::StatisticsCleanupTick);
         let sync_tick = iced::time::every(sync::SYNC_FLUSH_INTERVAL).map(|_| Message::SyncTick);
         let sync_subscription = sync::subscription().map(Message::SyncEvent);
         let global_events = iced::event::listen_with(|event, _status, _window| match event {
@@ -1103,11 +1201,15 @@ impl PrintCountApp {
             log_tick,
             poll_tick,
             statistics_poll_tick,
-            statistics_cleanup_tick,
             sync_tick,
             sync_subscription,
             global_events,
         ];
+        if self.statistics_cleanup_in_flight {
+            subscriptions.push(
+                iced::time::every(STATISTICS_CLEANUP_TICK).map(|_| Message::StatisticsCleanupTick),
+            );
+        }
         if self.pending_printer_drag.is_some() {
             subscriptions.push(
                 iced::time::every(PRINTER_REORDER_HOLD_TICK)

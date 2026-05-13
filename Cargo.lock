@@ -2754,7 +2754,7 @@ checksum = "e8cf8e6a8aa66ce33f63993ffc4ea4271eb5b0530a9002db8455ea6050c77bfa"
 
 [[package]]
 name = "printcountpay-app"
-version = "3.2.19"
+version = "3.2.20"
 dependencies = [
  "printcountpay-core",
  "printcountpay-ui",
@@ -2763,7 +2763,7 @@ dependencies = [
 
 [[package]]
 name = "printcountpay-core"
-version = "3.2.19"
+version = "3.2.20"
 dependencies = [
  "get_if_addrs",
  "ron",
@@ -2776,7 +2776,7 @@ dependencies = [
 
 [[package]]
 name = "printcountpay-ui"
-version = "3.2.19"
+version = "3.2.20"
 dependencies = [
  "arboard",
  "iced",
