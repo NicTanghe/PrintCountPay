@@ -39,7 +39,7 @@
                 applies_a2: false,
                 a2_price_input: "0.00",
                 applies_a3: true,
-                a3_price_input: "8",
+                a3_price_input: "",
                 applies_a4: true,
                 a4_price_input: "7",
             ),
