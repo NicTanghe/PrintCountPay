@@ -1221,17 +1221,13 @@ impl PrintCountApp {
             text("Flat print price per side")
                 .size(15)
                 .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-            text("Use flat per-side pricing for A0, A1, and A2.")
+            text("Use flat per-side pricing for non-tiered sizes.")
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
         ]
         .spacing(8);
 
-        for size in [
-            ManualPrintSize::A0,
-            ManualPrintSize::A1,
-            ManualPrintSize::A2,
-        ] {
+        for size in ManualPrintSize::FLAT_PRICED {
             size_prices = size_prices.push(self.manual_input(
                 &format!("{size} per side (EUR)"),
                 "0.00",
@@ -1245,11 +1241,10 @@ impl PrintCountApp {
             .width(Length::Fill)
             .style(theme::Container::Box);
 
-        let tiered_prices = column![
-            self.manual_tiered_price_box(ManualPrintSize::A3),
-            self.manual_tiered_price_box(ManualPrintSize::A4),
-        ]
-        .spacing(12);
+        let mut tiered_prices = iced::widget::Column::new().spacing(12);
+        for size in ManualPrintSize::TIERED_PRICED {
+            tiered_prices = tiered_prices.push(self.manual_tiered_price_box(size));
+        }
 
         let mut modifier_setup = column![
             row![
@@ -1264,7 +1259,7 @@ impl PrintCountApp {
                     .on_press(Message::ManualPricingModifierAdded),
             ]
             .align_items(Alignment::Center),
-            text("Paper modifiers are charged per sheet. Configure A0, A1, A2, A3, and A4 separately for each modifier.")
+            text("Paper modifiers are charged per sheet. Configure each print size separately for each modifier.")
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
         ]
@@ -1749,7 +1744,7 @@ impl PrintCountApp {
                     .on_press(Message::ManualPricingBindingModifierAdded),
             ]
             .align_items(Alignment::Center),
-            text("Binding modifiers are charged per binding. Configure A0, A1, A2, A3, and A4 separately for each modifier.")
+            text("Binding modifiers are charged per binding. Configure each print size separately for each modifier.")
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
         ]
@@ -2290,7 +2285,7 @@ impl PrintCountApp {
             row![
                 text(size.to_string())
                     .size(12)
-                    .width(Length::Fixed(28.0))
+                    .width(Length::Fixed(96.0))
                     .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                 checkbox(enabled)
                     .label("Applies")
@@ -2316,17 +2311,15 @@ impl PrintCountApp {
             .align_items(Alignment::Center)
         };
 
-        let applies = column![
+        let mut applies = column![
             text("Per-size setup")
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-            size_row(ManualPrintSize::A0),
-            size_row(ManualPrintSize::A1),
-            size_row(ManualPrintSize::A2),
-            size_row(ManualPrintSize::A3),
-            size_row(ManualPrintSize::A4),
         ]
         .spacing(8);
+        for size in ManualPrintSize::ALL {
+            applies = applies.push(size_row(size));
+        }
 
         container(column![controls, applies].spacing(8))
             .padding(10)
@@ -2369,7 +2362,7 @@ impl PrintCountApp {
             row![
                 text(size.to_string())
                     .size(12)
-                    .width(Length::Fixed(28.0))
+                    .width(Length::Fixed(96.0))
                     .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                 checkbox(enabled)
                     .label("Applies")
@@ -2395,17 +2388,15 @@ impl PrintCountApp {
             .align_items(Alignment::Center)
         };
 
-        let applies = column![
+        let mut applies = column![
             text("Per-size setup")
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
-            size_row(ManualPrintSize::A0),
-            size_row(ManualPrintSize::A1),
-            size_row(ManualPrintSize::A2),
-            size_row(ManualPrintSize::A3),
-            size_row(ManualPrintSize::A4),
         ]
         .spacing(8);
+        for size in ManualPrintSize::ALL {
+            applies = applies.push(size_row(size));
+        }
 
         container(column![controls, applies].spacing(8))
             .padding(10)
@@ -2514,7 +2505,7 @@ impl PrintCountApp {
                 text("Manual pricing")
                     .size(15)
                     .style(theme::Text::Color(name_color)),
-                text("A0-A4, paper types, discount, rounding")
+                text("A0-A7, buisnesscard, paper types")
                     .size(12)
                     .style(theme::Text::Color(secondary_color)),
             ]

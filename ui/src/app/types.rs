@@ -81,10 +81,44 @@ pub enum ManualPrintSize {
     A2,
     A3,
     A4,
+    A5,
+    A6,
+    A7,
+    #[serde(
+        rename = "buisnesscard",
+        alias = "Buisnesscard",
+        alias = "BusinessCard",
+        alias = "businesscard"
+    )]
+    Buisnesscard,
 }
 
 impl ManualPrintSize {
-    pub const ALL: [Self; 5] = [Self::A0, Self::A1, Self::A2, Self::A3, Self::A4];
+    pub const ALL: [Self; 9] = [
+        Self::A0,
+        Self::A1,
+        Self::A2,
+        Self::A3,
+        Self::A4,
+        Self::A5,
+        Self::A6,
+        Self::A7,
+        Self::Buisnesscard,
+    ];
+    pub const FLAT_PRICED: [Self; 7] = [
+        Self::A0,
+        Self::A1,
+        Self::A2,
+        Self::A5,
+        Self::A6,
+        Self::A7,
+        Self::Buisnesscard,
+    ];
+    pub const TIERED_PRICED: [Self; 2] = [Self::A3, Self::A4];
+
+    pub(crate) fn uses_tiered_print_pricing(self) -> bool {
+        matches!(self, Self::A3 | Self::A4)
+    }
 }
 
 impl std::fmt::Display for ManualPrintSize {
@@ -95,12 +129,20 @@ impl std::fmt::Display for ManualPrintSize {
             Self::A2 => write!(f, "A2"),
             Self::A3 => write!(f, "A3"),
             Self::A4 => write!(f, "A4"),
+            Self::A5 => write!(f, "A5"),
+            Self::A6 => write!(f, "A6"),
+            Self::A7 => write!(f, "A7"),
+            Self::Buisnesscard => write!(f, "buisnesscard"),
         }
     }
 }
 
 fn default_manual_print_size() -> ManualPrintSize {
     ManualPrintSize::A4
+}
+
+fn default_zero_price_input() -> String {
+    "0.00".to_string()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -430,6 +472,22 @@ pub struct ManualPaperModifier {
     pub(crate) applies_a4: bool,
     #[serde(default)]
     pub(crate) a4_price_input: String,
+    #[serde(default)]
+    pub(crate) applies_a5: bool,
+    #[serde(default)]
+    pub(crate) a5_price_input: String,
+    #[serde(default)]
+    pub(crate) applies_a6: bool,
+    #[serde(default)]
+    pub(crate) a6_price_input: String,
+    #[serde(default)]
+    pub(crate) applies_a7: bool,
+    #[serde(default)]
+    pub(crate) a7_price_input: String,
+    #[serde(default)]
+    pub(crate) applies_buisnesscard: bool,
+    #[serde(default)]
+    pub(crate) buisnesscard_price_input: String,
 }
 
 impl ManualPaperModifier {
@@ -440,6 +498,10 @@ impl ManualPaperModifier {
             ManualPrintSize::A2 => self.applies_a2,
             ManualPrintSize::A3 => self.applies_a3,
             ManualPrintSize::A4 => self.applies_a4,
+            ManualPrintSize::A5 => self.applies_a5,
+            ManualPrintSize::A6 => self.applies_a6,
+            ManualPrintSize::A7 => self.applies_a7,
+            ManualPrintSize::Buisnesscard => self.applies_buisnesscard,
         }
     }
 
@@ -450,6 +512,10 @@ impl ManualPaperModifier {
             ManualPrintSize::A2 => self.applies_a2 = value,
             ManualPrintSize::A3 => self.applies_a3 = value,
             ManualPrintSize::A4 => self.applies_a4 = value,
+            ManualPrintSize::A5 => self.applies_a5 = value,
+            ManualPrintSize::A6 => self.applies_a6 = value,
+            ManualPrintSize::A7 => self.applies_a7 = value,
+            ManualPrintSize::Buisnesscard => self.applies_buisnesscard = value,
         }
     }
 
@@ -460,6 +526,10 @@ impl ManualPaperModifier {
             ManualPrintSize::A2 => &self.a2_price_input,
             ManualPrintSize::A3 => &self.a3_price_input,
             ManualPrintSize::A4 => &self.a4_price_input,
+            ManualPrintSize::A5 => &self.a5_price_input,
+            ManualPrintSize::A6 => &self.a6_price_input,
+            ManualPrintSize::A7 => &self.a7_price_input,
+            ManualPrintSize::Buisnesscard => &self.buisnesscard_price_input,
         }
     }
 
@@ -470,6 +540,10 @@ impl ManualPaperModifier {
             ManualPrintSize::A2 => self.a2_price_input = value,
             ManualPrintSize::A3 => self.a3_price_input = value,
             ManualPrintSize::A4 => self.a4_price_input = value,
+            ManualPrintSize::A5 => self.a5_price_input = value,
+            ManualPrintSize::A6 => self.a6_price_input = value,
+            ManualPrintSize::A7 => self.a7_price_input = value,
+            ManualPrintSize::Buisnesscard => self.buisnesscard_price_input = value,
         }
     }
 
@@ -498,6 +572,14 @@ impl Default for ManualPaperModifier {
             a3_price_input: "1.00".to_string(),
             applies_a4: true,
             a4_price_input: "1.00".to_string(),
+            applies_a5: true,
+            a5_price_input: "1.00".to_string(),
+            applies_a6: true,
+            a6_price_input: "1.00".to_string(),
+            applies_a7: true,
+            a7_price_input: "1.00".to_string(),
+            applies_buisnesscard: true,
+            buisnesscard_price_input: "1.00".to_string(),
         }
     }
 }
@@ -531,6 +613,22 @@ pub struct ManualBindingModifier {
     pub(crate) applies_a4: bool,
     #[serde(default)]
     pub(crate) a4_price_input: String,
+    #[serde(default)]
+    pub(crate) applies_a5: bool,
+    #[serde(default)]
+    pub(crate) a5_price_input: String,
+    #[serde(default)]
+    pub(crate) applies_a6: bool,
+    #[serde(default)]
+    pub(crate) a6_price_input: String,
+    #[serde(default)]
+    pub(crate) applies_a7: bool,
+    #[serde(default)]
+    pub(crate) a7_price_input: String,
+    #[serde(default)]
+    pub(crate) applies_buisnesscard: bool,
+    #[serde(default)]
+    pub(crate) buisnesscard_price_input: String,
 }
 
 impl ManualBindingModifier {
@@ -541,6 +639,10 @@ impl ManualBindingModifier {
             ManualPrintSize::A2 => self.applies_a2,
             ManualPrintSize::A3 => self.applies_a3,
             ManualPrintSize::A4 => self.applies_a4,
+            ManualPrintSize::A5 => self.applies_a5,
+            ManualPrintSize::A6 => self.applies_a6,
+            ManualPrintSize::A7 => self.applies_a7,
+            ManualPrintSize::Buisnesscard => self.applies_buisnesscard,
         }
     }
 
@@ -551,6 +653,10 @@ impl ManualBindingModifier {
             ManualPrintSize::A2 => self.applies_a2 = value,
             ManualPrintSize::A3 => self.applies_a3 = value,
             ManualPrintSize::A4 => self.applies_a4 = value,
+            ManualPrintSize::A5 => self.applies_a5 = value,
+            ManualPrintSize::A6 => self.applies_a6 = value,
+            ManualPrintSize::A7 => self.applies_a7 = value,
+            ManualPrintSize::Buisnesscard => self.applies_buisnesscard = value,
         }
     }
 
@@ -561,6 +667,10 @@ impl ManualBindingModifier {
             ManualPrintSize::A2 => &self.a2_price_input,
             ManualPrintSize::A3 => &self.a3_price_input,
             ManualPrintSize::A4 => &self.a4_price_input,
+            ManualPrintSize::A5 => &self.a5_price_input,
+            ManualPrintSize::A6 => &self.a6_price_input,
+            ManualPrintSize::A7 => &self.a7_price_input,
+            ManualPrintSize::Buisnesscard => &self.buisnesscard_price_input,
         }
     }
 
@@ -571,6 +681,10 @@ impl ManualBindingModifier {
             ManualPrintSize::A2 => self.a2_price_input = value,
             ManualPrintSize::A3 => self.a3_price_input = value,
             ManualPrintSize::A4 => self.a4_price_input = value,
+            ManualPrintSize::A5 => self.a5_price_input = value,
+            ManualPrintSize::A6 => self.a6_price_input = value,
+            ManualPrintSize::A7 => self.a7_price_input = value,
+            ManualPrintSize::Buisnesscard => self.buisnesscard_price_input = value,
         }
     }
 
@@ -599,6 +713,14 @@ impl Default for ManualBindingModifier {
             a3_price_input: "0.00".to_string(),
             applies_a4: true,
             a4_price_input: "0.00".to_string(),
+            applies_a5: true,
+            a5_price_input: "0.00".to_string(),
+            applies_a6: true,
+            a6_price_input: "0.00".to_string(),
+            applies_a7: true,
+            a7_price_input: "0.00".to_string(),
+            applies_buisnesscard: true,
+            buisnesscard_price_input: "0.00".to_string(),
         }
     }
 }
@@ -627,6 +749,14 @@ pub struct ManualPricingSettings {
     pub(crate) a2_input: String,
     pub(crate) a3_input: String,
     pub(crate) a4_input: String,
+    #[serde(default = "default_zero_price_input")]
+    pub(crate) a5_input: String,
+    #[serde(default = "default_zero_price_input")]
+    pub(crate) a6_input: String,
+    #[serde(default = "default_zero_price_input")]
+    pub(crate) a7_input: String,
+    #[serde(default = "default_zero_price_input")]
+    pub(crate) buisnesscard_input: String,
     #[serde(default)]
     pub(crate) a3_bw_first_input: String,
     #[serde(default)]
@@ -693,6 +823,10 @@ impl ManualPricingSettings {
             ManualPrintSize::A2 => &self.a2_input,
             ManualPrintSize::A3 => &self.a3_input,
             ManualPrintSize::A4 => &self.a4_input,
+            ManualPrintSize::A5 => &self.a5_input,
+            ManualPrintSize::A6 => &self.a6_input,
+            ManualPrintSize::A7 => &self.a7_input,
+            ManualPrintSize::Buisnesscard => &self.buisnesscard_input,
         }
     }
 
@@ -703,6 +837,10 @@ impl ManualPricingSettings {
             ManualPrintSize::A2 => self.a2_input = value,
             ManualPrintSize::A3 => self.a3_input = value,
             ManualPrintSize::A4 => self.a4_input = value,
+            ManualPrintSize::A5 => self.a5_input = value,
+            ManualPrintSize::A6 => self.a6_input = value,
+            ManualPrintSize::A7 => self.a7_input = value,
+            ManualPrintSize::Buisnesscard => self.buisnesscard_input = value,
         }
     }
 
@@ -976,6 +1114,10 @@ impl Default for ManualPricingSettings {
             a2_input: "0.00".to_string(),
             a3_input: "1.00".to_string(),
             a4_input: "0.00".to_string(),
+            a5_input: "0.00".to_string(),
+            a6_input: "0.00".to_string(),
+            a7_input: "0.00".to_string(),
+            buisnesscard_input: "0.00".to_string(),
             a3_bw_first_input: "1.00".to_string(),
             a3_bw_next_input: "1.00".to_string(),
             a3_bw_rest_input: "1.00".to_string(),
@@ -1675,6 +1817,7 @@ mod tests {
             a3_price_input: "2.25".to_string(),
             applies_a4: true,
             a4_price_input: "1.25".to_string(),
+            ..ManualPaperModifier::default()
         }];
         let binding_modifiers = vec![ManualBindingModifier {
             name_input: "Wire".to_string(),

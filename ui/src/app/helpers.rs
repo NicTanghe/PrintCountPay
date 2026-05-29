@@ -17,8 +17,8 @@ use crate::app::profiles::{ManufacturerProfile, RecordingOidProfile, TonerOidPro
 use crate::app::types::{
     BwPricing, ManualBooklet, ManualBwTier, ManualColorTier, ManualFinisherLineItem,
     ManualFinisherType, ManualPricingLineItem, ManualPricingSettings, ManualPrintMode,
-    ManualPrintSize, ManualRoundingMode, Message, PricingSettings, RecordingCategory,
-    RecordingOidSettings, RecordingSession, RecordingSnapshot, SnmpPollStatus,
+    ManualRoundingMode, Message, PricingSettings, RecordingCategory, RecordingOidSettings,
+    RecordingSession, RecordingSnapshot, SnmpPollStatus,
 };
 
 pub(crate) fn level_color(level: tracing::Level) -> Color {
@@ -959,7 +959,7 @@ fn manual_print_pricing(
     counters: ManualPrintCounters,
 ) -> Option<ManualPrintPricing> {
     match line_item.size {
-        ManualPrintSize::A3 | ManualPrintSize::A4 => match line_item.print_mode {
+        size if size.uses_tiered_print_pricing() => match line_item.print_mode {
             ManualPrintMode::Bw => {
                 let first = parse_price_input(
                     settings.bw_tier_input(line_item.size, ManualBwTier::FirstFive)?,
@@ -1804,6 +1804,7 @@ mod tests {
                 a3_price_input: "1.00".to_string(),
                 applies_a4: true,
                 a4_price_input: "0.75".to_string(),
+                ..ManualPaperModifier::default()
             }],
             line_items: vec![ManualPricingLineItem {
                 size: ManualPrintSize::A3,
@@ -1883,6 +1884,32 @@ mod tests {
         let totals = manual_pricing_totals(&settings);
 
         assert_eq!(totals.subtotal_cents, Some(310));
+    }
+
+    #[test]
+    fn manual_pricing_uses_flat_prices_for_cut_sizes() {
+        let settings = ManualPricingSettings {
+            a7_input: "0.12".to_string(),
+            buisnesscard_input: "0.08".to_string(),
+            line_items: vec![
+                ManualPricingLineItem {
+                    size: ManualPrintSize::A7,
+                    sides_input: "5".to_string(),
+                    ..ManualPricingLineItem::default()
+                },
+                ManualPricingLineItem {
+                    size: ManualPrintSize::Buisnesscard,
+                    print_mode: ManualPrintMode::Color,
+                    sides_input: "10".to_string(),
+                    ..ManualPricingLineItem::default()
+                },
+            ],
+            ..ManualPricingSettings::default()
+        };
+
+        let totals = manual_pricing_totals(&settings);
+
+        assert_eq!(totals.subtotal_cents, Some(140));
     }
 
     #[test]
