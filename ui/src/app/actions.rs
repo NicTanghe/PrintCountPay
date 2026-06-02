@@ -1097,6 +1097,7 @@ impl PrintCountApp {
             ManualPricingBill {
                 id: id.clone(),
                 subject,
+                locked: false,
                 pricing: saved_pricing,
                 updated_at_millis: 0,
             },
@@ -1128,6 +1129,12 @@ impl PrintCountApp {
             self.selected_manual_bill_id = None;
             return;
         };
+
+        if self.manual_bills[index].locked {
+            self.manual_pricing_status =
+                Some("Unlock the selected bill before deleting it.".to_string());
+            return;
+        }
 
         let deleted_id = self.manual_bills[index].id.clone();
         self.manual_bills.remove(index);
@@ -3972,6 +3979,7 @@ mod tests {
         app.manual_bills = vec![ManualPricingBill {
             id: "shared-bill".to_string(),
             subject: "Local newer".to_string(),
+            locked: false,
             pricing: ManualPricingSettings::default(),
             updated_at_millis: 200,
         }];
@@ -3988,6 +3996,7 @@ mod tests {
             manual_bills: vec![ManualPricingBill {
                 id: "shared-bill".to_string(),
                 subject: "Remote older".to_string(),
+                locked: false,
                 pricing: ManualPricingSettings::default(),
                 updated_at_millis: 100,
             }],
@@ -4174,6 +4183,7 @@ mod tests {
             bills: vec![ManualPricingBill {
                 id: "saved-bill".to_string(),
                 subject: "Saved Bill".to_string(),
+                locked: false,
                 pricing: ManualPricingSettings {
                     discount_input: "5".to_string(),
                     rounding_mode: ManualRoundingMode::HalfEuro,
@@ -4310,6 +4320,32 @@ mod tests {
     }
 
     #[test]
+    fn locked_manual_pricing_bill_cannot_be_deleted_until_unlocked() {
+        let mut app = test_app();
+        app.save_manual_pricing_as_bill();
+        let bill_id = app.manual_bills[0].id.clone();
+        app.manual_bills[0].locked = true;
+        app.selected_manual_bill_id = Some(bill_id.clone());
+
+        app.delete_selected_manual_pricing_bill();
+
+        assert_eq!(app.manual_bills.len(), 1);
+        assert!(app.manual_bills[0].locked);
+        assert!(app.manual_bill_tombstones.is_empty());
+        assert_eq!(
+            app.manual_pricing_status,
+            Some("Unlock the selected bill before deleting it.".to_string())
+        );
+
+        app.manual_bills[0].locked = false;
+        app.delete_selected_manual_pricing_bill();
+
+        assert!(app.manual_bills.is_empty());
+        assert_eq!(app.manual_bill_tombstones.len(), 1);
+        assert_eq!(app.manual_bill_tombstones[0].id, bill_id);
+    }
+
+    #[test]
     fn manual_bill_store_persists_saved_bills_and_tombstones() {
         let mut app = test_app();
         let root = temp_test_dir("manual-bill-store");
@@ -4351,6 +4387,7 @@ mod tests {
             bills: vec![ManualPricingBill {
                 id: "saved-bill".to_string(),
                 subject: "Older Subject".to_string(),
+                locked: false,
                 pricing: ManualPricingSettings::default(),
                 updated_at_millis: 10,
             }],
@@ -4363,6 +4400,7 @@ mod tests {
                 ManualPricingBill {
                     id: "saved-bill".to_string(),
                     subject: "Newer Subject".to_string(),
+                    locked: false,
                     pricing: ManualPricingSettings {
                         discount_input: "5".to_string(),
                         ..ManualPricingSettings::default()
@@ -4372,6 +4410,7 @@ mod tests {
                 ManualPricingBill {
                     id: "local-only".to_string(),
                     subject: "Local Only".to_string(),
+                    locked: false,
                     pricing: ManualPricingSettings::default(),
                     updated_at_millis: 15,
                 },
@@ -4443,6 +4482,7 @@ mod tests {
         existing_workspace.bills = vec![ManualPricingBill {
             id: "local-bill".to_string(),
             subject: "Local Bill".to_string(),
+            locked: false,
             pricing: ManualPricingSettings::default(),
             updated_at_millis: 100,
         }];
@@ -4468,6 +4508,7 @@ mod tests {
             bills: vec![ManualPricingBill {
                 id: "remote-bill".to_string(),
                 subject: "Remote Bill".to_string(),
+                locked: false,
                 pricing: ManualPricingSettings {
                     discount_input: "5".to_string(),
                     ..ManualPricingSettings::default()
@@ -4531,12 +4572,14 @@ mod tests {
             ManualPricingBill {
                 id: "shared-bill".to_string(),
                 subject: "Local Newer".to_string(),
+                locked: false,
                 pricing: ManualPricingSettings::default(),
                 updated_at_millis: 300,
             },
             ManualPricingBill {
                 id: "local-only".to_string(),
                 subject: "Local Only".to_string(),
+                locked: false,
                 pricing: ManualPricingSettings::default(),
                 updated_at_millis: 250,
             },
@@ -4553,12 +4596,14 @@ mod tests {
                 ManualPricingBill {
                     id: "shared-bill".to_string(),
                     subject: "Remote Older".to_string(),
+                    locked: false,
                     pricing: ManualPricingSettings::default(),
                     updated_at_millis: 100,
                 },
                 ManualPricingBill {
                     id: "remote-only".to_string(),
                     subject: "Remote Only".to_string(),
+                    locked: false,
                     pricing: ManualPricingSettings::default(),
                     updated_at_millis: 200,
                 },
@@ -4608,6 +4653,7 @@ mod tests {
         app.manual_bills = vec![ManualPricingBill {
             id: "saved-bill".to_string(),
             subject: "Saved Bill".to_string(),
+            locked: false,
             pricing: ManualPricingSettings::default(),
             updated_at_millis: 10,
         }];

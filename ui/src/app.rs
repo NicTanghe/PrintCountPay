@@ -742,6 +742,14 @@ impl PrintCountApp {
                 self.delete_selected_manual_pricing_bill();
                 Command::none()
             }
+            Message::ManualPricingBillLockedChanged(bill_id, value) => {
+                if let Some(bill) = self.manual_bills.iter_mut().find(|bill| bill.id == bill_id) {
+                    bill.locked = value;
+                    bill.touch();
+                    self.manual_bills_dirty = true;
+                }
+                Command::none()
+            }
             Message::ManualPricingBillSubjectChanged(value) => {
                 if let Some(bill_id) = self.selected_manual_bill_id.as_deref()
                     && let Some(bill) = self.manual_bills.iter_mut().find(|bill| bill.id == bill_id)

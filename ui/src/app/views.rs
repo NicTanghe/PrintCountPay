@@ -827,11 +827,23 @@ impl PrintCountApp {
 
     fn manual_pricing_panel_view(&self) -> Element<'_, Message> {
         let title_block: Element<'_, Message> = if let Some(bill) = self.selected_manual_bill() {
+            let bill_id = bill.id.clone();
+            let bill_locked = bill.locked;
             let subject_input = text_input("Bill subject", &bill.subject)
                 .on_input(Message::ManualPricingBillSubjectChanged)
                 .padding(6)
                 .size(12)
                 .width(Length::Fixed(220.0));
+            let delete_button: Element<'_, Message> = if bill_locked {
+                button("Unlock to delete")
+                    .style(theme::Button::custom(muted_content_button_style()))
+                    .into()
+            } else {
+                button("Delete bill")
+                    .style(theme::Button::custom(muted_content_button_style()))
+                    .on_press(Message::DeleteSelectedManualPricingBill)
+                    .into()
+            };
 
             row![
                 column![
@@ -844,9 +856,8 @@ impl PrintCountApp {
                 ]
                 .spacing(4),
                 horizontal_space(),
-                button("Delete bill")
-                    .style(theme::Button::custom(muted_content_button_style()))
-                    .on_press(Message::DeleteSelectedManualPricingBill),
+                self.manual_bill_lock_toggle_button(bill_id, bill_locked),
+                delete_button,
                 column![
                     text("Subject")
                         .size(12)
@@ -1221,7 +1232,7 @@ impl PrintCountApp {
             text("Flat print price per side")
                 .size(15)
                 .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-            text("Use flat per-side pricing for non-tiered sizes.")
+            text("Use flat per-side pricing for A0, A1, and A2.")
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
         ]
@@ -1245,6 +1256,11 @@ impl PrintCountApp {
         for size in ManualPrintSize::TIERED_PRICED {
             tiered_prices = tiered_prices.push(self.manual_tiered_price_box(size));
         }
+        tiered_prices = tiered_prices.push(
+            text("A5, A6, A7, and buisnesscard print prices are divided from A3 tiers.")
+                .size(12)
+                .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+        );
 
         let mut modifier_setup = column![
             row![
@@ -2529,10 +2545,46 @@ impl PrintCountApp {
             .into()
     }
 
+    fn manual_bill_lock_toggle_button(
+        &self,
+        bill_id: String,
+        locked: bool,
+    ) -> Element<'_, Message> {
+        let icon_bytes = if locked {
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../assets/locked-svgrepo-com.svg"
+            ))
+            .as_slice()
+        } else {
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../assets/unlocked-svgrepo-com.svg"
+            ))
+            .as_slice()
+        };
+        let icon = iced::widget::svg(iced::widget::svg::Handle::from_memory(icon_bytes))
+            .width(16)
+            .height(16)
+            .style(|_theme, _status| iced::widget::svg::Style { color: None });
+
+        mouse_area(
+            container(icon)
+                .width(Length::Fixed(24.0))
+                .height(Length::Fixed(24.0))
+                .align_x(Horizontal::Center)
+                .align_y(iced::alignment::Vertical::Center),
+        )
+        .interaction(iced::mouse::Interaction::Pointer)
+        .on_press(Message::ManualPricingBillLockedChanged(bill_id, !locked))
+        .into()
+    }
+
     fn manual_pricing_bill_row(&self, bill: &ManualPricingBill) -> Element<'_, Message> {
         let is_selected = self.manual_pricing_selected
             && self.selected_manual_bill_id.as_deref() == Some(bill.id.as_str());
         let bill_id = bill.id.clone();
+        let lock_bill_id = bill.id.clone();
         let bill_subject = bill.display_subject().to_string();
         let base_color = Color::from_rgb8(0xf3, 0xf6, 0xfa);
         let name_color = if is_selected {
@@ -2566,7 +2618,12 @@ impl PrintCountApp {
         .clip(true)
         .on_press(Message::SelectManualPricingBill(bill_id));
 
-        row![horizontal_space(), card]
+        row![
+            horizontal_space(),
+            self.manual_bill_lock_toggle_button(lock_bill_id, bill.locked),
+            card,
+        ]
+        .spacing(6)
             .width(Length::Fill)
             .align_items(Alignment::Center)
             .into()

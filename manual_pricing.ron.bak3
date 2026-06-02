@@ -343,7 +343,7 @@
                 applies_a4: true,
                 a4_price_input: "0.40",
                 applies_a5: true,
-                a5_price_input: "0.2",
+                a5_price_input: "0.20",
                 applies_a6: true,
                 a6_price_input: "0.10",
                 applies_a7: true,

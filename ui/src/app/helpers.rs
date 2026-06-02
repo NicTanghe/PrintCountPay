@@ -17,8 +17,8 @@ use crate::app::profiles::{ManufacturerProfile, RecordingOidProfile, TonerOidPro
 use crate::app::types::{
     BwPricing, ManualBooklet, ManualBwTier, ManualColorTier, ManualFinisherLineItem,
     ManualFinisherType, ManualPricingLineItem, ManualPricingSettings, ManualPrintMode,
-    ManualRoundingMode, Message, PricingSettings, RecordingCategory, RecordingOidSettings,
-    RecordingSession, RecordingSnapshot, SnmpPollStatus,
+    ManualPrintSize, ManualRoundingMode, Message, PricingSettings, RecordingCategory,
+    RecordingOidSettings, RecordingSession, RecordingSnapshot, SnmpPollStatus,
 };
 
 pub(crate) fn level_color(level: tracing::Level) -> Color {
@@ -720,6 +720,7 @@ pub(crate) fn color_price_from_settings(settings: &PricingSettings) -> Option<u6
 }
 
 pub(crate) const MANUAL_CUTTING_CENTS: u64 = 300;
+const MANUAL_TIER_UNIT_SCALE: u64 = 80;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ManualLineBreakdown {
@@ -745,25 +746,25 @@ pub(crate) enum ManualLineState {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct ManualPrintCounters {
-    bw_tiered_sides: u64,
-    color_tiered_sides: u64,
+    bw_tiered_units: u64,
+    color_tiered_units: u64,
 }
 
 impl ManualPrintCounters {
-    fn tiered_sides_for(self, mode: ManualPrintMode) -> u64 {
+    fn tiered_units_for(self, mode: ManualPrintMode) -> u64 {
         match mode {
-            ManualPrintMode::Bw => self.bw_tiered_sides,
-            ManualPrintMode::Color => self.color_tiered_sides,
+            ManualPrintMode::Bw => self.bw_tiered_units,
+            ManualPrintMode::Color => self.color_tiered_units,
         }
     }
 
-    fn add_tiered_sides(&mut self, mode: Option<ManualPrintMode>, count: u64) {
+    fn add_tiered_units(&mut self, mode: Option<ManualPrintMode>, count: u64) {
         match mode {
             Some(ManualPrintMode::Bw) => {
-                self.bw_tiered_sides = self.bw_tiered_sides.saturating_add(count);
+                self.bw_tiered_units = self.bw_tiered_units.saturating_add(count);
             }
             Some(ManualPrintMode::Color) => {
-                self.color_tiered_sides = self.color_tiered_sides.saturating_add(count);
+                self.color_tiered_units = self.color_tiered_units.saturating_add(count);
             }
             None => {}
         }
@@ -891,7 +892,42 @@ fn format_tiered_count_terms(terms: &[(u64, u64)]) -> String {
         .join(" + ")
 }
 
-fn tiered_counts(count: u64, already_counted: u64, has_next_tier: bool) -> (u64, u64, u64) {
+fn format_a3_equivalent_units(units: u64) -> String {
+    if units % MANUAL_TIER_UNIT_SCALE == 0 {
+        return (units / MANUAL_TIER_UNIT_SCALE).to_string();
+    }
+
+    let whole = units / MANUAL_TIER_UNIT_SCALE;
+    let mut fraction =
+        (units % MANUAL_TIER_UNIT_SCALE).saturating_mul(10_000) / MANUAL_TIER_UNIT_SCALE;
+    let mut digits = 4;
+    while digits > 0 && fraction % 10 == 0 {
+        fraction /= 10;
+        digits -= 1;
+    }
+    format!("{whole}.{fraction:0digits$}")
+}
+
+fn format_tiered_unit_terms(terms: &[(u64, u64)]) -> String {
+    terms
+        .iter()
+        .filter(|(units, _)| *units > 0)
+        .map(|(units, price_cents)| {
+            format!(
+                "{} A3 eq x {}",
+                format_a3_equivalent_units(*units),
+                format_cents(*price_cents)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" + ")
+}
+
+fn tiered_unit_counts(
+    count_units: u64,
+    already_counted_units: u64,
+    has_next_tier: bool,
+) -> (u64, u64, u64) {
     fn overlap_count(start: u64, count: u64, tier_start: u64, tier_end: Option<u64>) -> u64 {
         let end = start.saturating_add(count);
         let overlap_start = start.max(tier_start);
@@ -900,35 +936,46 @@ fn tiered_counts(count: u64, already_counted: u64, has_next_tier: bool) -> (u64,
         overlap_end.saturating_sub(overlap_start)
     }
 
-    let first_count = overlap_count(already_counted, count, 0, Some(5));
+    let first_count = overlap_count(
+        already_counted_units,
+        count_units,
+        0,
+        Some(5 * MANUAL_TIER_UNIT_SCALE),
+    );
     let next_count = if has_next_tier {
-        overlap_count(already_counted, count, 5, Some(10))
+        overlap_count(
+            already_counted_units,
+            count_units,
+            5 * MANUAL_TIER_UNIT_SCALE,
+            Some(10 * MANUAL_TIER_UNIT_SCALE),
+        )
     } else {
         0
     };
     let rest_count = overlap_count(
-        already_counted,
-        count,
-        if has_next_tier { 10 } else { 5 },
+        already_counted_units,
+        count_units,
+        (if has_next_tier { 10 } else { 5 }) * MANUAL_TIER_UNIT_SCALE,
         None,
     );
 
     (first_count, next_count, rest_count)
 }
 
-fn tiered_total_cents(
-    count: u64,
-    already_counted: u64,
+fn tiered_total_cents_from_units(
+    count_units: u64,
+    already_counted_units: u64,
     first_cents: u64,
     next_cents: Option<u64>,
     rest_cents: u64,
 ) -> u64 {
     let (first_count, next_count, rest_count) =
-        tiered_counts(count, already_counted, next_cents.is_some());
-
-    first_count.saturating_mul(first_cents)
+        tiered_unit_counts(count_units, already_counted_units, next_cents.is_some());
+    let scaled_cents = first_count.saturating_mul(first_cents)
         + next_count.saturating_mul(next_cents.unwrap_or(0))
-        + rest_count.saturating_mul(rest_cents)
+        + rest_count.saturating_mul(rest_cents);
+
+    (scaled_cents + MANUAL_TIER_UNIT_SCALE / 2) / MANUAL_TIER_UNIT_SCALE
 }
 
 fn tiered_line_has_multiple_prices(
@@ -952,34 +999,78 @@ fn tiered_line_has_multiple_prices(
     next_differs_from_first || rest_differs_from_first || rest_differs_from_next
 }
 
+fn tiered_terms_for_summary(terms: &[(u64, u64)]) -> String {
+    if terms
+        .iter()
+        .all(|(units, _)| *units % MANUAL_TIER_UNIT_SCALE == 0)
+    {
+        let count_terms = terms
+            .iter()
+            .map(|(units, price_cents)| (units / MANUAL_TIER_UNIT_SCALE, *price_cents))
+            .collect::<Vec<_>>();
+        format_tiered_count_terms(&count_terms)
+    } else {
+        format_tiered_unit_terms(terms)
+    }
+}
+
+fn tiered_cumulative_label(size: ManualPrintSize, total_units: u64) -> String {
+    if total_units % MANUAL_TIER_UNIT_SCALE == 0 {
+        format!("Total {} {size}", total_units / MANUAL_TIER_UNIT_SCALE)
+    } else {
+        format!(
+            "Total {} A3 eq {size}",
+            format_a3_equivalent_units(total_units)
+        )
+    }
+}
+
+fn tiered_price_source(size: ManualPrintSize) -> Option<(ManualPrintSize, u64)> {
+    if let Some(divisor) = size.a3_print_price_divisor() {
+        return Some((ManualPrintSize::A3, MANUAL_TIER_UNIT_SCALE / divisor));
+    }
+
+    if size.uses_own_tiered_print_pricing() {
+        return Some((size, MANUAL_TIER_UNIT_SCALE));
+    }
+
+    None
+}
+
 fn manual_print_pricing(
     settings: &ManualPricingSettings,
     line_item: &ManualPricingLineItem,
     sides: u64,
     counters: ManualPrintCounters,
 ) -> Option<ManualPrintPricing> {
-    match line_item.size {
-        size if size.uses_tiered_print_pricing() => match line_item.print_mode {
+    if let Some((tier_price_size, tier_units_per_side)) = tiered_price_source(line_item.size) {
+        let count_units = sides.saturating_mul(tier_units_per_side);
+        match line_item.print_mode {
             ManualPrintMode::Bw => {
                 let first = parse_price_input(
-                    settings.bw_tier_input(line_item.size, ManualBwTier::FirstFive)?,
+                    settings.bw_tier_input(tier_price_size, ManualBwTier::FirstFive)?,
                 )
                 .ok()
                 .flatten()?;
                 let next = parse_price_input(
-                    settings.bw_tier_input(line_item.size, ManualBwTier::NextFive)?,
+                    settings.bw_tier_input(tier_price_size, ManualBwTier::NextFive)?,
                 )
                 .ok()
                 .flatten()?;
                 let rest =
-                    parse_price_input(settings.bw_tier_input(line_item.size, ManualBwTier::Rest)?)
+                    parse_price_input(settings.bw_tier_input(tier_price_size, ManualBwTier::Rest)?)
                         .ok()
                         .flatten()?;
-                let already_counted = counters.tiered_sides_for(ManualPrintMode::Bw);
+                let already_counted = counters.tiered_units_for(ManualPrintMode::Bw);
                 let (first_count, next_count, rest_count) =
-                    tiered_counts(sides, already_counted, true);
-                let total_cents =
-                    tiered_total_cents(sides, already_counted, first, Some(next), rest);
+                    tiered_unit_counts(count_units, already_counted, true);
+                let total_cents = tiered_total_cents_from_units(
+                    count_units,
+                    already_counted,
+                    first,
+                    Some(next),
+                    rest,
+                );
 
                 Some(ManualPrintPricing {
                     total_cents,
@@ -991,13 +1082,14 @@ fn manual_print_pricing(
                         Some(next),
                         rest,
                     ) {
-                        let cumulative_sides = already_counted.saturating_add(sides);
                         Some(format!(
-                            "Total {} {} {} | {} = {}",
-                            cumulative_sides,
-                            line_item.size,
+                            "{} {} | {} = {}",
+                            tiered_cumulative_label(
+                                line_item.size,
+                                already_counted.saturating_add(count_units),
+                            ),
                             line_item.print_mode,
-                            format_tiered_count_terms(&[
+                            tiered_terms_for_summary(&[
                                 (first_count, first),
                                 (next_count, next),
                                 (rest_count, rest),
@@ -1008,23 +1100,25 @@ fn manual_print_pricing(
                         None
                     },
                     counter_mode: Some(ManualPrintMode::Bw),
-                    counter_increment: sides,
+                    counter_increment: count_units,
                 })
             }
             ManualPrintMode::Color => {
                 let first = parse_price_input(
-                    settings.color_tier_input(line_item.size, ManualColorTier::FirstFive)?,
+                    settings.color_tier_input(tier_price_size, ManualColorTier::FirstFive)?,
                 )
                 .ok()
                 .flatten()?;
                 let rest = parse_price_input(
-                    settings.color_tier_input(line_item.size, ManualColorTier::Rest)?,
+                    settings.color_tier_input(tier_price_size, ManualColorTier::Rest)?,
                 )
                 .ok()
                 .flatten()?;
-                let already_counted = counters.tiered_sides_for(ManualPrintMode::Color);
-                let (first_count, _, rest_count) = tiered_counts(sides, already_counted, false);
-                let total_cents = tiered_total_cents(sides, already_counted, first, None, rest);
+                let already_counted = counters.tiered_units_for(ManualPrintMode::Color);
+                let (first_count, _, rest_count) =
+                    tiered_unit_counts(count_units, already_counted, false);
+                let total_cents =
+                    tiered_total_cents_from_units(count_units, already_counted, first, None, rest);
 
                 Some(ManualPrintPricing {
                     total_cents,
@@ -1036,34 +1130,34 @@ fn manual_print_pricing(
                         None,
                         rest,
                     ) {
-                        let cumulative_sides = already_counted.saturating_add(sides);
                         Some(format!(
-                            "Total {} {} {} | {} = {}",
-                            cumulative_sides,
-                            line_item.size,
+                            "{} {} | {} = {}",
+                            tiered_cumulative_label(
+                                line_item.size,
+                                already_counted.saturating_add(count_units),
+                            ),
                             line_item.print_mode,
-                            format_tiered_count_terms(&[(first_count, first), (rest_count, rest)]),
+                            tiered_terms_for_summary(&[(first_count, first), (rest_count, rest)]),
                             format_cents(total_cents)
                         ))
                     } else {
                         None
                     },
                     counter_mode: Some(ManualPrintMode::Color),
-                    counter_increment: sides,
+                    counter_increment: count_units,
                 })
             }
-        },
-        _ => {
-            let price_cents = parse_price_input(settings.size_price_input(line_item.size))
-                .ok()
-                .flatten()?;
-            Some(ManualPrintPricing {
-                total_cents: sides.saturating_mul(price_cents),
-                summary: None,
-                counter_mode: None,
-                counter_increment: 0,
-            })
         }
+    } else {
+        let price_cents = parse_price_input(settings.size_price_input(line_item.size))
+            .ok()
+            .flatten()?;
+        Some(ManualPrintPricing {
+            total_cents: sides.saturating_mul(price_cents),
+            summary: None,
+            counter_mode: None,
+            counter_increment: 0,
+        })
     }
 }
 
@@ -1111,7 +1205,7 @@ fn manual_line_state_with_counters(
     };
 
     let paper_total_cents = sheets.saturating_mul(paper_price_cents);
-    counters.add_tiered_sides(print_pricing.counter_mode, print_pricing.counter_increment);
+    counters.add_tiered_units(print_pricing.counter_mode, print_pricing.counter_increment);
 
     ManualLineState::Ready(ManualLineBreakdown {
         sheets,
@@ -1887,20 +1981,26 @@ mod tests {
     }
 
     #[test]
-    fn manual_pricing_uses_flat_prices_for_cut_sizes() {
+    fn manual_pricing_derives_cut_size_print_prices_from_a3_tiers() {
         let settings = ManualPricingSettings {
-            a7_input: "0.12".to_string(),
-            buisnesscard_input: "0.08".to_string(),
+            a3_bw_first_input: "0.35".to_string(),
+            a3_bw_next_input: "0.20".to_string(),
+            a3_bw_rest_input: "0.12".to_string(),
+            a3_color_first_input: "1.25".to_string(),
+            a3_color_rest_input: "1.00".to_string(),
+            a7_input: "99.00".to_string(),
+            buisnesscard_input: "99.00".to_string(),
             line_items: vec![
                 ManualPricingLineItem {
                     size: ManualPrintSize::A7,
-                    sides_input: "5".to_string(),
+                    print_mode: ManualPrintMode::Bw,
+                    sides_input: "80".to_string(),
                     ..ManualPricingLineItem::default()
                 },
                 ManualPricingLineItem {
                     size: ManualPrintSize::Buisnesscard,
                     print_mode: ManualPrintMode::Color,
-                    sides_input: "10".to_string(),
+                    sides_input: "100".to_string(),
                     ..ManualPricingLineItem::default()
                 },
             ],
@@ -1909,7 +2009,7 @@ mod tests {
 
         let totals = manual_pricing_totals(&settings);
 
-        assert_eq!(totals.subtotal_cents, Some(140));
+        assert_eq!(totals.subtotal_cents, Some(800));
     }
 
     #[test]

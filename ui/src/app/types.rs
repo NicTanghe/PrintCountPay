@@ -105,19 +105,22 @@ impl ManualPrintSize {
         Self::A7,
         Self::Buisnesscard,
     ];
-    pub const FLAT_PRICED: [Self; 7] = [
-        Self::A0,
-        Self::A1,
-        Self::A2,
-        Self::A5,
-        Self::A6,
-        Self::A7,
-        Self::Buisnesscard,
-    ];
+    pub const FLAT_PRICED: [Self; 3] = [Self::A0, Self::A1, Self::A2];
     pub const TIERED_PRICED: [Self; 2] = [Self::A3, Self::A4];
 
-    pub(crate) fn uses_tiered_print_pricing(self) -> bool {
-        matches!(self, Self::A3 | Self::A4)
+    pub(crate) fn a3_print_price_divisor(self) -> Option<u64> {
+        match self {
+            Self::A3 => Some(1),
+            Self::A5 => Some(4),
+            Self::A6 => Some(8),
+            Self::A7 => Some(16),
+            Self::Buisnesscard => Some(20),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn uses_own_tiered_print_pricing(self) -> bool {
+        matches!(self, Self::A4)
     }
 }
 
@@ -1168,6 +1171,8 @@ pub struct ManualPricingBill {
     #[serde(default)]
     pub(crate) subject: String,
     #[serde(default)]
+    pub(crate) locked: bool,
+    #[serde(default)]
     pub(crate) pricing: ManualPricingSettings,
     #[serde(default)]
     pub(crate) updated_at_millis: u64,
@@ -1178,6 +1183,7 @@ impl Default for ManualPricingBill {
         Self {
             id: String::new(),
             subject: String::new(),
+            locked: false,
             pricing: ManualPricingSettings::default(),
             updated_at_millis: 0,
         }
@@ -1419,6 +1425,7 @@ pub(crate) enum Message {
     SaveManualPricingAsBill,
     ResetManualPricingCalculator,
     DeleteSelectedManualPricingBill,
+    ManualPricingBillLockedChanged(String, bool),
     ManualPricingBillSubjectChanged(String),
     ManualPricingLineAdded,
     ManualPricingLineRemoved(usize),
