@@ -35350,6 +35350,354 @@
                         ),
                     ],
                 ),
+                (
+                    captured_at: 1780395335,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 193826,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 96201,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 2755073,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 2851274,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780396235,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 193826,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 96201,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 2755073,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 2851274,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780397135,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 193826,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 96201,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 2755073,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 2851274,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780398035,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 193826,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 96201,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 2755073,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 2851274,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780398935,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 193826,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 96201,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 2755073,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 2851274,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780399835,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 193826,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 96201,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 2755073,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 2851274,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780400735,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 193826,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 96201,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 2755073,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 2851274,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780401635,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 193826,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 96201,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 2755075,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 2851276,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780402535,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 193826,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 96201,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 2755075,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 2851276,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780403435,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 193826,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 96201,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 2755132,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 2851333,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780404335,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 193826,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 96201,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 2755132,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 2851333,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780405235,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 193826,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 96201,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 2755132,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 2851333,
+                        ),
+                    ],
+                ),
             ],
             euro_samples: [
                 (
@@ -60769,6 +61117,282 @@
                             series_key: "label:Recording: Prints B/W",
                             label: "Recording: Prints B/W",
                             value: 1853679,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780395335,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 433188,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 5963926,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1853679,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780396235,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 433188,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 5963926,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1853679,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780397137,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 433188,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 5963926,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1853679,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780398035,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 433188,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 5963926,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1853679,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780398935,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 433188,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 5963926,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1853679,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780399835,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 433188,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 5963926,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1853679,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780400735,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 433188,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 5963926,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1853679,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780401635,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 433188,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 5963926,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1853679,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780402535,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 433188,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 5963926,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1853769,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780403435,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 433189,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 5963926,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1853960,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780404335,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 433240,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 5963926,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1854112,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780405235,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 433240,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 5963926,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1854112,
                         ),
                     ],
                 ),
@@ -98096,6 +98720,354 @@
                         ),
                     ],
                 ),
+                (
+                    captured_at: 1780395335,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Observed counter 3",
+                            label: "Observed counter 3",
+                            value: 807688,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Observed counter 5",
+                            label: "Observed counter 5",
+                            value: 8982774,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 13470,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 9790462,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780396235,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Observed counter 3",
+                            label: "Observed counter 3",
+                            value: 807688,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Observed counter 5",
+                            label: "Observed counter 5",
+                            value: 8982774,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 13470,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 9790462,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780397136,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Observed counter 3",
+                            label: "Observed counter 3",
+                            value: 807688,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Observed counter 5",
+                            label: "Observed counter 5",
+                            value: 8982774,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 13470,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 9790462,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780398035,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Observed counter 3",
+                            label: "Observed counter 3",
+                            value: 807688,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Observed counter 5",
+                            label: "Observed counter 5",
+                            value: 8982774,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 13470,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 9790462,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780398935,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Observed counter 3",
+                            label: "Observed counter 3",
+                            value: 807688,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Observed counter 5",
+                            label: "Observed counter 5",
+                            value: 8982774,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 13470,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 9790462,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780399835,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Observed counter 3",
+                            label: "Observed counter 3",
+                            value: 807688,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Observed counter 5",
+                            label: "Observed counter 5",
+                            value: 8982774,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 13470,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 9790462,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780400735,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Observed counter 3",
+                            label: "Observed counter 3",
+                            value: 807688,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Observed counter 5",
+                            label: "Observed counter 5",
+                            value: 8982774,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 13470,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 9790462,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780401635,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Observed counter 3",
+                            label: "Observed counter 3",
+                            value: 807688,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Observed counter 5",
+                            label: "Observed counter 5",
+                            value: 8982774,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 13470,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 9790462,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780402539,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Observed counter 3",
+                            label: "Observed counter 3",
+                            value: 807688,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Observed counter 5",
+                            label: "Observed counter 5",
+                            value: 8982774,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 13470,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 9790462,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780403435,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Observed counter 3",
+                            label: "Observed counter 3",
+                            value: 807688,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Observed counter 5",
+                            label: "Observed counter 5",
+                            value: 8982774,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 13470,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 9790462,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780404335,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Observed counter 3",
+                            label: "Observed counter 3",
+                            value: 807688,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Observed counter 5",
+                            label: "Observed counter 5",
+                            value: 8982774,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 13470,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 9790462,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780405235,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Observed counter 3",
+                            label: "Observed counter 3",
+                            value: 807688,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Observed counter 5",
+                            label: "Observed counter 5",
+                            value: 8982774,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed counter 71",
+                            label: "Observed counter 71",
+                            value: 13470,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 9790462,
+                        ),
+                    ],
+                ),
             ],
             euro_samples: [
                 (
@@ -105331,6 +106303,76 @@
                             series_key: "label:Clicks: B/W",
                             label: "Clicks: B/W",
                             value: 840611,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.1",
+                            series_key: "label:Toner: Black",
+                            label: "Toner: Black",
+                            value: 30,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.2",
+                            series_key: "label:Toner: Cyan",
+                            label: "Toner: Cyan",
+                            value: 50,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.3",
+                            series_key: "label:Toner: Magenta",
+                            label: "Toner: Magenta",
+                            value: 30,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.4",
+                            series_key: "label:Toner: Yellow",
+                            label: "Toner: Yellow",
+                            value: 50,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780404335,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.2.1.43.10.2.1.4.1.1",
+                            series_key: "label:Clicks: B/W",
+                            label: "Clicks: B/W",
+                            value: 841525,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.1",
+                            series_key: "label:Toner: Black",
+                            label: "Toner: Black",
+                            value: 30,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.2",
+                            series_key: "label:Toner: Cyan",
+                            label: "Toner: Cyan",
+                            value: 50,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.3",
+                            series_key: "label:Toner: Magenta",
+                            label: "Toner: Magenta",
+                            value: 30,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.4",
+                            series_key: "label:Toner: Yellow",
+                            label: "Toner: Yellow",
+                            value: 50,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780405235,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.2.1.43.10.2.1.4.1.1",
+                            series_key: "label:Clicks: B/W",
+                            label: "Clicks: B/W",
+                            value: 841525,
                         ),
                         (
                             oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.1",
@@ -118957,6 +119999,138 @@
                             series_key: "label:Recording: Prints B/W",
                             label: "Recording: Prints B/W",
                             value: 1683917,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780395335,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.2.1.43.10.2.1.4.1.1",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1683917,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780396235,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.2.1.43.10.2.1.4.1.1",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1683917,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780397135,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.2.1.43.10.2.1.4.1.1",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1683917,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780398037,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.2.1.43.10.2.1.4.1.1",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1683980,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780398935,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.2.1.43.10.2.1.4.1.1",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1683980,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780399804,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.2.1.43.10.2.1.4.1.1",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1683980,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780400735,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.2.1.43.10.2.1.4.1.1",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1683980,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780401635,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.2.1.43.10.2.1.4.1.1",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1683980,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780402535,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.2.1.43.10.2.1.4.1.1",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1683980,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780403435,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.2.1.43.10.2.1.4.1.1",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1683980,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780404335,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.2.1.43.10.2.1.4.1.1",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1683980,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780405235,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.2.1.43.10.2.1.4.1.1",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 1683980,
                         ),
                     ],
                 ),
@@ -211633,6 +212807,930 @@
                             series_key: "label:Recording: Prints B/W",
                             label: "Recording: Prints B/W",
                             value: 349530,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 286213,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.3",
+                            series_key: "label:Toner: Magenta",
+                            label: "Toner: Magenta",
+                            value: 70,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780395300,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.22",
+                            series_key: "label:Clicks: B/W",
+                            label: "Clicks: B/W",
+                            value: 634209,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.21",
+                            series_key: "label:Clicks: Color",
+                            label: "Clicks: Color",
+                            value: 302500,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.59",
+                            series_key: "label:Clicks: Total",
+                            label: "Clicks: Total",
+                            value: 936709,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed transmission counter 71",
+                            label: "Observed transmission counter 71",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
+                            series_key: "label:Observed transmission counter 72",
+                            label: "Observed transmission counter 72",
+                            value: 97025,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.74",
+                            series_key: "label:Observed transmission counter 74",
+                            label: "Observed transmission counter 74",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.75",
+                            series_key: "label:Observed transmission counter 75",
+                            label: "Observed transmission counter 75",
+                            value: 95382,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 280438,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 16155,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 349530,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 286213,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.3",
+                            series_key: "label:Toner: Magenta",
+                            label: "Toner: Magenta",
+                            value: 70,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780396200,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.22",
+                            series_key: "label:Clicks: B/W",
+                            label: "Clicks: B/W",
+                            value: 634209,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.21",
+                            series_key: "label:Clicks: Color",
+                            label: "Clicks: Color",
+                            value: 302500,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.59",
+                            series_key: "label:Clicks: Total",
+                            label: "Clicks: Total",
+                            value: 936709,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed transmission counter 71",
+                            label: "Observed transmission counter 71",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
+                            series_key: "label:Observed transmission counter 72",
+                            label: "Observed transmission counter 72",
+                            value: 97025,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.74",
+                            series_key: "label:Observed transmission counter 74",
+                            label: "Observed transmission counter 74",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.75",
+                            series_key: "label:Observed transmission counter 75",
+                            label: "Observed transmission counter 75",
+                            value: 95382,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 280438,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 16155,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 349530,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 286213,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.3",
+                            series_key: "label:Toner: Magenta",
+                            label: "Toner: Magenta",
+                            value: 70,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780397100,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.22",
+                            series_key: "label:Clicks: B/W",
+                            label: "Clicks: B/W",
+                            value: 634209,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.21",
+                            series_key: "label:Clicks: Color",
+                            label: "Clicks: Color",
+                            value: 302500,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.59",
+                            series_key: "label:Clicks: Total",
+                            label: "Clicks: Total",
+                            value: 936709,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed transmission counter 71",
+                            label: "Observed transmission counter 71",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
+                            series_key: "label:Observed transmission counter 72",
+                            label: "Observed transmission counter 72",
+                            value: 97025,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.74",
+                            series_key: "label:Observed transmission counter 74",
+                            label: "Observed transmission counter 74",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.75",
+                            series_key: "label:Observed transmission counter 75",
+                            label: "Observed transmission counter 75",
+                            value: 95382,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 280438,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 16155,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 349530,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 286213,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.3",
+                            series_key: "label:Toner: Magenta",
+                            label: "Toner: Magenta",
+                            value: 70,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780398000,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.22",
+                            series_key: "label:Clicks: B/W",
+                            label: "Clicks: B/W",
+                            value: 634209,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.21",
+                            series_key: "label:Clicks: Color",
+                            label: "Clicks: Color",
+                            value: 302500,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.59",
+                            series_key: "label:Clicks: Total",
+                            label: "Clicks: Total",
+                            value: 936709,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed transmission counter 71",
+                            label: "Observed transmission counter 71",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
+                            series_key: "label:Observed transmission counter 72",
+                            label: "Observed transmission counter 72",
+                            value: 97025,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.74",
+                            series_key: "label:Observed transmission counter 74",
+                            label: "Observed transmission counter 74",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.75",
+                            series_key: "label:Observed transmission counter 75",
+                            label: "Observed transmission counter 75",
+                            value: 95382,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 280438,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 16155,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 349530,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 286213,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.3",
+                            series_key: "label:Toner: Magenta",
+                            label: "Toner: Magenta",
+                            value: 70,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780398900,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.22",
+                            series_key: "label:Clicks: B/W",
+                            label: "Clicks: B/W",
+                            value: 634214,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.21",
+                            series_key: "label:Clicks: Color",
+                            label: "Clicks: Color",
+                            value: 302500,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.59",
+                            series_key: "label:Clicks: Total",
+                            label: "Clicks: Total",
+                            value: 936714,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed transmission counter 71",
+                            label: "Observed transmission counter 71",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
+                            series_key: "label:Observed transmission counter 72",
+                            label: "Observed transmission counter 72",
+                            value: 97025,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.74",
+                            series_key: "label:Observed transmission counter 74",
+                            label: "Observed transmission counter 74",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.75",
+                            series_key: "label:Observed transmission counter 75",
+                            label: "Observed transmission counter 75",
+                            value: 95382,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 280438,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 16155,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 349535,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 286213,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.3",
+                            series_key: "label:Toner: Magenta",
+                            label: "Toner: Magenta",
+                            value: 70,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780399835,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.22",
+                            series_key: "label:Clicks: B/W",
+                            label: "Clicks: B/W",
+                            value: 634215,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.21",
+                            series_key: "label:Clicks: Color",
+                            label: "Clicks: Color",
+                            value: 302500,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.59",
+                            series_key: "label:Clicks: Total",
+                            label: "Clicks: Total",
+                            value: 936715,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed transmission counter 71",
+                            label: "Observed transmission counter 71",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
+                            series_key: "label:Observed transmission counter 72",
+                            label: "Observed transmission counter 72",
+                            value: 97025,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.74",
+                            series_key: "label:Observed transmission counter 74",
+                            label: "Observed transmission counter 74",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.75",
+                            series_key: "label:Observed transmission counter 75",
+                            label: "Observed transmission counter 75",
+                            value: 95382,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 280438,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 16155,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 349536,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 286213,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.3",
+                            series_key: "label:Toner: Magenta",
+                            label: "Toner: Magenta",
+                            value: 70,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780400700,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.22",
+                            series_key: "label:Clicks: B/W",
+                            label: "Clicks: B/W",
+                            value: 634215,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.21",
+                            series_key: "label:Clicks: Color",
+                            label: "Clicks: Color",
+                            value: 302500,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.59",
+                            series_key: "label:Clicks: Total",
+                            label: "Clicks: Total",
+                            value: 936715,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed transmission counter 71",
+                            label: "Observed transmission counter 71",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
+                            series_key: "label:Observed transmission counter 72",
+                            label: "Observed transmission counter 72",
+                            value: 97025,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.74",
+                            series_key: "label:Observed transmission counter 74",
+                            label: "Observed transmission counter 74",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.75",
+                            series_key: "label:Observed transmission counter 75",
+                            label: "Observed transmission counter 75",
+                            value: 95382,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 280438,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 16155,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 349536,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 286213,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.3",
+                            series_key: "label:Toner: Magenta",
+                            label: "Toner: Magenta",
+                            value: 70,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780401600,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.22",
+                            series_key: "label:Clicks: B/W",
+                            label: "Clicks: B/W",
+                            value: 634215,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.21",
+                            series_key: "label:Clicks: Color",
+                            label: "Clicks: Color",
+                            value: 302500,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.59",
+                            series_key: "label:Clicks: Total",
+                            label: "Clicks: Total",
+                            value: 936715,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed transmission counter 71",
+                            label: "Observed transmission counter 71",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
+                            series_key: "label:Observed transmission counter 72",
+                            label: "Observed transmission counter 72",
+                            value: 97025,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.74",
+                            series_key: "label:Observed transmission counter 74",
+                            label: "Observed transmission counter 74",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.75",
+                            series_key: "label:Observed transmission counter 75",
+                            label: "Observed transmission counter 75",
+                            value: 95382,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 280438,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 16155,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 349536,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 286213,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.3",
+                            series_key: "label:Toner: Magenta",
+                            label: "Toner: Magenta",
+                            value: 70,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780402500,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.22",
+                            series_key: "label:Clicks: B/W",
+                            label: "Clicks: B/W",
+                            value: 634215,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.21",
+                            series_key: "label:Clicks: Color",
+                            label: "Clicks: Color",
+                            value: 302500,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.59",
+                            series_key: "label:Clicks: Total",
+                            label: "Clicks: Total",
+                            value: 936715,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed transmission counter 71",
+                            label: "Observed transmission counter 71",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
+                            series_key: "label:Observed transmission counter 72",
+                            label: "Observed transmission counter 72",
+                            value: 97025,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.74",
+                            series_key: "label:Observed transmission counter 74",
+                            label: "Observed transmission counter 74",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.75",
+                            series_key: "label:Observed transmission counter 75",
+                            label: "Observed transmission counter 75",
+                            value: 95382,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 280438,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 16155,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 349536,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 286213,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.3",
+                            series_key: "label:Toner: Magenta",
+                            label: "Toner: Magenta",
+                            value: 70,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780404280,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.22",
+                            series_key: "label:Clicks: B/W",
+                            label: "Clicks: B/W",
+                            value: 634215,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.21",
+                            series_key: "label:Clicks: Color",
+                            label: "Clicks: Color",
+                            value: 302500,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.59",
+                            series_key: "label:Clicks: Total",
+                            label: "Clicks: Total",
+                            value: 936715,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed transmission counter 71",
+                            label: "Observed transmission counter 71",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
+                            series_key: "label:Observed transmission counter 72",
+                            label: "Observed transmission counter 72",
+                            value: 97025,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.74",
+                            series_key: "label:Observed transmission counter 74",
+                            label: "Observed transmission counter 74",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.75",
+                            series_key: "label:Observed transmission counter 75",
+                            label: "Observed transmission counter 75",
+                            value: 95382,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 280438,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 16155,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 349536,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 286213,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.3",
+                            series_key: "label:Toner: Magenta",
+                            label: "Toner: Magenta",
+                            value: 70,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780404300,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.22",
+                            series_key: "label:Clicks: B/W",
+                            label: "Clicks: B/W",
+                            value: 634215,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.21",
+                            series_key: "label:Clicks: Color",
+                            label: "Clicks: Color",
+                            value: 302500,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.59",
+                            series_key: "label:Clicks: Total",
+                            label: "Clicks: Total",
+                            value: 936715,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed transmission counter 71",
+                            label: "Observed transmission counter 71",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
+                            series_key: "label:Observed transmission counter 72",
+                            label: "Observed transmission counter 72",
+                            value: 97025,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.74",
+                            series_key: "label:Observed transmission counter 74",
+                            label: "Observed transmission counter 74",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.75",
+                            series_key: "label:Observed transmission counter 75",
+                            label: "Observed transmission counter 75",
+                            value: 95382,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 280438,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 16155,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 349536,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",
+                            series_key: "label:Recording: Prints Color",
+                            label: "Recording: Prints Color",
+                            value: 286213,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.24.1.1.5.3",
+                            series_key: "label:Toner: Magenta",
+                            label: "Toner: Magenta",
+                            value: 70,
+                        ),
+                    ],
+                ),
+                (
+                    captured_at: 1780405235,
+                    metrics: [
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.22",
+                            series_key: "label:Clicks: B/W",
+                            label: "Clicks: B/W",
+                            value: 634215,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.21",
+                            series_key: "label:Clicks: Color",
+                            label: "Clicks: Color",
+                            value: 302500,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.59",
+                            series_key: "label:Clicks: Total",
+                            label: "Clicks: Total",
+                            value: 936715,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.71",
+                            series_key: "label:Observed transmission counter 71",
+                            label: "Observed transmission counter 71",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.72",
+                            series_key: "label:Observed transmission counter 72",
+                            label: "Observed transmission counter 72",
+                            value: 97025,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.74",
+                            series_key: "label:Observed transmission counter 74",
+                            label: "Observed transmission counter 74",
+                            value: 324,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.75",
+                            series_key: "label:Observed transmission counter 75",
+                            label: "Observed transmission counter 75",
+                            value: 95382,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.3",
+                            series_key: "label:Recording: Copies B/W",
+                            label: "Recording: Copies B/W",
+                            value: 280438,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.5",
+                            series_key: "label:Recording: Copies Color",
+                            label: "Recording: Copies Color",
+                            value: 16155,
+                        ),
+                        (
+                            oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.9",
+                            series_key: "label:Recording: Prints B/W",
+                            label: "Recording: Prints B/W",
+                            value: 349536,
                         ),
                         (
                             oid: "1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11",

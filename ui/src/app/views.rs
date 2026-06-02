@@ -2545,11 +2545,7 @@ impl PrintCountApp {
             .into()
     }
 
-    fn manual_bill_lock_toggle_button(
-        &self,
-        bill_id: String,
-        locked: bool,
-    ) -> Element<'_, Message> {
+    fn manual_bill_lock_icon(&self, locked: bool) -> Element<'_, Message> {
         let icon_bytes = if locked {
             include_bytes!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -2568,8 +2564,16 @@ impl PrintCountApp {
             .height(16)
             .style(|_theme, _status| iced::widget::svg::Style { color: None });
 
+        icon.into()
+    }
+
+    fn manual_bill_lock_toggle_button(
+        &self,
+        bill_id: String,
+        locked: bool,
+    ) -> Element<'_, Message> {
         mouse_area(
-            container(icon)
+            container(self.manual_bill_lock_icon(locked))
                 .width(Length::Fixed(24.0))
                 .height(Length::Fixed(24.0))
                 .align_x(Horizontal::Center)
@@ -2584,7 +2588,6 @@ impl PrintCountApp {
         let is_selected = self.manual_pricing_selected
             && self.selected_manual_bill_id.as_deref() == Some(bill.id.as_str());
         let bill_id = bill.id.clone();
-        let lock_bill_id = bill.id.clone();
         let bill_subject = bill.display_subject().to_string();
         let base_color = Color::from_rgb8(0xf3, 0xf6, 0xfa);
         let name_color = if is_selected {
@@ -2598,7 +2601,7 @@ impl PrintCountApp {
             Color::from_rgb8(0x5a, 0x66, 0x78)
         };
 
-        let card = button(
+        let mut card_content = row![
             column![
                 text(bill_id.clone())
                     .size(11)
@@ -2607,8 +2610,16 @@ impl PrintCountApp {
                     .size(14)
                     .style(theme::Text::Color(name_color)),
             ]
-            .spacing(4),
-        )
+            .spacing(4)
+            .width(Length::Fill),
+        ]
+        .spacing(8)
+        .align_items(Alignment::Center);
+        if bill.locked {
+            card_content = card_content.push(self.manual_bill_lock_icon(true));
+        }
+
+        let card = button(card_content)
         .style(theme::Button::custom(printer_card_style(
             is_selected,
             base_color,
@@ -2618,12 +2629,7 @@ impl PrintCountApp {
         .clip(true)
         .on_press(Message::SelectManualPricingBill(bill_id));
 
-        row![
-            horizontal_space(),
-            self.manual_bill_lock_toggle_button(lock_bill_id, bill.locked),
-            card,
-        ]
-        .spacing(6)
+        row![horizontal_space(), card]
             .width(Length::Fill)
             .align_items(Alignment::Center)
             .into()
