@@ -2638,13 +2638,6 @@ impl PrintCountApp {
     fn printer_list_view(&self) -> Element<'_, Message> {
         let mut list_items = column![].spacing(10);
 
-        if self.active_tab != Tab::Statistics {
-            list_items = list_items.push(self.manual_pricing_row());
-            for bill in &self.manual_bills {
-                list_items = list_items.push(self.manual_pricing_bill_row(bill));
-            }
-        }
-
         if self.printers.is_empty() {
             list_items = list_items.push(
                 text("No printers discovered or added yet.")
@@ -2665,6 +2658,13 @@ impl PrintCountApp {
             }
             if active_drop_index == Some(self.printers.len()) {
                 list_items = list_items.push(self.printer_drop_indicator());
+            }
+        }
+
+        if self.active_tab != Tab::Statistics {
+            list_items = list_items.push(self.manual_pricing_row());
+            for bill in &self.manual_bills {
+                list_items = list_items.push(self.manual_pricing_bill_row(bill));
             }
         }
 
