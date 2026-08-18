@@ -3063,6 +3063,9 @@ mod tests {
         let (mut app, _) = PrintCountApp::new(flags);
         app.replace_printers(Vec::new());
         app.selected_printer = None;
+        app.manual_bills.clear();
+        app.manual_bill_tombstones.clear();
+        app.statistics_store = StatisticsStore::default();
         app
     }
 
@@ -5085,5 +5088,114 @@ mod tests {
         assert_eq!(persisted, app.statistics_store);
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn summary_tab_switching() {
+        let mut app = test_app();
+        assert_eq!(app.manual_summary_tab, ManualSummaryTab::Standard);
+
+        let _ = app.update(Message::SelectManualSummaryTab(ManualSummaryTab::A4));
+        assert_eq!(app.manual_summary_tab, ManualSummaryTab::A4);
+
+        let _ = app.update(Message::SelectManualSummaryTab(ManualSummaryTab::Standard));
+        assert_eq!(app.manual_summary_tab, ManualSummaryTab::Standard);
+    }
+
+    #[test]
+    fn manual_order_summary_receipt_rows_standard_vs_a4() {
+        let mut app = test_app();
+        app.manual_pricing.a3_bw_first_input = "0.20".to_string();
+        app.manual_pricing.a3_bw_next_input = "0.20".to_string();
+        app.manual_pricing.a3_bw_rest_input = "0.20".to_string();
+        app.manual_pricing.a4_bw_first_input = "0.05".to_string();
+        app.manual_pricing.a4_bw_next_input = "0.05".to_string();
+        app.manual_pricing.a4_bw_rest_input = "0.05".to_string();
+        app.manual_pricing.modifiers = vec![ManualPaperModifier {
+            name_input: "160g Heavy".to_string(),
+            a3_price_input: "0.10".to_string(),
+            a4_price_input: "0.05".to_string(),
+            a5_price_input: "0.03".to_string(),
+            ..ManualPaperModifier::default()
+        }];
+        app.manual_pricing.line_items = vec![
+            // Line 1: A3 BW, 10 sides -> stays A3 in both tabs
+            ManualPricingLineItem {
+                size: ManualPrintSize::A3,
+                print_mode: ManualPrintMode::Bw,
+                modifier_index: Some(0),
+                sides_input: "10".to_string(),
+                sheets_input: "10".to_string(),
+                ..ManualPricingLineItem::default()
+            },
+            // Line 2: A5 BW, 20 sides -> converts to 10 A4 eq in A4 summary
+            ManualPricingLineItem {
+                size: ManualPrintSize::A5,
+                print_mode: ManualPrintMode::Bw,
+                modifier_index: Some(0),
+                sides_input: "20".to_string(),
+                sheets_input: "20".to_string(),
+                ..ManualPricingLineItem::default()
+            },
+        ];
+
+        let totals = manual_pricing_totals(&app.manual_pricing);
+
+        // Standard summary tab
+        app.manual_summary_tab = ManualSummaryTab::Standard;
+        let rows_standard = app.manual_order_summary_receipt_rows(&app.manual_pricing, &totals);
+        // Header + 2 lines = 3 rows
+        assert_eq!(rows_standard.len(), 3);
+        assert!(rows_standard[1].contains("A3 BW 160g Heavy"));
+        assert!(rows_standard[1].contains("10"));
+        assert!(!rows_standard[1].contains("(as A4)"));
+        assert!(rows_standard[2].contains("A5 BW 160g Heavy"));
+        assert!(rows_standard[2].contains("20"));
+        assert!(!rows_standard[2].contains("(as A4)"));
+
+        // A4 summary tab
+        app.manual_summary_tab = ManualSummaryTab::A4;
+        let rows_a4 = app.manual_order_summary_receipt_rows(&app.manual_pricing, &totals);
+        assert_eq!(rows_a4.len(), 3);
+        // A3 is untouched
+        assert!(rows_a4[1].contains("A3 BW 160g Heavy"));
+        assert!(rows_a4[1].contains("10"));
+        assert!(!rows_a4[1].contains("(as A4)"));
+        // A5 is converted to 10 A4 eq with (as A4) label
+        assert!(rows_a4[2].contains("A5 BW 160g Heavy (as A4)"));
+        assert!(rows_a4[2].contains("10"));
+    }
+
+    #[test]
+    fn business_cards_convert_10_to_1_a4_in_summary() {
+        let mut app = test_app();
+        app.manual_pricing.a3_bw_first_input = "0.20".to_string();
+        app.manual_pricing.a3_bw_next_input = "0.20".to_string();
+        app.manual_pricing.a3_bw_rest_input = "0.20".to_string();
+        app.manual_pricing.line_items = vec![
+            ManualPricingLineItem {
+                size: ManualPrintSize::Buisnesscard,
+                print_mode: ManualPrintMode::Bw,
+                sides_input: "100".to_string(),
+                sheets_input: "100".to_string(),
+                ..ManualPricingLineItem::default()
+            },
+        ];
+
+        let totals = manual_pricing_totals(&app.manual_pricing);
+
+        // Standard: shows 100 cards
+        app.manual_summary_tab = ManualSummaryTab::Standard;
+        let rows_standard = app.manual_order_summary_receipt_rows(&app.manual_pricing, &totals);
+        assert_eq!(rows_standard.len(), 2);
+        assert!(rows_standard[1].contains("100"));
+        assert!(!rows_standard[1].contains("(as A4)"));
+
+        // A4 Summary: 100 business cards / 10 = 10 A4 eq
+        app.manual_summary_tab = ManualSummaryTab::A4;
+        let rows_a4 = app.manual_order_summary_receipt_rows(&app.manual_pricing, &totals);
+        assert_eq!(rows_a4.len(), 2);
+        assert!(rows_a4[1].contains("10"));
+        assert!(rows_a4[1].contains("(as A4)"));
     }
 }

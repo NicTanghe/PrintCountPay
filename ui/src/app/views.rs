@@ -1134,6 +1134,19 @@ impl PrintCountApp {
         parts.join(" ")
     }
 
+    fn manual_receipt_line_label_a4(
+        &self,
+        manual: &ManualPricingSettings,
+        line_item: &ManualPricingLineItem,
+    ) -> String {
+        let base_label = self.manual_receipt_line_label(manual, line_item);
+        if line_item.size.a4_summary_ratio().is_some() && line_item.size != ManualPrintSize::A4 {
+            format!("{base_label} (as A4)")
+        } else {
+            base_label
+        }
+    }
+
     fn manual_receipt_finisher_label(
         &self,
         manual: &ManualPricingSettings,
@@ -1171,12 +1184,49 @@ impl PrintCountApp {
             let Some(ManualLineState::Ready(line)) = totals.line_states.get(index) else {
                 continue;
             };
-            rows.extend(Self::manual_receipt_rows(
-                self.manual_receipt_line_label(manual, line_item),
-                line.sides.to_string(),
-                Self::manual_average_unit_price(line.total_cents, line.sides),
-                format_cents(line.total_cents),
-            ));
+
+            match self.manual_summary_tab {
+                ManualSummaryTab::Standard => {
+                    rows.extend(Self::manual_receipt_rows(
+                        self.manual_receipt_line_label(manual, line_item),
+                        line.sides.to_string(),
+                        Self::manual_average_unit_price(line.total_cents, line.sides),
+                        format_cents(line.total_cents),
+                    ));
+                }
+                ManualSummaryTab::A4 => {
+                    match line_item.size.a4_summary_ratio() {
+                        None => {
+                            rows.extend(Self::manual_receipt_rows(
+                                self.manual_receipt_line_label(manual, line_item),
+                                line.sides.to_string(),
+                                Self::manual_average_unit_price(line.total_cents, line.sides),
+                                format_cents(line.total_cents),
+                            ));
+                        }
+                        Some((num, den)) => {
+                            let a4_count_text =
+                                format_fraction_count(line.sides.saturating_mul(num), den);
+                            let a4_units_total = line.sides.saturating_mul(num);
+                            let a4_unit_price = if a4_units_total == 0 {
+                                "N/A".to_string()
+                            } else {
+                                let scaled_total = line.total_cents.saturating_mul(den);
+                                format_cents(
+                                    (scaled_total.saturating_add(a4_units_total / 2))
+                                        / a4_units_total,
+                                )
+                            };
+                            rows.extend(Self::manual_receipt_rows(
+                                self.manual_receipt_line_label_a4(manual, line_item),
+                                a4_count_text,
+                                a4_unit_price,
+                                format_cents(line.total_cents),
+                            ));
+                        }
+                    }
+                }
+            }
         }
 
         for (index, finisher_item) in manual.finisher_items.iter().enumerate() {
@@ -1535,12 +1585,34 @@ impl PrintCountApp {
             None
         };
 
-        let mut summary = column![
+        let summary_tabs = row![
+            button(text("Standard").size(12))
+                .padding([3, 8])
+                .style(theme::Button::custom(firefox_tab_style(
+                    self.manual_summary_tab == ManualSummaryTab::Standard,
+                )))
+                .on_press(Message::SelectManualSummaryTab(ManualSummaryTab::Standard)),
+            button(text("A4 Summary").size(12))
+                .padding([3, 8])
+                .style(theme::Button::custom(firefox_tab_style(
+                    self.manual_summary_tab == ManualSummaryTab::A4,
+                )))
+                .on_press(Message::SelectManualSummaryTab(ManualSummaryTab::A4)),
+        ]
+        .spacing(4)
+        .align_items(Alignment::Center);
+
+        let summary_header = row![
             text("Summary")
                 .size(15)
                 .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
+            horizontal_space(),
+            summary_tabs,
         ]
-        .spacing(6);
+        .align_items(Alignment::Center)
+        .width(Length::Fill);
+
+        let mut summary = column![summary_header].spacing(6);
 
         if let Some(booklet_totals) = active_booklet_totals {
             let booklet_lines_label = booklet_totals

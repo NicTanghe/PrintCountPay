@@ -908,6 +908,23 @@ fn format_a3_equivalent_units(units: u64) -> String {
     format!("{whole}.{fraction:0digits$}")
 }
 
+pub(crate) fn format_fraction_count(numerator: u64, denominator: u64) -> String {
+    if denominator == 0 {
+        return "0".to_string();
+    }
+    if numerator % denominator == 0 {
+        return (numerator / denominator).to_string();
+    }
+    let whole = numerator / denominator;
+    let rem = numerator % denominator;
+    let decimal_val = (rem.saturating_mul(1000)) / denominator;
+    let mut s = format!("{whole}.{decimal_val:03}");
+    while s.ends_with('0') {
+        s.pop();
+    }
+    s
+}
+
 fn format_tiered_unit_terms(terms: &[(u64, u64)]) -> String {
     terms
         .iter()
@@ -1705,10 +1722,11 @@ mod tests {
         ManualFinisherState, ManualLineBreakdown, ManualLineState, build_poll_label_map,
         category_end_display, category_end_value, category_start_display, category_start_value,
         default_recording_oid_inputs, default_toner_oids, delta_value,
-        format_clock_hms_with_offset, format_elapsed_hms, manual_line_summary,
-        manual_pricing_totals, manual_round_total_cents, missing_recording_snapshot_categories,
-        parse_count_input, recording_profile_from_settings_lossy, round_to_nearest_5_cents,
-        snmp_oids, sum_optional_included, sum_two,
+        format_clock_hms_with_offset, format_elapsed_hms, format_fraction_count,
+        manual_line_summary, manual_pricing_totals, manual_round_total_cents,
+        missing_recording_snapshot_categories, parse_count_input,
+        recording_profile_from_settings_lossy, round_to_nearest_5_cents, snmp_oids,
+        sum_optional_included, sum_two,
     };
     use crate::app::constants::PRT_GENERAL_PRINTER_NAME_OID;
     use crate::app::profiles::{
@@ -1722,6 +1740,36 @@ mod tests {
     };
     use printcountpay_core::{CounterOidSet, Oid};
     use time::UtcOffset;
+
+    #[test]
+    fn a4_summary_conversion_ratios() {
+        // A0, A1, A2, A3 must not be converted (return None)
+        assert_eq!(ManualPrintSize::A0.a4_summary_ratio(), None);
+        assert_eq!(ManualPrintSize::A1.a4_summary_ratio(), None);
+        assert_eq!(ManualPrintSize::A2.a4_summary_ratio(), None);
+        assert_eq!(ManualPrintSize::A3.a4_summary_ratio(), None);
+
+        // A4, A5, A6, A7, Business cards must convert to rational multipliers
+        assert_eq!(ManualPrintSize::A4.a4_summary_ratio(), Some((1, 1)));
+        assert_eq!(ManualPrintSize::A5.a4_summary_ratio(), Some((1, 2)));
+        assert_eq!(ManualPrintSize::A6.a4_summary_ratio(), Some((1, 4)));
+        assert_eq!(ManualPrintSize::A7.a4_summary_ratio(), Some((1, 8)));
+        assert_eq!(
+            ManualPrintSize::Buisnesscard.a4_summary_ratio(),
+            Some((1, 10))
+        );
+    }
+
+    #[test]
+    fn fraction_count_formatting() {
+        assert_eq!(format_fraction_count(10, 1), "10");
+        assert_eq!(format_fraction_count(20, 2), "10");
+        assert_eq!(format_fraction_count(5, 2), "2.5");
+        assert_eq!(format_fraction_count(1, 4), "0.25");
+        assert_eq!(format_fraction_count(3, 8), "0.375");
+        assert_eq!(format_fraction_count(1, 10), "0.1");
+        assert_eq!(format_fraction_count(0, 5), "0");
+    }
 
     #[test]
     fn sum_two_ignores_missing_side() {

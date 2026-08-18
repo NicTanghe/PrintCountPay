@@ -70,6 +70,13 @@ pub enum ManualPricingTab {
     Finishers,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ManualSummaryTab {
+    #[default]
+    Standard,
+    A4,
+}
+
 fn default_manual_booklet_copies_input() -> String {
     "1".to_string()
 }
@@ -116,6 +123,17 @@ impl ManualPrintSize {
             Self::A7 => Some(16),
             Self::Buisnesscard => Some(20),
             _ => None,
+        }
+    }
+
+    pub(crate) fn a4_summary_ratio(self) -> Option<(u64, u64)> {
+        match self {
+            Self::A0 | Self::A1 | Self::A2 | Self::A3 => None,
+            Self::A4 => Some((1, 1)),
+            Self::A5 => Some((1, 2)),
+            Self::A6 => Some((1, 4)),
+            Self::A7 => Some((1, 8)),
+            Self::Buisnesscard => Some((1, 10)),
         }
     }
 
@@ -1354,6 +1372,7 @@ pub(crate) enum Message {
     SelectManualPricing,
     SelectManualPricingBill(String),
     SelectManualPricingTab(ManualPricingTab),
+    SelectManualSummaryTab(ManualSummaryTab),
     SelectPrinterTab(PrinterTab),
     SelectPrinter(PrinterId),
     ToggleStatisticsPrinter(PrinterId),

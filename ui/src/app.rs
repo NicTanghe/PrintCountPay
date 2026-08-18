@@ -39,8 +39,8 @@ pub use types::{
     ManualBwTier, ManualColorTier, ManualFinisherLineItem, ManualFinisherType, ManualLaminateSize,
     ManualModifierChoice, ManualPaperModifier, ManualPricingBill, ManualPricingBillTombstone,
     ManualPricingLineItem, ManualPricingSettings, ManualPricingTab, ManualPrintMode,
-    ManualPrintSize, ManualRoundingMode, PrinterTab, ProfileChoice, RecordingCategory,
-    SnmpErrorInfo, Tab,
+    ManualPrintSize, ManualRoundingMode, ManualSummaryTab, PrinterTab, ProfileChoice,
+    RecordingCategory, SnmpErrorInfo, Tab,
 };
 pub(crate) use types::{
     ManualBillStore, ManualPricingWorkspace, Message, PricingSettings, RecordingSession,
@@ -147,6 +147,7 @@ pub struct PrintCountApp {
     selected_manual_bill_id: Option<String>,
     selected_manual_booklet_index: Option<usize>,
     manual_pricing_tab: ManualPricingTab,
+    manual_summary_tab: ManualSummaryTab,
     manual_pricing: ManualPricingSettings,
     manual_bills: Vec<ManualPricingBill>,
     manual_bill_tombstones: Vec<ManualPricingBillTombstone>,
@@ -276,6 +277,7 @@ impl PrintCountApp {
             selected_manual_bill_id: None,
             selected_manual_booklet_index: None,
             manual_pricing_tab: ManualPricingTab::Calculator,
+            manual_summary_tab: ManualSummaryTab::Standard,
             manual_pricing: ManualPricingSettings::default(),
             manual_bills: Vec::new(),
             manual_bill_tombstones: Vec::new(),
@@ -454,6 +456,10 @@ impl PrintCountApp {
             }
             Message::SelectManualPricingTab(tab) => {
                 self.manual_pricing_tab = tab;
+                Command::none()
+            }
+            Message::SelectManualSummaryTab(tab) => {
+                self.manual_summary_tab = tab;
                 Command::none()
             }
             Message::SelectPrinterTab(tab) => {
