@@ -424,7 +424,7 @@
                 discount_input: "",
                 rounding_mode: FiveCents,
             ),
-            updated_at_millis: 1787058585799,
+            updated_at_millis: 1787058920223,
         ),
         (
             id: "lunar-mesa",
