@@ -3930,7 +3930,11 @@ impl PrintCountApp {
             text("Profile OID mapping")
                 .size(18)
                 .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
-            text("Enter dotted OIDs separated by commas or spaces.")
+            text(if self.counter_oids.sum_bw_color {
+                "B/W and color click totals sum the configured OIDs; every component is required. Total OIDs are alternatives."
+            } else {
+                "Enter dotted OIDs separated by commas or spaces."
+            })
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
             column![
@@ -3949,7 +3953,7 @@ impl PrintCountApp {
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
             text(
-                "Crawl roots: 1.3.6.1.2.1.43, 1.3.6.1.4.1.367, 1.3.6.1.4.1.367.3.2.1.2.19, 1.3.6.1.4.1.367.3.2.1.2.24",
+                "Crawl roots: Printer-MIB, Ricoh MIB/counters/toner, Konica Minolta counters (1.3.6.1.4.1.18334.1.1.1.5.7.2)",
             )
                 .size(12)
                 .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),

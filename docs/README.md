@@ -18,3 +18,5 @@ dist\windows\installer\PrintCountPay-Setup-<version>.exe
 ```
 
 For the full packaging flow and silent install flags, see `WINDOWS_INSTALLER.md`.
+
+Konica Minolta bizhub C551i setup, OIDs and device validation: [KONICA_MINOLTA_C551I.md](KONICA_MINOLTA_C551I.md).

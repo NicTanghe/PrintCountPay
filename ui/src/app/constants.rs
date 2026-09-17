@@ -27,12 +27,24 @@ pub(crate) const RICOH_TONER_MAGENTA_OID: [u32; 16] =
 pub(crate) const RICOH_TONER_YELLOW_OID: [u32; 16] =
     [1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 24, 1, 1, 5, 4];
 pub(crate) const PRINTER_MIB_ROOT: [u32; 7] = [1, 3, 6, 1, 2, 1, 43];
+pub(crate) const KONICA_COUNTER_ROOT: [u32; 13] = [1, 3, 6, 1, 4, 1, 18334, 1, 1, 1, 5, 7, 2];
+pub(crate) const KONICA_BW_COPIER_COUNT_OID: [u32; 18] =
+    [1, 3, 6, 1, 4, 1, 18334, 1, 1, 1, 5, 7, 2, 2, 1, 5, 1, 1];
+pub(crate) const KONICA_BW_PRINTER_COUNT_OID: [u32; 18] =
+    [1, 3, 6, 1, 4, 1, 18334, 1, 1, 1, 5, 7, 2, 2, 1, 5, 1, 2];
+pub(crate) const KONICA_COLOR_COPIER_COUNT_OID: [u32; 18] =
+    [1, 3, 6, 1, 4, 1, 18334, 1, 1, 1, 5, 7, 2, 2, 1, 5, 2, 1];
+pub(crate) const KONICA_COLOR_PRINTER_COUNT_OID: [u32; 18] =
+    [1, 3, 6, 1, 4, 1, 18334, 1, 1, 1, 5, 7, 2, 2, 1, 5, 2, 2];
+pub(crate) const KONICA_TOTAL_COUNT_OID: [u32; 16] =
+    [1, 3, 6, 1, 4, 1, 18334, 1, 1, 1, 5, 7, 2, 1, 1, 0];
 pub(crate) const RICOH_MIB_ROOT: [u32; 7] = [1, 3, 6, 1, 4, 1, 367];
-pub(crate) const CRAWL_ROOTS: [&[u32]; 4] = [
+pub(crate) const CRAWL_ROOTS: [&[u32]; 5] = [
     &PRINTER_MIB_ROOT,
     &RICOH_MIB_ROOT,
     &RICOH_COUNTER_ROOT,
     &RICOH_TONER_ROOT,
+    &KONICA_COUNTER_ROOT,
 ];
 pub(crate) const DISCOVERY_CONCURRENCY: usize = 24;
 pub(crate) const MAX_VARBINDS_SHOWN: usize = 200;

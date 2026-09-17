@@ -2659,7 +2659,12 @@ impl PrintCountApp {
         let mut color = copies_color;
         color.extend(prints_color);
 
-        Ok(CounterOidSet { bw, color, total })
+        Ok(CounterOidSet {
+            bw,
+            color,
+            total,
+            sum_bw_color: self.counter_oids.sum_bw_color,
+        })
     }
 
     fn load_oids_from_path(&mut self) {
@@ -5197,5 +5202,44 @@ mod tests {
         assert_eq!(rows_a4.len(), 2);
         assert!(rows_a4[1].contains("10"));
         assert!(rows_a4[1].contains("(as A4)"));
+    }
+
+    #[test]
+    fn c551i_mapping_survives_apply_and_crawl_and_records_all_four_functions() {
+        let mut app = test_app();
+        let profile: ManufacturerProfile = from_str(include_str!(
+            "../../../profiles/machines/konica-minolta-bizhub-c551i.ron"
+        )).expect("c551i profile");
+        app.apply_active_profile(profile.clone());
+        app.apply_oid_inputs();
+        assert!(app.counter_oids.sum_bw_color);
+        let readings = [
+            (&profile.recording.copies_bw[0], 10),
+            (&profile.recording.prints_bw[0], 20),
+            (&profile.recording.copies_color[0], 0),
+            (&profile.recording.prints_color[0], 40),
+        ];
+        let mut values: Vec<_> = readings.into_iter().map(|(oid, value)| SnmpVarBind {
+            oid: oid.clone(), value: SnmpValue::Counter32(value)
+        }).collect();
+        let snapshot = app.build_recording_snapshot(1, &values);
+        assert_eq!(snapshot.bw_copier, Some(10));
+        assert_eq!(snapshot.bw_printer, Some(20));
+        assert_eq!(snapshot.color_copier, Some(0));
+        assert_eq!(snapshot.color_printer, Some(40));
+
+        values.push(SnmpVarBind {
+            oid: Oid::from_slice(&[1,3,6,1,2,1,43,11,1,1,9,1,1]),
+            value: SnmpValue::Integer(75),
+        });
+        let crawled = counter_oids_from_walk(&values);
+        assert!(crawled.sum_bw_color);
+        assert_eq!(crawled.total, profile.counters.total);
+        app.counter_oids = crawled;
+        app.sync_oid_inputs();
+        assert_eq!(app.recording_oids.prints_bw_input, profile.recording.prints_bw[0].to_string());
+        assert_eq!(app.recording_oids.prints_color_input, profile.recording.prints_color[0].to_string());
+        app.apply_oid_inputs();
+        assert!(app.counter_oids.sum_bw_color);
     }
 }

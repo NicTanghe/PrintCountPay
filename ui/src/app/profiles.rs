@@ -371,4 +371,105 @@ mod tests {
             vec![oid("1.3.6.1.4.1.367.3.2.1.2.19.5.1.9.11")]
         );
     }
+
+    #[test]
+    fn c551i_matches_model_or_description_without_matching_other_bizhubs() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../profiles");
+        let (index, errors) = super::load_profile_index(&root);
+        assert!(errors.is_none(), "{errors:?}");
+        for (descr, model) in [
+            (Some("KONICA MINOLTA bizhub C551i"), Some("Office upstairs")),
+            (None, Some("KONICA MINOLTA C551i")),
+            (None, Some("bizhub c551i")),
+        ] {
+            assert_eq!(
+                index.match_profile_id(None, descr, model).as_deref(),
+                Some("konica-minolta-bizhub-c551i")
+            );
+        }
+        for model in [
+            "bizhub C550i",
+            "bizhub 551i",
+            "bizhub C651i",
+            "Generic printer",
+        ] {
+            assert_eq!(
+                index.match_profile_id(Some("1.3.6.1.4.1.18334"), None, Some(model)),
+                None
+            );
+        }
+        assert_eq!(
+            index
+                .match_profile_id(None, None, Some("RICOH Aficio MP C4502"))
+                .as_deref(),
+            Some("ricoh-aficio-mp-c4502")
+        );
+    }
+
+    #[test]
+    fn c551i_profile_polls_separate_functions_and_excludes_scan_from_clicks() {
+        use crate::app::helpers::{
+            build_poll_label_map, recording_settings_from_profile, snmp_oids,
+        };
+        use printcountpay_core::{SnmpValue, SnmpVarBind, resolve_counters};
+        let profile: MachineProfile = from_str(include_str!(
+            "../../../profiles/machines/konica-minolta-bizhub-c551i.ron"
+        ))
+        .expect("c551i profile");
+        let readings = [
+            ("1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.1.1", 100),
+            ("1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.1.2", 200),
+            ("1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.1", 30),
+            ("1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.2", 40),
+            ("1.3.6.1.4.1.18334.1.1.1.5.7.2.1.1.0", 380),
+            ("1.3.6.1.4.1.18334.1.1.1.5.7.2.3.1.5.1", 9000),
+        ];
+        let values: Vec<_> = readings
+            .iter()
+            .map(|(key, value)| SnmpVarBind {
+                oid: oid(key),
+                value: SnmpValue::Counter32(*value),
+            })
+            .collect();
+        let extra: Vec<_> = profile
+            .extra_poll_labels
+            .iter()
+            .map(|entry| entry.oid.clone())
+            .collect();
+        let request = snmp_oids(
+            &profile.counters,
+            &profile.recording,
+            &extra,
+            &profile.toner,
+        );
+        for value in &values {
+            assert!(request.contains(&value.oid));
+        }
+        assert_eq!(
+            request
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            request.len()
+        );
+        assert!(
+            !request
+                .iter()
+                .any(|oid| oid.as_slice().starts_with(&[1, 3, 6, 1, 4, 1, 367]))
+        );
+
+        let result = resolve_counters(1, &profile.counters, &values);
+        assert_eq!(result.snapshot.bw, Some(300));
+        assert_eq!(result.snapshot.color, Some(70));
+        assert_eq!(result.snapshot.total, Some(380));
+        let labels = build_poll_label_map(
+            &profile.counters,
+            &recording_settings_from_profile(&profile.recording),
+            Some(&profile),
+        );
+        assert_eq!(
+            labels.get(&values[5].oid).map(String::as_str),
+            Some("Scan counter (Konica)")
+        );
+    }
 }

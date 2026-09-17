@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -36,6 +37,7 @@ pub enum CounterWarning {
     UsedTotalFallback,
     DerivedTotal,
     NonNumeric { kind: CounterKind, oid: String },
+    Overflow { kind: CounterKind },
 }
 
 impl fmt::Display for CounterWarning {
@@ -49,6 +51,7 @@ impl fmt::Display for CounterWarning {
             CounterWarning::NonNumeric { kind, oid } => {
                 write!(f, "Non-numeric {kind} counter at OID {oid}")
             }
+            CounterWarning::Overflow { kind } => write!(f, "Overflow summing {kind} counters"),
         }
     }
 }
@@ -58,6 +61,10 @@ pub struct CounterOidSet {
     pub bw: Vec<Oid>,
     pub color: Vec<Oid>,
     pub total: Vec<Oid>,
+    /// Sum every distinct B/W and color OID instead of using them as alternatives.
+    /// All components must be present. Total OIDs always remain ordered fallbacks.
+    #[serde(default)]
+    pub sum_bw_color: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -74,8 +81,13 @@ pub fn resolve_counters(
 ) -> CounterResolution {
     let mut warnings = Vec::new();
 
-    let bw = find_counter_value(CounterKind::Bw, &oids.bw, varbinds, &mut warnings);
-    let color = find_counter_value(CounterKind::Color, &oids.color, varbinds, &mut warnings);
+    let resolve_color = if oids.sum_bw_color {
+        sum_counter_values
+    } else {
+        find_counter_value
+    };
+    let bw = resolve_color(CounterKind::Bw, &oids.bw, varbinds, &mut warnings);
+    let color = resolve_color(CounterKind::Color, &oids.color, varbinds, &mut warnings);
     let total = find_counter_value(CounterKind::Total, &oids.total, varbinds, &mut warnings);
 
     let mut snapshot = CounterSnapshot::new(timestamp);
@@ -92,8 +104,14 @@ pub fn resolve_counters(
         if let Some(total_value) = total.value {
             snapshot.total = Some(total_value);
         } else {
-            snapshot.total = Some(bw.value.unwrap() + color.value.unwrap());
-            warnings.push(CounterWarning::DerivedTotal);
+            snapshot.total = bw.value.unwrap().checked_add(color.value.unwrap());
+            warnings.push(if snapshot.total.is_some() {
+                CounterWarning::DerivedTotal
+            } else {
+                CounterWarning::Overflow {
+                    kind: CounterKind::Total,
+                }
+            });
             snapshot.source_oids.total = None;
         }
         CounterMode::BwColor
@@ -148,6 +166,45 @@ struct CounterValue {
     oid: Option<Oid>,
 }
 
+fn sum_counter_values(
+    kind: CounterKind,
+    components: &[Oid],
+    varbinds: &[SnmpVarBind],
+    warnings: &mut Vec<CounterWarning>,
+) -> CounterValue {
+    let missing = CounterValue {
+        value: None,
+        oid: None,
+    };
+    if components.is_empty() {
+        return missing;
+    }
+
+    let mut seen = HashSet::new();
+    let mut total = 0u64;
+    for oid in components {
+        if !seen.insert(oid) {
+            continue;
+        }
+        let component = find_counter_value(kind, std::slice::from_ref(oid), varbinds, warnings);
+        let Some(value) = component.value else {
+            // A partial sum must not masquerade as the full device counter.
+            return missing;
+        };
+        let Some(sum) = total.checked_add(value) else {
+            warnings.push(CounterWarning::Overflow { kind });
+            return missing;
+        };
+        total = sum;
+    }
+
+    CounterValue {
+        value: Some(total),
+        // A derived value has no single source OID.
+        oid: (seen.len() == 1).then(|| components[0].clone()),
+    }
+}
+
 fn find_counter_value(
     kind: CounterKind,
     candidates: &[Oid],
@@ -194,6 +251,7 @@ mod tests {
             bw: vec![oid("1.2.3.1")],
             color: vec![oid("1.2.3.2")],
             total: vec![oid("1.2.3.3")],
+            ..CounterOidSet::default()
         };
         let varbinds = vec![
             SnmpVarBind {
@@ -225,6 +283,7 @@ mod tests {
             bw: vec![oid("1.2.3.1")],
             color: vec![oid("1.2.3.2")],
             total: vec![oid("1.2.3.3")],
+            ..CounterOidSet::default()
         };
         let varbinds = vec![SnmpVarBind {
             oid: oid("1.2.3.3"),
@@ -253,5 +312,118 @@ mod tests {
                 .iter()
                 .any(|warning| matches!(warning, CounterWarning::Missing { .. }))
         );
+    }
+
+    #[test]
+    fn legacy_oid_sets_keep_ordered_fallbacks() {
+        let set: CounterOidSet =
+            ron::from_str("(bw: [([1,2,3,1]), ([1,2,3,2])], color: [], total: [])")
+                .expect("legacy mapping");
+        assert!(!set.sum_bw_color);
+        let varbinds = vec![
+            SnmpVarBind {
+                oid: oid("1.2.3.1"),
+                value: SnmpValue::Counter32(12),
+            },
+            SnmpVarBind {
+                oid: oid("1.2.3.2"),
+                value: SnmpValue::Counter32(34),
+            },
+        ];
+        assert_eq!(resolve_counters(1, &set, &varbinds).snapshot.bw, Some(12));
+    }
+
+    fn summed_set() -> CounterOidSet {
+        CounterOidSet {
+            bw: vec![oid("1.2.3.1"), oid("1.2.3.2"), oid("1.2.3.1")],
+            color: vec![oid("1.2.3.3"), oid("1.2.3.4")],
+            total: vec![oid("1.2.3.5"), oid("1.2.3.6")],
+            sum_bw_color: true,
+        }
+    }
+
+    fn summed_values() -> Vec<SnmpVarBind> {
+        [100, 200, 0, 40, 350, 999]
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| SnmpVarBind {
+                oid: oid(&format!("1.2.3.{}", index + 1)),
+                value: SnmpValue::Counter64(value),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn sums_distinct_copy_print_counters_but_keeps_total_fallbacks() {
+        let set = summed_set();
+        let encoded = ron::to_string(&set).expect("serialize");
+        let set = ron::from_str(&encoded).expect("deserialize");
+        let result = resolve_counters(1, &set, &summed_values());
+        assert_eq!(result.mode, CounterMode::BwColor);
+        assert_eq!(result.snapshot.bw, Some(300));
+        assert_eq!(result.snapshot.color, Some(40));
+        assert_eq!(result.snapshot.total, Some(350));
+        assert_eq!(result.snapshot.source_oids.bw, None);
+        assert_eq!(
+            result.snapshot.source_oids.total.as_deref(),
+            Some("1.2.3.5")
+        );
+    }
+
+    #[test]
+    fn incomplete_sum_never_reports_a_partial_count_as_a_total() {
+        for bad_value in [
+            SnmpValue::NoSuchObject,
+            SnmpValue::NoSuchInstance,
+            SnmpValue::Null,
+            SnmpValue::OctetString(b"unknown".to_vec()),
+            SnmpValue::Integer(-1),
+        ] {
+            let mut values = summed_values();
+            values[1].value = bad_value;
+            let result = resolve_counters(1, &summed_set(), &values);
+            assert_eq!(result.mode, CounterMode::TotalOnly);
+            assert_eq!(result.snapshot.bw, None);
+            assert_eq!(result.snapshot.total, Some(350));
+        }
+        let mut values = summed_values();
+        values.remove(1);
+        assert_eq!(
+            resolve_counters(1, &summed_set(), &values).snapshot.bw,
+            None
+        );
+    }
+
+    #[test]
+    fn summed_counters_derive_total_and_preserve_zero() {
+        let mut values = summed_values();
+        values.truncate(4);
+        let result = resolve_counters(1, &summed_set(), &values);
+        assert_eq!(result.snapshot.total, Some(340));
+        for value in &mut values {
+            value.value = SnmpValue::Counter32(0);
+        }
+        let result = resolve_counters(1, &summed_set(), &values);
+        assert_eq!(result.mode, CounterMode::BwColor);
+        assert_eq!(result.snapshot.total, Some(0));
+    }
+
+    #[test]
+    fn counter_sum_overflow_is_reported_without_wrapping() {
+        let mut values = summed_values();
+        values[0].value = SnmpValue::Counter64(u64::MAX);
+        let result = resolve_counters(1, &summed_set(), &values);
+        assert_eq!(result.snapshot.bw, None);
+        assert!(result.warnings.contains(&CounterWarning::Overflow {
+            kind: CounterKind::Bw
+        }));
+
+        values[1].value = SnmpValue::Counter32(0);
+        values.truncate(4);
+        let result = resolve_counters(1, &summed_set(), &values);
+        assert_eq!(result.snapshot.total, None);
+        assert!(result.warnings.contains(&CounterWarning::Overflow {
+            kind: CounterKind::Total
+        }));
     }
 }

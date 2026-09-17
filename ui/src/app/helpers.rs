@@ -7,6 +7,8 @@ use printcountpay_core::{CounterOidSet, Oid, PrinterStatus, SnmpVarBind};
 use time::{Date, Month, OffsetDateTime, UtcOffset};
 
 use crate::app::constants::{
+    KONICA_BW_COPIER_COUNT_OID, KONICA_BW_PRINTER_COUNT_OID, KONICA_COLOR_COPIER_COUNT_OID,
+    KONICA_COLOR_PRINTER_COUNT_OID, KONICA_COUNTER_ROOT, KONICA_TOTAL_COUNT_OID,
     PRT_GENERAL_PRINTER_NAME_OID, PRT_MARKER_LIFECOUNT_1, PRT_MARKER_LIFECOUNT_2,
     PRT_MARKER_LIFECOUNT_3, RICOH_BW_COPIER_COUNT_OID, RICOH_BW_PRINTER_COUNT_OID,
     RICOH_COLOR_COPIER_COUNT_OID, RICOH_COLOR_PRINTER_COUNT_OID, RICOH_COUNTER_TABLE,
@@ -263,6 +265,7 @@ pub(crate) fn default_counter_oids() -> CounterOidSet {
             Oid::from_slice(&PRT_MARKER_LIFECOUNT_2),
         ],
         total: vec![Oid::from_slice(&PRT_MARKER_LIFECOUNT_3)],
+        ..CounterOidSet::default()
     }
 }
 
@@ -303,7 +306,9 @@ pub(crate) fn recording_oids_from_counter_set(set: &CounterOidSet) -> RecordingO
     for oid in &set.bw {
         if oid.as_slice() == RICOH_BW_COPIER_COUNT_OID.as_slice() {
             copies_bw.push(oid.clone());
-        } else if oid.as_slice() == RICOH_BW_PRINTER_COUNT_OID.as_slice() {
+        } else if oid.as_slice() == RICOH_BW_PRINTER_COUNT_OID.as_slice()
+            || oid.as_slice() == KONICA_BW_PRINTER_COUNT_OID.as_slice()
+        {
             prints_bw.push(oid.clone());
         } else {
             copies_bw.push(oid.clone());
@@ -316,6 +321,7 @@ pub(crate) fn recording_oids_from_counter_set(set: &CounterOidSet) -> RecordingO
         {
             copies_color.push(oid.clone());
         } else if oid.as_slice() == RICOH_COLOR_PRINTER_COUNT_OID.as_slice()
+            || oid.as_slice() == KONICA_COLOR_PRINTER_COUNT_OID.as_slice()
             || oid.as_slice() == prints_color_alt.as_slice()
         {
             prints_color.push(oid.clone());
@@ -1676,6 +1682,27 @@ pub(crate) fn sum_optional_included(
 }
 
 pub(crate) fn counter_oids_from_walk(varbinds: &[SnmpVarBind]) -> CounterOidSet {
+    if varbinds.iter().any(|item| {
+        item.oid.as_slice().starts_with(&KONICA_COUNTER_ROOT) && item.value.as_u64().is_some()
+    }) {
+        // Only known counters are billable. Never turn arbitrary numeric MIB
+        // values (uptime, supply levels, scan counts) into total fallbacks.
+        return CounterOidSet {
+            bw: vec![
+                Oid::from_slice(&KONICA_BW_COPIER_COUNT_OID),
+                Oid::from_slice(&KONICA_BW_PRINTER_COUNT_OID),
+            ],
+            color: vec![
+                Oid::from_slice(&KONICA_COLOR_COPIER_COUNT_OID),
+                Oid::from_slice(&KONICA_COLOR_PRINTER_COUNT_OID),
+            ],
+            total: vec![
+                Oid::from_slice(&KONICA_TOTAL_COUNT_OID),
+                Oid::from_slice(&PRT_MARKER_LIFECOUNT_1),
+            ],
+            sum_bw_color: true,
+        };
+    }
     let mut seen = HashSet::new();
     let mut candidates: Vec<Oid> = varbinds
         .iter()

@@ -7,7 +7,7 @@ Tabs
 
 - Printers: left list of discovered printers, right details with Polling and SNMP OIDs sub-tabs.
 - Counters segment shows B/W, color, and total clicks (N/A until counter OIDs are mapped).
-- SNMP OIDs sub-tab lets you load/save counter OIDs in RON, manually edit dotted OIDs (comma/space separated), or crawl Printer-MIB and Ricoh OID trees.
+- SNMP OIDs sub-tab lets you load/save counter OIDs in RON, manually edit dotted OIDs (comma/space separated), or crawl Printer-MIB, Ricoh and Konica Minolta counter trees.
 - Debug: log console, filters, and diagnostics panel.
 
 Discovery

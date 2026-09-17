@@ -14,3 +14,14 @@ Canon (IRaC,…) page counter OID for page count is:
 122 Total (Full Color + Single / large) 1.3.6.1.4.1.1602.1.11.1.3.1.4.122
 123 Total Full Color + Single/Small) 1.3.6.1.4.1.1602.1.11.1.3.1.4.123
 501 Scan - 1.3.6.1.4.1.1602.1.11.1.3.1.4.501
+Konica Minolta bizhub C551i (profile: konica-minolta-bizhub-c551i)
+Published bizhub mapping; confirm against the device panel. See docs/KONICA_MINOLTA_C551I.md.
+Copies B/W: 1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.1.1
+Copies Color: 1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.1
+Prints B/W: 1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.1.2
+Prints Color: 1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.2
+B/W clicks = Copies B/W + Prints B/W; Color clicks = Copies Color + Prints Color.
+Total: 1.3.6.1.4.1.18334.1.1.1.5.7.2.1.1.0
+Total fallback: 1.3.6.1.2.1.43.10.2.1.4.1.1
+Scan (diagnostic only): 1.3.6.1.4.1.18334.1.1.1.5.7.2.3.1.5.1
+Duplex (diagnostic only): 1.3.6.1.4.1.18334.1.1.1.5.7.2.1.3.0
