@@ -26,7 +26,10 @@ pub(crate) fn resolve_app_paths() -> AppPaths {
         .or_else(windows_app_data_root)
         .unwrap_or_else(|| install_root.clone());
 
-    let profiles_root = data_root.join("profiles");
+    let profiles_root = dev_root
+        .as_ref()
+        .map(|root| root.join("profiles"))
+        .unwrap_or_else(|| data_root.join("profiles"));
     let printers_file = data_root.join("printers.ron");
     let manual_bills_file = data_root.join("manual_bills.ron");
     let counter_oids_file = data_root.join("counter_oids.ron");
@@ -61,10 +64,22 @@ pub(crate) fn resolve_app_paths() -> AppPaths {
 }
 
 fn development_root() -> Option<PathBuf> {
-    let cwd = env::current_dir().ok()?;
-    let has_workspace_manifest = cwd.join("Cargo.toml").is_file();
-    let has_profiles = cwd.join("profiles").is_dir();
-    (has_workspace_manifest && has_profiles).then_some(cwd)
+    if let Ok(cwd) = env::current_dir() {
+        let has_workspace_manifest = cwd.join("Cargo.toml").is_file();
+        let has_profiles = cwd.join("profiles").is_dir();
+        if has_workspace_manifest && has_profiles {
+            return Some(cwd);
+        }
+    }
+
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    if let Some(parent) = manifest_dir.parent() {
+        if parent.join("Cargo.toml").is_file() && parent.join("profiles").is_dir() {
+            return Some(parent.to_path_buf());
+        }
+    }
+
+    None
 }
 
 fn data_root_from_env() -> Option<PathBuf> {

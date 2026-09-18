@@ -219,12 +219,87 @@ fn prefer_local_recording_session(
 }
 
 fn prefer_local_poll_state(local: &SnmpPollStatus, incoming: &SnmpPollStatus) -> bool {
+    let local_usable = count_usable_numeric_varbinds(local);
+    let incoming_usable = count_usable_numeric_varbinds(incoming);
+
+    if local_usable > incoming_usable {
+        return true;
+    }
+    if incoming_usable > local_usable {
+        return false;
+    }
+
     match (poll_received_at(local), poll_received_at(incoming)) {
         (Some(local_received_at), Some(incoming_received_at)) => {
             local_received_at > incoming_received_at
         }
         (Some(_), None) => true,
         _ => false,
+    }
+}
+
+fn merge_poll_states(local: &SnmpPollStatus, incoming: &SnmpPollStatus) -> SnmpPollStatus {
+    match (local, incoming) {
+        (
+            SnmpPollStatus::Ok {
+                received_at: local_received_at,
+                varbinds: local_varbinds,
+            },
+            SnmpPollStatus::Ok {
+                received_at: incoming_received_at,
+                varbinds: incoming_varbinds,
+            },
+        ) => {
+            let mut varbind_map: HashMap<Oid, (u64, SnmpVarBind)> = HashMap::new();
+            for vb in local_varbinds {
+                varbind_map.insert(vb.oid.clone(), (*local_received_at, vb.clone()));
+            }
+
+            for vb in incoming_varbinds {
+                let incoming_has_value = vb.value.as_u64().is_some();
+                match varbind_map.entry(vb.oid.clone()) {
+                    std::collections::hash_map::Entry::Occupied(mut entry) => {
+                        let (existing_time, existing_vb) = entry.get_mut();
+                        let existing_has_value = existing_vb.value.as_u64().is_some();
+                        if incoming_has_value && !existing_has_value {
+                            *existing_time = *incoming_received_at;
+                            *existing_vb = vb.clone();
+                        } else if incoming_has_value == existing_has_value
+                            && *incoming_received_at >= *existing_time
+                        {
+                            *existing_time = *incoming_received_at;
+                            *existing_vb = vb.clone();
+                        }
+                    }
+                    std::collections::hash_map::Entry::Vacant(entry) => {
+                        entry.insert((*incoming_received_at, vb.clone()));
+                    }
+                }
+            }
+
+            let mut varbinds: Vec<SnmpVarBind> =
+                varbind_map.into_values().map(|(_, vb)| vb).collect();
+            varbinds.sort_by(|a, b| a.oid.0.cmp(&b.oid.0));
+
+            SnmpPollStatus::Ok {
+                received_at: (*local_received_at).max(*incoming_received_at),
+                varbinds,
+            }
+        }
+        (SnmpPollStatus::Ok { .. }, _) => local.clone(),
+        (_, SnmpPollStatus::Ok { .. }) => incoming.clone(),
+        (local, incoming) if prefer_local_poll_state(local, incoming) => local.clone(),
+        (_, incoming) => incoming.clone(),
+    }
+}
+
+fn count_usable_numeric_varbinds(state: &SnmpPollStatus) -> usize {
+    match state {
+        SnmpPollStatus::Ok { varbinds, .. } => varbinds
+            .iter()
+            .filter(|vb| vb.value.as_u64().is_some())
+            .count(),
+        _ => 0,
     }
 }
 
@@ -2116,7 +2191,40 @@ impl PrintCountApp {
             if !self.recent_poll_is_fresh(&printer_id) {
                 self.request_remote_poll(&printer_id);
             }
-            return Command::none();
+
+            let recording_oids = recording_profile_from_settings_lossy(&self.recording_oids);
+            let master_provides_recording = self
+                .last_shared_state
+                .poll_states
+                .iter()
+                .find(|entry| entry.printer_id == printer_id)
+                .map(|entry| match &entry.state {
+                    SnmpPollStatus::Ok {
+                        received_at,
+                        varbinds,
+                    } => {
+                        let snapshot =
+                            Self::snapshot_from_varbinds(*received_at, varbinds, &recording_oids);
+                        missing_recording_snapshot_categories(&snapshot, &recording_oids).is_empty()
+                    }
+                    _ => false,
+                })
+                .unwrap_or(false);
+
+            if master_provides_recording {
+                return Command::none();
+            }
+
+            let has_all_recording_categories = self
+                .snapshot_for_printer(&printer_id)
+                .map(|snapshot| {
+                    missing_recording_snapshot_categories(&snapshot, &recording_oids).is_empty()
+                })
+                .unwrap_or(false);
+
+            if has_all_recording_categories && self.recent_poll_is_fresh(&printer_id) {
+                return Command::none();
+            }
         }
 
         self.poll_printer(printer_id)
@@ -2477,37 +2585,44 @@ impl PrintCountApp {
         }
     }
 
+fn snapshot_from_varbinds(
+    received_at: u64,
+    varbinds: &[SnmpVarBind],
+    recording_oids: &RecordingOidProfile,
+) -> RecordingSnapshot {
+    let copies_bw_value = recording_oids
+        .copies_bw
+        .iter()
+        .find_map(|oid| varbind_numeric_value(varbinds, oid));
+    let copies_color_value = recording_oids
+        .copies_color
+        .iter()
+        .find_map(|oid| varbind_numeric_value(varbinds, oid));
+    let prints_bw_value = recording_oids
+        .prints_bw
+        .iter()
+        .find_map(|oid| varbind_numeric_value(varbinds, oid));
+    let prints_color_value = recording_oids
+        .prints_color
+        .iter()
+        .find_map(|oid| varbind_numeric_value(varbinds, oid));
+
+    RecordingSnapshot {
+        received_at,
+        bw_printer: prints_bw_value,
+        bw_copier: copies_bw_value,
+        color_printer: prints_color_value,
+        color_copier: copies_color_value,
+    }
+}
+
     fn build_recording_snapshot(
         &self,
         received_at: u64,
         varbinds: &[SnmpVarBind],
     ) -> RecordingSnapshot {
         let recording_oids = recording_profile_from_settings_lossy(&self.recording_oids);
-
-        let copies_bw_value = recording_oids
-            .copies_bw
-            .iter()
-            .find_map(|oid| varbind_numeric_value(varbinds, oid));
-        let copies_color_value = recording_oids
-            .copies_color
-            .iter()
-            .find_map(|oid| varbind_numeric_value(varbinds, oid));
-        let prints_bw_value = recording_oids
-            .prints_bw
-            .iter()
-            .find_map(|oid| varbind_numeric_value(varbinds, oid));
-        let prints_color_value = recording_oids
-            .prints_color
-            .iter()
-            .find_map(|oid| varbind_numeric_value(varbinds, oid));
-
-        RecordingSnapshot {
-            received_at,
-            bw_printer: prints_bw_value,
-            bw_copier: copies_bw_value,
-            color_printer: prints_color_value,
-            color_copier: copies_color_value,
-        }
+        Self::snapshot_from_varbinds(received_at, varbinds, &recording_oids)
     }
 
     fn apply_profile_for_printer(
@@ -2561,6 +2676,9 @@ impl PrintCountApp {
 
         let Some(profile_id) = profile_id else {
             if self.selected_printer.as_ref() == Some(printer_id) {
+                if self.active_profile.is_some() {
+                    return;
+                }
                 self.clear_active_profile();
             }
             return;
@@ -2572,6 +2690,9 @@ impl PrintCountApp {
 
         let Some(profile) = self.profile_index.profile(&profile_id).cloned() else {
             if self.selected_printer.as_ref() == Some(printer_id) {
+                if self.active_profile.is_some() {
+                    return;
+                }
                 self.clear_active_profile();
                 self.oids_status = Some(format!("Profile {profile_id} not found."));
             }
@@ -2958,10 +3079,8 @@ impl PrintCountApp {
                 let local_state = local_poll_states.get(printer_id);
                 let incoming_state = incoming_poll_states.get(printer_id);
                 let state = match (local_state, incoming_state) {
-                    (Some(local), Some(incoming)) if prefer_local_poll_state(local, incoming) => {
-                        local.clone()
-                    }
-                    (_, Some(incoming)) => incoming.clone(),
+                    (Some(local), Some(incoming)) => merge_poll_states(local, incoming),
+                    (None, Some(incoming)) => incoming.clone(),
                     (Some(local), None) if poll_received_at(local).is_some() => local.clone(),
                     _ => SnmpPollStatus::Idle,
                 };
@@ -5241,5 +5360,167 @@ mod tests {
         assert_eq!(app.recording_oids.prints_color_input, profile.recording.prints_color[0].to_string());
         app.apply_oid_inputs();
         assert!(app.counter_oids.sum_bw_color);
+    }
+
+    #[test]
+    fn merge_poll_states_preserves_local_recording_oids_when_remote_lacks_them() {
+        let oid_copies_bw =
+            Oid::from_slice(&[1, 3, 6, 1, 4, 1, 18334, 1, 1, 1, 5, 7, 2, 2, 1, 5, 1, 1]);
+        let oid_copies_color =
+            Oid::from_slice(&[1, 3, 6, 1, 4, 1, 18334, 1, 1, 1, 5, 7, 2, 2, 1, 5, 2, 1]);
+        let oid_prints_bw =
+            Oid::from_slice(&[1, 3, 6, 1, 4, 1, 18334, 1, 1, 1, 5, 7, 2, 2, 1, 5, 1, 2]);
+        let oid_prints_color =
+            Oid::from_slice(&[1, 3, 6, 1, 4, 1, 18334, 1, 1, 1, 5, 7, 2, 2, 1, 5, 2, 2]);
+        let oid_total = Oid::from_slice(&[1, 3, 6, 1, 2, 1, 43, 10, 2, 1, 4, 1, 1]);
+
+        let local = SnmpPollStatus::Ok {
+            received_at: 100,
+            varbinds: vec![
+                SnmpVarBind {
+                    oid: oid_copies_bw.clone(),
+                    value: SnmpValue::Counter32(33),
+                },
+                SnmpVarBind {
+                    oid: oid_copies_color.clone(),
+                    value: SnmpValue::Counter32(9),
+                },
+                SnmpVarBind {
+                    oid: oid_prints_bw.clone(),
+                    value: SnmpValue::Counter32(1751),
+                },
+                SnmpVarBind {
+                    oid: oid_prints_color.clone(),
+                    value: SnmpValue::Counter32(206),
+                },
+                SnmpVarBind {
+                    oid: oid_total.clone(),
+                    value: SnmpValue::Counter32(2000),
+                },
+            ],
+        };
+
+        // Remote Master only polls standard total and gets error for Ricoh oids
+        let incoming = SnmpPollStatus::Ok {
+            received_at: 105,
+            varbinds: vec![
+                SnmpVarBind {
+                    oid: oid_total.clone(),
+                    value: SnmpValue::Counter32(2004),
+                },
+                SnmpVarBind {
+                    oid: Oid::from_slice(&[1, 3, 6, 1, 4, 1, 367, 1, 1]),
+                    value: SnmpValue::NoSuchObject,
+                },
+            ],
+        };
+
+        let merged = merge_poll_states(&local, &incoming);
+        match merged {
+            SnmpPollStatus::Ok {
+                received_at,
+                varbinds,
+            } => {
+                assert_eq!(received_at, 105);
+                assert_eq!(varbind_numeric_value(&varbinds, &oid_copies_bw), Some(33));
+                assert_eq!(varbind_numeric_value(&varbinds, &oid_copies_color), Some(9));
+                assert_eq!(
+                    varbind_numeric_value(&varbinds, &oid_prints_bw),
+                    Some(1751)
+                );
+                assert_eq!(
+                    varbind_numeric_value(&varbinds, &oid_prints_color),
+                    Some(206)
+                );
+                assert_eq!(varbind_numeric_value(&varbinds, &oid_total), Some(2004));
+            }
+            other => panic!("expected Ok, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_shared_state_preserves_local_konica_recording_when_remote_sends_partial_poll() {
+        let mut app = test_app();
+        let profile: ManufacturerProfile = from_str(include_str!(
+            "../../../profiles/machines/konica-minolta-bizhub-c551i.ron"
+        ))
+        .expect("c551i profile");
+        let mut printer = printer_record_with_id("snmp-192.168.129.51");
+        printer.profile_id = Some(profile.id());
+        let printer_id = printer.id.clone();
+
+        app.profile_index.upsert_profile(profile.clone());
+        app.replace_printers(vec![printer.clone()]);
+        app.selected_printer = Some(printer_id.clone());
+        app.apply_active_profile(profile.clone());
+
+        let oid_copies_bw = profile.recording.copies_bw[0].clone();
+        let oid_copies_color = profile.recording.copies_color[0].clone();
+        let oid_prints_bw = profile.recording.prints_bw[0].clone();
+        let oid_prints_color = profile.recording.prints_color[0].clone();
+        let oid_total = profile.counters.total[0].clone();
+
+        app.poll_states.insert(
+            printer_id.clone(),
+            SnmpPollStatus::Ok {
+                received_at: 100,
+                varbinds: vec![
+                    SnmpVarBind {
+                        oid: oid_copies_bw.clone(),
+                        value: SnmpValue::Counter32(33),
+                    },
+                    SnmpVarBind {
+                        oid: oid_copies_color.clone(),
+                        value: SnmpValue::Counter32(9),
+                    },
+                    SnmpVarBind {
+                        oid: oid_prints_bw.clone(),
+                        value: SnmpValue::Counter32(1751),
+                    },
+                    SnmpVarBind {
+                        oid: oid_prints_color.clone(),
+                        value: SnmpValue::Counter32(206),
+                    },
+                    SnmpVarBind {
+                        oid: oid_total.clone(),
+                        value: SnmpValue::Counter32(2000),
+                    },
+                ],
+            },
+        );
+
+        // Incoming snapshot from remote Master who only has standard total
+        app.apply_shared_state(sync::SharedState {
+            revision: 5,
+            printers: vec![printer],
+            poll_states: vec![sync::PollStateEntry {
+                printer_id: printer_id.clone(),
+                state: SnmpPollStatus::Ok {
+                    received_at: 105,
+                    varbinds: vec![SnmpVarBind {
+                        oid: oid_total.clone(),
+                        value: SnmpValue::Counter32(2004),
+                    }],
+                },
+            }],
+            recording_sessions: Vec::new(),
+            pricing: app.pricing.clone(),
+            bill_sync_supported: false,
+            manual_pricing_settings: None,
+            manual_bills: Vec::new(),
+            manual_bill_tombstones: Vec::new(),
+        });
+
+        // The recording snapshot must still be ready with all 4 categories
+        let snapshot_result = app.ready_recording_snapshot(&printer_id);
+        assert!(
+            snapshot_result.is_ok(),
+            "recording should be ready: {snapshot_result:?}"
+        );
+        let snapshot = snapshot_result.unwrap();
+        assert_eq!(snapshot.bw_copier, Some(33));
+        assert_eq!(snapshot.color_copier, Some(9));
+        assert_eq!(snapshot.bw_printer, Some(1751));
+        assert_eq!(snapshot.color_printer, Some(206));
     }
 }

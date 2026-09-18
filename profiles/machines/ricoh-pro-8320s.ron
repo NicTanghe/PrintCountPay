@@ -1,7 +1,7 @@
 (
     id: "ricoh-pro-8320s",
     manufacturer: "ricoh",
-    firmware: "csv-derived",
+    firmware: "",
     recording: (
         copies_bw: [
             ([1, 3, 6, 1, 4, 1, 367, 3, 2, 1, 2, 19, 5, 1, 9, 3]),

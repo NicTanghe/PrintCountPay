@@ -1,7 +1,7 @@
 (
     id: "ricoh-pro-8200s",
     manufacturer: "ricoh",
-    firmware: "csv-derived",
+    firmware: "",
     recording: (
         copies_bw: [],
         copies_color: [],
