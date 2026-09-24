@@ -445,6 +445,94 @@ impl PrintCountApp {
             .into()
     }
 
+    fn editable_printer_name_view(
+        &self,
+        label: &str,
+        printer_id: &PrinterId,
+        display_name: &str,
+    ) -> Element<'_, Message> {
+        let is_editing = self
+            .editing_printer_name
+            .as_ref()
+            .map(|e| &e.printer_id == printer_id)
+            .unwrap_or(false);
+
+        if is_editing {
+            let editing = self.editing_printer_name.as_ref().unwrap();
+            let name_input = text_input("Printer name", &editing.name_input)
+                .on_input(Message::PrinterNameInputChanged)
+                .on_submit(Message::CommitPrinterName)
+                .padding([3, 6])
+                .size(12)
+                .width(Length::Fixed(200.0));
+
+            let save_btn = button("Save")
+                .padding([3, 8])
+                .style(theme::Button::custom(solid_brand_button_style(
+                    CONTENT_BRAND_SAMPLE,
+                )))
+                .on_press(Message::CommitPrinterName);
+
+            let cancel_btn = button("Cancel")
+                .padding([3, 8])
+                .style(theme::Button::custom(muted_content_button_style()))
+                .on_press(Message::CancelPrinterNameEdit);
+
+            row![
+                text(format!("{label}: "))
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                name_input,
+                save_btn,
+                cancel_btn,
+            ]
+            .spacing(6)
+            .align_items(Alignment::Center)
+            .into()
+        } else {
+            let is_pending = self
+                .pending_printer_rename_hold
+                .as_ref()
+                .map(|p| &p.printer_id == printer_id)
+                .unwrap_or(false);
+
+            let text_color = if is_pending {
+                Color::from_rgb8(0x0f, 0x4c, 0x81)
+            } else {
+                Color::from_rgb8(0x1f, 0x2a, 0x37)
+            };
+
+            let name_badge = container(
+                text(display_name.to_string())
+                    .size(12)
+                    .style(theme::Text::Color(text_color)),
+            )
+            .padding([2, 6])
+            .style(theme::Container::Custom(printer_name_badge_style(is_pending)));
+
+            let interactive_name = mouse_area(name_badge)
+                .interaction(iced::mouse::Interaction::Pointer)
+                .on_press(Message::StartPrinterRenameHold(printer_id.clone()))
+                .on_release(Message::CancelPrinterRenameHold)
+                .on_exit(Message::CancelPrinterRenameHold);
+
+            let hint = text("(click and hold to rename)")
+                .size(10)
+                .style(theme::Text::Color(Color::from_rgb8(0x8a, 0x8a, 0x8a)));
+
+            row![
+                text(format!("{label}: "))
+                    .size(12)
+                    .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
+                interactive_name,
+                hint,
+            ]
+            .spacing(6)
+            .align_items(Alignment::Center)
+            .into()
+        }
+    }
+
     fn recording_tab_view(&self) -> Element<'_, Message> {
         let selected_id = self.selected_printer.as_ref();
         let selected_label = selected_id
@@ -713,12 +801,20 @@ impl PrintCountApp {
         };
 
         let mut content = column![].spacing(12);
-        if self.advanced_mode {
+        if let Some(printer_id) = selected_id {
+            content = content.push(self.editable_printer_name_view(
+                "Selected printer",
+                printer_id,
+                &selected_label,
+            ));
+        } else {
             content = content.push(
-                text(format!("Selected printer: {selected_label}"))
+                text("Selected printer: No printer selected")
                     .size(12)
                     .style(theme::Text::Color(Color::from_rgb8(0x6a, 0x6a, 0x6a))),
             );
+        }
+        if self.advanced_mode {
             content = content.push(
                 text(format!("Recording printer ID: {selected_id_label}"))
                     .size(12)
@@ -3725,9 +3821,7 @@ impl PrintCountApp {
                                 .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
                         );
                         content = content.push(
-                            text(format!("Name: {}", name))
-                                .size(13)
-                                .style(theme::Text::Color(Color::from_rgb8(0x3a, 0x4a, 0x5a))),
+                            self.editable_printer_name_view("Name", &record.id, name),
                         );
                         content = content.push(
                             text(format!("Address: {}", address))

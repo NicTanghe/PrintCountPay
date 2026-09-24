@@ -1673,6 +1673,7 @@ impl PrintCountApp {
         }
 
         self.pending_printer_drag = None;
+        self.commit_printer_name_if_editing();
         self.manual_pricing_selected = false;
         self.selected_manual_bill_id = None;
         self.selected_printer = Some(printer_id.clone());
@@ -1739,6 +1740,110 @@ impl PrintCountApp {
             .is_some_and(|pending| &pending.printer_id == printer_id)
         {
             self.pending_printer_drag = None;
+        }
+    }
+
+    fn start_printer_rename_hold(&mut self, printer_id: PrinterId) {
+        if self.editing_printer_name.is_some() {
+            return;
+        }
+        self.pending_printer_rename_hold = Some(PendingPrinterRenameHold {
+            printer_id,
+            pressed_at: Instant::now(),
+        });
+    }
+
+    fn activate_printer_rename_if_ready(&mut self) {
+        if self.editing_printer_name.is_some() {
+            return;
+        }
+
+        let Some(pending) = self.pending_printer_rename_hold.clone() else {
+            return;
+        };
+
+        if pending.pressed_at.elapsed() < PRINTER_RENAME_HOLD_DURATION {
+            return;
+        }
+
+        let Some(record) = self
+            .printers
+            .iter()
+            .find(|record| record.id == pending.printer_id)
+        else {
+            self.pending_printer_rename_hold = None;
+            return;
+        };
+
+        let current_name = record.model.as_deref().unwrap_or("").to_string();
+        self.editing_printer_name = Some(PrinterNameEditing {
+            printer_id: pending.printer_id,
+            original_name: record.model.clone(),
+            name_input: current_name,
+        });
+        self.pending_printer_rename_hold = None;
+    }
+
+    fn cancel_printer_rename_hold(&mut self) {
+        self.pending_printer_rename_hold = None;
+    }
+
+    fn handle_printer_name_input_changed(&mut self, value: String) {
+        let Some(editing) = self.editing_printer_name.as_mut() else {
+            return;
+        };
+        editing.name_input = value.clone();
+
+        if let Some(record) = self
+            .printers
+            .iter_mut()
+            .find(|record| record.id == editing.printer_id)
+        {
+            let trimmed = value.trim();
+            record.model = (!trimmed.is_empty()).then(|| trimmed.to_string());
+        }
+    }
+
+    fn commit_printer_name(&mut self) {
+        let Some(editing) = self.editing_printer_name.take() else {
+            return;
+        };
+
+        let trimmed = editing.name_input.trim();
+        let new_model = (!trimmed.is_empty()).then(|| trimmed.to_string());
+
+        if let Some(record) = self
+            .printers
+            .iter_mut()
+            .find(|record| record.id == editing.printer_id)
+        {
+            record.model = new_model.clone();
+        }
+
+        let name_display = new_model.as_deref().unwrap_or("Unknown name");
+        self.printers_status = Some(format!(
+            "Updated printer name to '{name_display}'. Use Export in Printer list storage to save it."
+        ));
+        self.flush_shared_state();
+    }
+
+    fn cancel_printer_name_edit(&mut self) {
+        let Some(editing) = self.editing_printer_name.take() else {
+            return;
+        };
+
+        if let Some(record) = self
+            .printers
+            .iter_mut()
+            .find(|record| record.id == editing.printer_id)
+        {
+            record.model = editing.original_name;
+        }
+    }
+
+    fn commit_printer_name_if_editing(&mut self) {
+        if self.editing_printer_name.is_some() {
+            self.commit_printer_name();
         }
     }
 
@@ -1937,6 +2042,7 @@ impl PrintCountApp {
     }
 
     fn save_printers_to_path(&mut self) {
+        self.commit_printer_name_if_editing();
         let path = self.printers_path.trim().to_string();
         if path.is_empty() {
             self.printers_status = Some("Save failed: path is empty.".to_string());
@@ -3492,6 +3598,130 @@ mod tests {
         assert_eq!(app.selected_printer, Some(printer_a.id));
         assert!(app.pending_printer_drag.is_none());
         assert!(app.active_printer_drag.is_none());
+    }
+
+    #[test]
+    fn printer_rename_requires_hold_before_editing_activates() {
+        let mut app = test_app();
+        let printer = printer_record_with_id("printer-a");
+        app.replace_printers(vec![printer.clone()]);
+
+        app.start_printer_rename_hold(printer.id.clone());
+        app.activate_printer_rename_if_ready();
+
+        assert!(app.pending_printer_rename_hold.is_some());
+        assert!(app.editing_printer_name.is_none());
+
+        if let Some(pending) = app.pending_printer_rename_hold.as_mut() {
+            pending.pressed_at = Instant::now() - PRINTER_RENAME_HOLD_DURATION;
+        }
+        app.activate_printer_rename_if_ready();
+
+        assert!(app.pending_printer_rename_hold.is_none());
+        let editing = app.editing_printer_name.as_ref().expect("editing active");
+        assert_eq!(editing.printer_id, printer.id);
+        assert_eq!(editing.name_input, "printer-a");
+    }
+
+    #[test]
+    fn printer_rename_cancel_hold() {
+        let mut app = test_app();
+        let printer = printer_record_with_id("printer-a");
+        app.replace_printers(vec![printer.clone()]);
+
+        app.start_printer_rename_hold(printer.id.clone());
+        assert!(app.pending_printer_rename_hold.is_some());
+
+        app.cancel_printer_rename_hold();
+        assert!(app.pending_printer_rename_hold.is_none());
+        assert!(app.editing_printer_name.is_none());
+    }
+
+    #[test]
+    fn printer_rename_input_and_commit() {
+        let mut app = test_app();
+        let printer = printer_record_with_id("printer-a");
+        app.replace_printers(vec![printer.clone()]);
+
+        app.start_printer_rename_hold(printer.id.clone());
+        if let Some(pending) = app.pending_printer_rename_hold.as_mut() {
+            pending.pressed_at = Instant::now() - PRINTER_RENAME_HOLD_DURATION;
+        }
+        app.activate_printer_rename_if_ready();
+
+        app.handle_printer_name_input_changed("New Printer Name".to_string());
+        assert_eq!(
+            app.printers[0].model.as_deref(),
+            Some("New Printer Name")
+        );
+
+        app.commit_printer_name();
+        assert!(app.editing_printer_name.is_none());
+        assert_eq!(
+            app.printers[0].model.as_deref(),
+            Some("New Printer Name")
+        );
+    }
+
+    #[test]
+    fn printer_rename_cancel_reverts_original() {
+        let mut app = test_app();
+        let mut printer = printer_record_with_id("printer-a");
+        printer.model = Some("Original Model".to_string());
+        app.replace_printers(vec![printer.clone()]);
+
+        app.start_printer_rename_hold(printer.id.clone());
+        if let Some(pending) = app.pending_printer_rename_hold.as_mut() {
+            pending.pressed_at = Instant::now() - PRINTER_RENAME_HOLD_DURATION;
+        }
+        app.activate_printer_rename_if_ready();
+
+        app.handle_printer_name_input_changed("Unsaved Name".to_string());
+        assert_eq!(
+            app.printers[0].model.as_deref(),
+            Some("Unsaved Name")
+        );
+
+        app.cancel_printer_name_edit();
+        assert!(app.editing_printer_name.is_none());
+        assert_eq!(
+            app.printers[0].model.as_deref(),
+            Some("Original Model")
+        );
+    }
+
+    #[test]
+    fn save_printers_commits_active_rename_to_file() {
+        let mut app = test_app();
+        let dir = temp_test_dir("export-rename");
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let export_path = dir.join("printers_test.ron");
+        app.printers_path = export_path.to_string_lossy().to_string();
+
+        let mut printer = printer_record_with_id("printer-a");
+        printer.model = Some("Old Name".to_string());
+        app.replace_printers(vec![printer.clone()]);
+
+        app.start_printer_rename_hold(printer.id.clone());
+        if let Some(pending) = app.pending_printer_rename_hold.as_mut() {
+            pending.pressed_at = Instant::now() - PRINTER_RENAME_HOLD_DURATION;
+        }
+        app.activate_printer_rename_if_ready();
+
+        app.handle_printer_name_input_changed("Exported Custom Name".to_string());
+
+        // Press export without explicitly pressing Enter/Commit
+        app.save_printers_to_path();
+
+        assert!(app.editing_printer_name.is_none());
+        assert_eq!(
+            app.printers[0].model.as_deref(),
+            Some("Exported Custom Name")
+        );
+
+        let content = fs::read_to_string(&export_path).expect("read exported file");
+        assert!(content.contains("Exported Custom Name"));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

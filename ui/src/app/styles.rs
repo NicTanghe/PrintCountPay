@@ -783,6 +783,29 @@ pub(crate) fn rec_badge_style(active: bool) -> impl Fn(&Theme) -> container::Sty
     }
 }
 
+pub(crate) fn printer_name_badge_style(is_held: bool) -> impl Fn(&Theme) -> container::Style {
+    move |_theme| {
+        let background = if is_held {
+            Some(Background::Color(Color::from_rgba8(0x0f, 0x4c, 0x81, 0.15)))
+        } else {
+            None
+        };
+        container::Style {
+            background,
+            border: Border {
+                color: if is_held {
+                    Color::from_rgb8(0x0f, 0x4c, 0x81)
+                } else {
+                    Color::TRANSPARENT
+                },
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..container::Style::default()
+        }
+    }
+}
+
 #[allow(non_snake_case)]
 pub(crate) mod theme {
     use super::*;

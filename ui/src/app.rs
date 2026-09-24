@@ -73,6 +73,8 @@ fn display_path(path: &Path) -> String {
 
 const PRINTER_REORDER_HOLD_TICK: Duration = Duration::from_millis(50);
 const PRINTER_REORDER_HOLD_DURATION: Duration = Duration::from_millis(700);
+const PRINTER_RENAME_HOLD_TICK: Duration = Duration::from_millis(50);
+const PRINTER_RENAME_HOLD_DURATION: Duration = Duration::from_millis(600);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingPrinterReorderDrag {
@@ -84,6 +86,19 @@ struct PendingPrinterReorderDrag {
 struct PrinterReorderDrag {
     printer_id: PrinterId,
     drop_index: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PendingPrinterRenameHold {
+    pub(crate) printer_id: PrinterId,
+    pub(crate) pressed_at: Instant,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PrinterNameEditing {
+    pub(crate) printer_id: PrinterId,
+    pub(crate) original_name: Option<String>,
+    pub(crate) name_input: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -130,6 +145,8 @@ pub struct PrintCountApp {
     printers: Vec<PrinterRecord>,
     pending_printer_drag: Option<PendingPrinterReorderDrag>,
     active_printer_drag: Option<PrinterReorderDrag>,
+    pending_printer_rename_hold: Option<PendingPrinterRenameHold>,
+    editing_printer_name: Option<PrinterNameEditing>,
     selected_printer: Option<PrinterId>,
     statistics_selected_printers: HashSet<PrinterId>,
     statistics_visible_series: HashSet<String>,
@@ -260,6 +277,8 @@ impl PrintCountApp {
             printers,
             pending_printer_drag: None,
             active_printer_drag: None,
+            pending_printer_rename_hold: None,
+            editing_printer_name: None,
             selected_printer: None,
             statistics_selected_printers: HashSet::new(),
             statistics_visible_series: HashSet::new(),
@@ -564,6 +583,30 @@ impl PrintCountApp {
             }
             Message::CancelPendingPrinterReorder(printer_id) => {
                 self.cancel_pending_printer_reorder(&printer_id);
+                Command::none()
+            }
+            Message::StartPrinterRenameHold(printer_id) => {
+                self.start_printer_rename_hold(printer_id);
+                Command::none()
+            }
+            Message::PrinterRenameHoldTick => {
+                self.activate_printer_rename_if_ready();
+                Command::none()
+            }
+            Message::CancelPrinterRenameHold => {
+                self.cancel_printer_rename_hold();
+                Command::none()
+            }
+            Message::PrinterNameInputChanged(value) => {
+                self.handle_printer_name_input_changed(value);
+                Command::none()
+            }
+            Message::CommitPrinterName => {
+                self.commit_printer_name();
+                Command::none()
+            }
+            Message::CancelPrinterNameEdit => {
+                self.cancel_printer_name_edit();
                 Command::none()
             }
             Message::ProfileChoiceChanged(choice) => {
@@ -1228,6 +1271,11 @@ impl PrintCountApp {
             subscriptions.push(
                 iced::time::every(PRINTER_REORDER_HOLD_TICK)
                     .map(|_| Message::PrinterReorderHoldTick),
+            );
+        }
+        if self.pending_printer_rename_hold.is_some() {
+            subscriptions.push(
+                iced::time::every(PRINTER_RENAME_HOLD_TICK).map(|_| Message::PrinterRenameHoldTick),
             );
         }
 
