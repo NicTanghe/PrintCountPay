@@ -17,7 +17,7 @@ use crate::app::constants::{
 };
 use crate::app::profiles::{ManufacturerProfile, RecordingOidProfile, TonerOidProfile};
 use crate::app::types::{
-    BwPricing, ManualBooklet, ManualBwTier, ManualColorTier, ManualFinisherLineItem,
+    BwPricing, ColorPricing, ManualBooklet, ManualBwTier, ManualColorTier, ManualFinisherLineItem,
     ManualFinisherType, ManualPricingLineItem, ManualPricingSettings, ManualPrintMode,
     ManualPrintSize, ManualRoundingMode, Message, PricingSettings, RecordingCategory,
     RecordingOidSettings, RecordingSession, RecordingSnapshot, SnmpPollStatus,
@@ -501,8 +501,14 @@ pub(crate) fn bw_cost_cents(count: u64, pricing: BwPricing) -> u64 {
     first * pricing.first_cents + second * pricing.next_cents + rest * pricing.rest_cents
 }
 
-pub(crate) fn color_cost_cents(count: u64, price_cents: u64) -> u64 {
-    count * price_cents
+pub(crate) fn color_cost_cents(
+    count: u64,
+    already_counted_prints: u64,
+    pricing: ColorPricing,
+) -> u64 {
+    let first_count = 5u64.saturating_sub(already_counted_prints).min(count);
+    let rest_count = count.saturating_sub(first_count);
+    first_count * pricing.first_cents + rest_count * pricing.rest_cents
 }
 
 pub(crate) fn round_to_nearest_5_cents(total_cents: u64) -> u64 {
@@ -721,8 +727,27 @@ pub(crate) fn bw_pricing_from_settings(settings: &PricingSettings) -> Option<BwP
     })
 }
 
+pub(crate) fn color_pricing_from_settings(settings: &PricingSettings) -> Option<ColorPricing> {
+    let first = parse_price_input(&settings.color_first_input)
+        .ok()
+        .flatten()
+        .or_else(|| parse_price_input(&settings.color_input).ok().flatten())?;
+    let rest = parse_price_input(&settings.color_rest_input)
+        .ok()
+        .flatten()
+        .or_else(|| parse_price_input(&settings.color_input).ok().flatten())?;
+    Some(ColorPricing {
+        first_cents: first,
+        rest_cents: rest,
+    })
+}
+
+#[allow(dead_code)]
 pub(crate) fn color_price_from_settings(settings: &PricingSettings) -> Option<u64> {
-    parse_price_input(&settings.color_input).ok().flatten()
+    parse_price_input(&settings.color_rest_input)
+        .ok()
+        .flatten()
+        .or_else(|| parse_price_input(&settings.color_input).ok().flatten())
 }
 
 pub(crate) const MANUAL_CUTTING_CENTS: u64 = 300;
@@ -1330,26 +1355,36 @@ pub(crate) fn manual_finisher_state(
     })
 }
 
+fn manual_line_states_with_counters(
+    settings: &ManualPricingSettings,
+    line_items: &[ManualPricingLineItem],
+    counters: &mut ManualPrintCounters,
+    booklet_copies: u64,
+) -> Vec<ManualLineState> {
+    line_items
+        .iter()
+        .map(|line_item| {
+            manual_line_state_with_counters(settings, line_item, counters, booklet_copies)
+        })
+        .collect()
+}
+
 fn manual_line_states(
     settings: &ManualPricingSettings,
     line_items: &[ManualPricingLineItem],
 ) -> Vec<ManualLineState> {
     let mut print_counters = ManualPrintCounters::default();
-    line_items
-        .iter()
-        .map(|line_item| {
-            manual_line_state_with_counters(settings, line_item, &mut print_counters, 1)
-        })
-        .collect()
+    manual_line_states_with_counters(settings, line_items, &mut print_counters, 1)
 }
 
 fn manual_finisher_states(
     settings: &ManualPricingSettings,
     finisher_items: &[ManualFinisherLineItem],
+    booklet_copies: u64,
 ) -> Vec<ManualFinisherState> {
     finisher_items
         .iter()
-        .map(|finisher_item| manual_finisher_state(settings, finisher_item, 1))
+        .map(|finisher_item| manual_finisher_state(settings, finisher_item, booklet_copies))
         .collect()
 }
 
@@ -1394,13 +1429,13 @@ fn manual_booklet_copies(booklet: &ManualBooklet) -> Option<u64> {
         .filter(|value| *value > 0)
 }
 
-fn manual_booklet_totals(
+fn manual_booklet_totals_legacy(
     settings: &ManualPricingSettings,
     booklet: &ManualBooklet,
     discount_basis_points: Option<u64>,
 ) -> ManualBookletTotals {
     let line_states = manual_line_states(settings, &booklet.line_items);
-    let finisher_states = manual_finisher_states(settings, &booklet.finisher_items);
+    let finisher_states = manual_finisher_states(settings, &booklet.finisher_items, 1);
     let lines_total_cents = manual_line_states_total(&line_states);
     let finishers_total_cents = manual_finisher_states_total(&finisher_states);
     let copies = manual_booklet_copies(booklet);
@@ -1446,9 +1481,80 @@ fn manual_booklet_totals(
     }
 }
 
+fn manual_booklet_totals_default(
+    settings: &ManualPricingSettings,
+    booklet: &ManualBooklet,
+    discount_basis_points: Option<u64>,
+    counters: &mut ManualPrintCounters,
+) -> ManualBookletTotals {
+    let copies = manual_booklet_copies(booklet);
+    let actual_copies = copies.unwrap_or(1);
+    let line_states =
+        manual_line_states_with_counters(settings, &booklet.line_items, counters, actual_copies);
+    let finisher_states = manual_finisher_states(settings, &booklet.finisher_items, actual_copies);
+    let lines_total_cents = manual_line_states_total(&line_states);
+    let finishers_total_cents = manual_finisher_states_total(&finisher_states);
+
+    if copies.is_none() {
+        return ManualBookletTotals {
+            line_states,
+            finisher_states,
+            lines_total_cents,
+            finishers_total_cents,
+            subtotal_cents: None,
+            discount_cents: None,
+            price_per_booklet_cents: None,
+            copies: None,
+            total_cents: None,
+        };
+    }
+
+    let subtotal_cents = match (lines_total_cents, finishers_total_cents) {
+        (Some(lines_total_cents), Some(finishers_total_cents)) => {
+            Some(lines_total_cents.saturating_add(finishers_total_cents))
+        }
+        _ => None,
+    };
+
+    let discount_cents = match (subtotal_cents, discount_basis_points) {
+        (Some(subtotal_cents), Some(discount_basis_points)) => {
+            Some(manual_discount_cents(subtotal_cents, discount_basis_points))
+        }
+        _ => None,
+    };
+
+    let total_cents = match (subtotal_cents, discount_cents) {
+        (Some(subtotal_cents), Some(discount_cents)) => {
+            Some(subtotal_cents.saturating_sub(discount_cents))
+        }
+        _ => None,
+    };
+
+    let price_per_booklet_cents = match (total_cents, copies) {
+        (Some(total_cents), Some(copies)) if copies > 0 => {
+            Some((total_cents + copies / 2) / copies)
+        }
+        _ => None,
+    };
+
+    ManualBookletTotals {
+        line_states,
+        finisher_states,
+        lines_total_cents,
+        finishers_total_cents,
+        subtotal_cents,
+        discount_cents,
+        price_per_booklet_cents,
+        copies,
+        total_cents,
+    }
+}
+
 pub(crate) fn manual_pricing_totals(settings: &ManualPricingSettings) -> ManualPricingTotals {
-    let line_states = manual_line_states(settings, &settings.line_items);
-    let finisher_states = manual_finisher_states(settings, &settings.finisher_items);
+    let mut print_counters = ManualPrintCounters::default();
+    let line_states =
+        manual_line_states_with_counters(settings, &settings.line_items, &mut print_counters, 1);
+    let finisher_states = manual_finisher_states(settings, &settings.finisher_items, 1);
     let lines_total_cents = manual_line_states_total(&line_states);
     let finishers_total_cents = manual_finisher_states_total(&finisher_states);
 
@@ -1488,43 +1594,79 @@ pub(crate) fn manual_pricing_totals(settings: &ManualPricingSettings) -> ManualP
         _ => None,
     };
 
-    let booklet_totals: Vec<_> = settings
-        .booklets
-        .iter()
-        .map(|booklet| manual_booklet_totals(settings, booklet, discount_basis_points))
-        .collect();
+    let booklet_totals: Vec<_> = if settings.legacy_booklet_mode {
+        settings
+            .booklets
+            .iter()
+            .map(|booklet| manual_booklet_totals_legacy(settings, booklet, discount_basis_points))
+            .collect()
+    } else {
+        settings
+            .booklets
+            .iter()
+            .map(|booklet| {
+                manual_booklet_totals_default(
+                    settings,
+                    booklet,
+                    discount_basis_points,
+                    &mut print_counters,
+                )
+            })
+            .collect()
+    };
 
     let mut booklets_subtotal_cents = Some(0u64);
     let mut booklets_discount_cents = Some(0u64);
     let mut booklets_total_cents = Some(0u64);
     for booklet_total in &booklet_totals {
-        match (
-            booklets_subtotal_cents,
-            booklet_total.subtotal_cents,
-            booklet_total.copies,
-        ) {
-            (Some(current), Some(subtotal), Some(copies)) => {
-                booklets_subtotal_cents =
-                    Some(current.saturating_add(subtotal.saturating_mul(copies)));
+        if settings.legacy_booklet_mode {
+            match (
+                booklets_subtotal_cents,
+                booklet_total.subtotal_cents,
+                booklet_total.copies,
+            ) {
+                (Some(current), Some(subtotal), Some(copies)) => {
+                    booklets_subtotal_cents =
+                        Some(current.saturating_add(subtotal.saturating_mul(copies)));
+                }
+                _ => booklets_subtotal_cents = None,
             }
-            _ => booklets_subtotal_cents = None,
-        }
-        match (
-            booklets_discount_cents,
-            booklet_total.discount_cents,
-            booklet_total.copies,
-        ) {
-            (Some(current), Some(discount), Some(copies)) => {
-                booklets_discount_cents =
-                    Some(current.saturating_add(discount.saturating_mul(copies)));
+            match (
+                booklets_discount_cents,
+                booklet_total.discount_cents,
+                booklet_total.copies,
+            ) {
+                (Some(current), Some(discount), Some(copies)) => {
+                    booklets_discount_cents =
+                        Some(current.saturating_add(discount.saturating_mul(copies)));
+                }
+                _ => booklets_discount_cents = None,
             }
-            _ => booklets_discount_cents = None,
-        }
-        match (booklets_total_cents, booklet_total.total_cents) {
-            (Some(current), Some(total)) => {
-                booklets_total_cents = Some(current.saturating_add(total));
+            match (booklets_total_cents, booklet_total.total_cents) {
+                (Some(current), Some(total)) => {
+                    booklets_total_cents = Some(current.saturating_add(total));
+                }
+                _ => booklets_total_cents = None,
             }
-            _ => booklets_total_cents = None,
+        } else {
+            match (booklets_subtotal_cents, booklet_total.subtotal_cents) {
+                (Some(current), Some(subtotal)) => {
+                    booklets_subtotal_cents = Some(current.saturating_add(subtotal));
+                }
+                _ => booklets_subtotal_cents = None,
+            }
+            match (booklets_discount_cents, booklet_total.discount_cents) {
+                (Some(current), Some(discount)) => {
+                    booklets_discount_cents = Some(current.saturating_add(discount));
+                }
+                _ => booklets_discount_cents = None,
+            }
+            match (booklets_total_cents, booklet_total.total_cents) {
+                (Some(current), Some(total)) => {
+                    booklets_total_cents = Some(current.saturating_add(total));
+                }
+                _ => booklets_total_cents = None,
+            }
         }
     }
 
@@ -1748,10 +1890,10 @@ mod tests {
     use super::{
         ManualFinisherState, ManualLineBreakdown, ManualLineState, build_poll_label_map,
         category_end_display, category_end_value, category_start_display, category_start_value,
-        default_recording_oid_inputs, default_toner_oids, delta_value,
-        format_clock_hms_with_offset, format_elapsed_hms, format_fraction_count,
-        manual_line_summary, manual_pricing_totals, manual_round_total_cents,
-        missing_recording_snapshot_categories, parse_count_input,
+        color_cost_cents, color_pricing_from_settings, default_recording_oid_inputs,
+        default_toner_oids, delta_value, format_clock_hms_with_offset, format_elapsed_hms,
+        format_fraction_count, manual_line_summary, manual_pricing_totals,
+        manual_round_total_cents, missing_recording_snapshot_categories, parse_count_input,
         recording_profile_from_settings_lossy, round_to_nearest_5_cents, snmp_oids,
         sum_optional_included, sum_two,
     };
@@ -1759,6 +1901,7 @@ mod tests {
     use crate::app::profiles::{
         MachineMatcher, ManufacturerProfile, OidLabel, RecordingOidProfile, TonerOidProfile,
     };
+    use crate::app::types::{ColorPricing, PricingSettings};
     use crate::app::{
         ManualBooklet, ManualFinisherLineItem, ManualFinisherType, ManualLaminateSize,
         ManualPaperModifier, ManualPricingLineItem, ManualPricingSettings, ManualPrintMode,
@@ -2358,8 +2501,76 @@ mod tests {
     }
 
     #[test]
-    fn manual_pricing_booklet_tab_discounts_one_booklet_before_multiplier() {
+    fn manual_pricing_booklet_tab_discounts_across_entire_run_by_default() {
         let settings = ManualPricingSettings {
+            a3_color_first_input: "1.00".to_string(),
+            a3_color_rest_input: "1.00".to_string(),
+            modifiers: vec![ManualPaperModifier {
+                name_input: "300G".to_string(),
+                a3_price_input: "1.00".to_string(),
+                ..ManualPaperModifier::default()
+            }],
+            booklets: vec![ManualBooklet {
+                name_input: "Program".to_string(),
+                copies_input: "10".to_string(),
+                line_items: vec![ManualPricingLineItem {
+                    size: ManualPrintSize::A3,
+                    print_mode: ManualPrintMode::Color,
+                    modifier_index: Some(0),
+                    sides_input: "8".to_string(),
+                    double_sided: true,
+                    ..ManualPricingLineItem::default()
+                }],
+                finisher_items: vec![ManualFinisherLineItem {
+                    finisher_type: ManualFinisherType::Binding,
+                    binding_size: ManualPrintSize::A4,
+                    binding_modifier_index: Some(0),
+                    amount_input: "1".to_string(),
+                    ..ManualFinisherLineItem::default()
+                }],
+            }],
+            binding_modifiers: vec![crate::app::types::ManualBindingModifier {
+                name_input: "Spiral".to_string(),
+                a4_price_input: "3.00".to_string(),
+                ..crate::app::types::ManualBindingModifier::default()
+            }],
+            discount_input: "10".to_string(),
+            ..ManualPricingSettings::default()
+        };
+
+        let totals = manual_pricing_totals(&settings);
+        let booklet_totals = &totals.booklet_totals[0];
+
+        assert_eq!(booklet_totals.copies, Some(10));
+        assert_eq!(booklet_totals.lines_total_cents, Some(12_000));
+        assert_eq!(booklet_totals.finishers_total_cents, Some(3_000));
+        assert_eq!(booklet_totals.subtotal_cents, Some(15_000));
+        assert_eq!(booklet_totals.discount_cents, Some(1_500));
+        assert_eq!(booklet_totals.price_per_booklet_cents, Some(1_350));
+        assert_eq!(booklet_totals.total_cents, Some(13_500));
+        assert_eq!(totals.subtotal_cents, Some(15_000));
+        assert_eq!(totals.discount_cents, Some(1_500));
+        assert_eq!(totals.total_before_rounding_cents, Some(13_500));
+        assert!(matches!(
+            booklet_totals.line_states.as_slice(),
+            [ManualLineState::Ready(line)] if line.sides == 80
+                && line.sides_per_book == 8
+                && line.sheets == 40
+                && line.sheets_per_book == 4
+                && line.booklet_copies == 10
+        ));
+        assert!(matches!(
+            booklet_totals.finisher_states.as_slice(),
+            [ManualFinisherState::Ready(finisher)] if finisher.amount == 10
+                && finisher.amount_per_book == 1
+                && finisher.booklet_copies == 10
+        ));
+    }
+
+    #[test]
+    fn manual_pricing_booklet_tab_legacy_mode_discounts_one_booklet_before_multiplier() {
+        let settings = ManualPricingSettings {
+            legacy_booklet_mode: true,
             a3_color_first_input: "1.00".to_string(),
             a3_color_rest_input: "1.00".to_string(),
             modifiers: vec![ManualPaperModifier {
@@ -2422,6 +2633,111 @@ mod tests {
                 && finisher.amount_per_book == 1
                 && finisher.booklet_copies == 1
         ));
+    }
+
+    #[test]
+    fn manual_pricing_booklet_tab_default_shares_print_tiers_across_booklets_and_copies() {
+        let mut settings = ManualPricingSettings {
+            a4_color_first_input: "2.00".to_string(),
+            a4_color_rest_input: "1.00".to_string(),
+            booklets: vec![
+                ManualBooklet {
+                    name_input: "Booklet 1".to_string(),
+                    copies_input: "5".to_string(),
+                    line_items: vec![ManualPricingLineItem {
+                        size: ManualPrintSize::A4,
+                        print_mode: ManualPrintMode::Color,
+                        sides_input: "2".to_string(),
+                        double_sided: false,
+                        ..ManualPricingLineItem::default()
+                    }],
+                    ..ManualBooklet::default()
+                },
+                ManualBooklet {
+                    name_input: "Booklet 2".to_string(),
+                    copies_input: "5".to_string(),
+                    line_items: vec![ManualPricingLineItem {
+                        size: ManualPrintSize::A4,
+                        print_mode: ManualPrintMode::Color,
+                        sides_input: "2".to_string(),
+                        double_sided: false,
+                        ..ManualPricingLineItem::default()
+                    }],
+                    ..ManualBooklet::default()
+                },
+            ],
+            ..ManualPricingSettings::default()
+        };
+
+        // Default mode:
+        // Booklet 1: 5 copies * 2 sides = 10 sides total.
+        // First 5 sides take tier 1 (5 * 2.00 = 10.00 EUR = 1000 cents).
+        // Remaining 5 sides take rest tier (5 * 1.00 = 5.00 EUR = 500 cents).
+        // Total Booklet 1 = 15.00 EUR = 1500 cents.
+        // Booklet 2: 5 copies * 2 sides = 10 sides total.
+        // Tier 1 quota (5) is already fully exhausted by Booklet 1!
+        // All 10 sides take rest tier (10 * 1.00 = 10.00 EUR = 1000 cents).
+        // Total Booklet 2 = 10.00 EUR = 1000 cents.
+        // Total overall = 25.00 EUR = 2500 cents.
+        let totals = manual_pricing_totals(&settings);
+        assert_eq!(totals.booklet_totals[0].total_cents, Some(1_500));
+        assert_eq!(totals.booklet_totals[1].total_cents, Some(1_000));
+        assert_eq!(totals.total_before_rounding_cents, Some(2_500));
+
+        // Legacy mode:
+        // Each booklet independently calculates for 1 copy:
+        // Booklet 1 (1 copy = 2 sides): 2 sides <= 5 -> 2 * 2.00 = 4.00 EUR per booklet. Total = 4.00 * 5 = 20.00 EUR (2000 cents).
+        // Booklet 2 (1 copy = 2 sides): 2 sides <= 5 -> 2 * 2.00 = 4.00 EUR per booklet. Total = 4.00 * 5 = 20.00 EUR (2000 cents).
+        // Total overall = 40.00 EUR = 4000 cents.
+        settings.legacy_booklet_mode = true;
+        let legacy_totals = manual_pricing_totals(&settings);
+        assert_eq!(legacy_totals.booklet_totals[0].total_cents, Some(2_000));
+        assert_eq!(legacy_totals.booklet_totals[1].total_cents, Some(2_000));
+        assert_eq!(legacy_totals.total_before_rounding_cents, Some(4_000));
+    }
+
+    #[test]
+    fn color_cost_cents_evaluates_total_print_threshold_with_bw() {
+        let pricing = ColorPricing {
+            first_cents: 75,
+            rest_cents: 50,
+        };
+
+        // 0 B/W prints counted: first 5 color prints get first tier (75c), rest get 50c
+        assert_eq!(color_cost_cents(0, 0, pricing), 0);
+        assert_eq!(color_cost_cents(1, 0, pricing), 75);
+        assert_eq!(color_cost_cents(5, 0, pricing), 5 * 75); // 375
+        assert_eq!(color_cost_cents(6, 0, pricing), 5 * 75 + 50); // 425
+        assert_eq!(color_cost_cents(10, 0, pricing), 5 * 75 + 5 * 50); // 625
+
+        // 3 B/W prints already counted: only 2 color prints remain in first tier
+        assert_eq!(color_cost_cents(2, 3, pricing), 2 * 75); // 150
+        assert_eq!(color_cost_cents(4, 3, pricing), 2 * 75 + 2 * 50); // 250
+
+        // 5 or more B/W prints already counted: tier 1 is completely exhausted, all color prints at 50c
+        assert_eq!(color_cost_cents(4, 5, pricing), 4 * 50); // 200
+        assert_eq!(color_cost_cents(10, 8, pricing), 10 * 50); // 500
+    }
+
+    #[test]
+    fn color_pricing_from_settings_defaults_and_legacy_fallback() {
+        let default_settings = PricingSettings::default();
+        let default_pricing =
+            color_pricing_from_settings(&default_settings).expect("valid default pricing");
+        assert_eq!(default_pricing.first_cents, 75);
+        assert_eq!(default_pricing.rest_cents, 50);
+
+        // Fallback to legacy single color_input when color_first/rest are blank
+        let legacy_settings = PricingSettings {
+            color_first_input: String::new(),
+            color_rest_input: String::new(),
+            color_input: "0.60".to_string(),
+            ..PricingSettings::default()
+        };
+        let legacy_pricing =
+            color_pricing_from_settings(&legacy_settings).expect("valid legacy pricing");
+        assert_eq!(legacy_pricing.first_cents, 60);
+        assert_eq!(legacy_pricing.rest_cents, 60);
     }
 
     #[test]

@@ -831,6 +831,8 @@ pub struct ManualPricingSettings {
     #[serde(default)]
     pub(crate) cutting_enabled: bool,
     #[serde(default)]
+    pub(crate) legacy_booklet_mode: bool,
+    #[serde(default)]
     pub(crate) discount_input: String,
     #[serde(default)]
     pub(crate) rounding_mode: ManualRoundingMode,
@@ -993,6 +995,7 @@ impl ManualPricingSettings {
         self.booklets.clear();
         self.booklet_enabled = false;
         self.booklet_copies_input = default_manual_booklet_copies_input();
+        self.legacy_booklet_mode = false;
         self.cutting_enabled = false;
         self.discount_input.clear();
         self.rounding_mode = ManualRoundingMode::FiveCents;
@@ -1164,6 +1167,7 @@ impl Default for ManualPricingSettings {
             booklets: Vec::new(),
             booklet_enabled: false,
             booklet_copies_input: default_manual_booklet_copies_input(),
+            legacy_booklet_mode: false,
             cutting_enabled: false,
             discount_input: String::new(),
             rounding_mode: ManualRoundingMode::FiveCents,
@@ -1274,12 +1278,25 @@ impl ManualBillStore {
     }
 }
 
+fn default_recording_color_first_input() -> String {
+    "0.75".to_string()
+}
+
+fn default_recording_color_rest_input() -> String {
+    "0.50".to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct RecordingPricingSettings {
     pub(crate) bw_first_input: String,
     pub(crate) bw_next_input: String,
     pub(crate) bw_rest_input: String,
+    #[serde(default)]
     pub(crate) color_input: String,
+    #[serde(default = "default_recording_color_first_input")]
+    pub(crate) color_first_input: String,
+    #[serde(default = "default_recording_color_rest_input")]
+    pub(crate) color_rest_input: String,
     #[serde(rename = "round_to_half_euro", alias = "round_to_five_cents")]
     pub(crate) round_to_five_cents: bool,
 }
@@ -1291,6 +1308,8 @@ impl RecordingPricingSettings {
             bw_next_input: pricing.bw_next_input.clone(),
             bw_rest_input: pricing.bw_rest_input.clone(),
             color_input: pricing.color_input.clone(),
+            color_first_input: pricing.color_first_input.clone(),
+            color_rest_input: pricing.color_rest_input.clone(),
             round_to_five_cents: pricing.round_to_five_cents,
         }
     }
@@ -1300,7 +1319,22 @@ impl RecordingPricingSettings {
         pricing.bw_next_input = self.bw_next_input.clone();
         pricing.bw_rest_input = self.bw_rest_input.clone();
         pricing.color_input = self.color_input.clone();
+        pricing.color_first_input = self.color_first_input.clone();
+        pricing.color_rest_input = self.color_rest_input.clone();
         pricing.round_to_five_cents = self.round_to_five_cents;
+    }
+
+    pub(crate) fn normalize(&mut self) {
+        if self.color_first_input.trim().is_empty() {
+            self.color_first_input = default_recording_color_first_input();
+        }
+        if self.color_rest_input.trim().is_empty() {
+            if !self.color_input.trim().is_empty() {
+                self.color_rest_input = self.color_input.clone();
+            } else {
+                self.color_rest_input = default_recording_color_rest_input();
+            }
+        }
     }
 }
 
@@ -1311,6 +1345,8 @@ impl Default for RecordingPricingSettings {
             bw_next_input: "0.10".to_string(),
             bw_rest_input: "0.06".to_string(),
             color_input: "0.50".to_string(),
+            color_first_input: "0.75".to_string(),
+            color_rest_input: "0.50".to_string(),
             round_to_five_cents: true,
         }
     }
@@ -1331,6 +1367,7 @@ pub(crate) struct ManualPricingWorkspace {
 
 impl ManualPricingWorkspace {
     pub(crate) fn normalize(&mut self) {
+        self.recording_pricing.normalize();
         self.settings.normalize();
         for bill in &mut self.bills {
             bill.normalize();
@@ -1446,6 +1483,8 @@ pub(crate) enum Message {
     PricingBwNextChanged(String),
     PricingBwRestChanged(String),
     PricingColorChanged(String),
+    PricingColorFirstChanged(String),
+    PricingColorRestChanged(String),
     PricingRoundChanged(bool),
     SaveManualPricingAsBill,
     ResetManualPricingCalculator,
@@ -1471,6 +1510,7 @@ pub(crate) enum Message {
     ManualPricingBookletRemoved(usize),
     ManualPricingBookletNameChanged(usize, String),
     ManualPricingBookletCopiesChanged(usize, String),
+    ManualPricingLegacyBookletModeToggled(bool),
     ManualPricingBasePriceChanged(ManualPrintSize, String),
     ManualPricingBwTierChanged(ManualPrintSize, ManualBwTier, String),
     ManualPricingColorTierChanged(ManualPrintSize, ManualColorTier, String),
@@ -1726,7 +1766,12 @@ pub struct PricingSettings {
     pub(crate) bw_first_input: String,
     pub(crate) bw_next_input: String,
     pub(crate) bw_rest_input: String,
+    #[serde(default)]
     pub(crate) color_input: String,
+    #[serde(default = "default_recording_color_first_input")]
+    pub(crate) color_first_input: String,
+    #[serde(default = "default_recording_color_rest_input")]
+    pub(crate) color_rest_input: String,
     #[serde(rename = "round_to_half_euro", alias = "round_to_five_cents")]
     pub(crate) round_to_five_cents: bool,
     #[serde(default)]
@@ -1740,16 +1785,24 @@ impl Default for PricingSettings {
             bw_next_input: "0.10".to_string(),
             bw_rest_input: "0.06".to_string(),
             color_input: "0.50".to_string(),
+            color_first_input: "0.75".to_string(),
+            color_rest_input: "0.50".to_string(),
             round_to_five_cents: true,
             manual_pricing: ManualPricingSettings::default(),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct BwPricing {
     pub(crate) first_cents: u64,
     pub(crate) next_cents: u64,
+    pub(crate) rest_cents: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ColorPricing {
+    pub(crate) first_cents: u64,
     pub(crate) rest_cents: u64,
 }
 

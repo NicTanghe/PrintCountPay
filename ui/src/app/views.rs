@@ -706,7 +706,7 @@ impl PrintCountApp {
             ]);
 
             let bw_pricing = bw_pricing_from_settings(&self.pricing);
-            let color_price = color_price_from_settings(&self.pricing);
+            let color_pricing = color_pricing_from_settings(&self.pricing);
             let bw_cost_raw = match bw_delta {
                 Some(0) => Some(0),
                 Some(count) => bw_pricing.map(|pricing| bw_cost_cents(count, pricing)),
@@ -721,7 +721,10 @@ impl PrintCountApp {
             });
             let color_cost_value = match color_delta {
                 Some(0) => Some(0),
-                Some(count) => color_price.map(|price| color_cost_cents(count, price)),
+                Some(count) => {
+                    let already_counted = bw_delta.unwrap_or(0);
+                    color_pricing.map(|pricing| color_cost_cents(count, already_counted, pricing))
+                }
                 None => None,
             };
             let subtotal_cents = match (bw_cost_value, color_cost_value) {
@@ -891,10 +894,16 @@ impl PrintCountApp {
                 .size(14)
                 .style(theme::Text::Color(Color::from_rgb8(0x12, 0x12, 0x12))),
             self.pricing_input(
-                "Per page (EUR)",
+                "First 5 pages (EUR)",
+                "0.75",
+                &self.pricing.color_first_input,
+                Message::PricingColorFirstChanged,
+            ),
+            self.pricing_input(
+                "Rest (EUR)",
                 "0.50",
-                &self.pricing.color_input,
-                Message::PricingColorChanged,
+                &self.pricing.color_rest_input,
+                Message::PricingColorRestChanged,
             ),
         ]
         .spacing(6);
@@ -1083,7 +1092,25 @@ impl PrintCountApp {
                 .on_press(Message::ManualPricingBookletAdded),
         );
 
-        tabs.into()
+        if !manual.booklets.is_empty() {
+            let legacy_toggle = checkbox(manual.legacy_booklet_mode)
+                .label("Legacy mode")
+                .on_toggle(Message::ManualPricingLegacyBookletModeToggled)
+                .size(12)
+                .style(theme::Checkbox::custom(brand_checkbox_style(
+                    CONTENT_BRAND_SAMPLE,
+                )));
+
+            row![
+                tabs,
+                horizontal_space(),
+                legacy_toggle,
+            ]
+            .align_items(Alignment::Center)
+            .into()
+        } else {
+            tabs.into()
+        }
     }
 
     fn manual_receipt_cell(value: &str, width: usize, align_right: bool) -> String {
@@ -1740,15 +1767,27 @@ impl PrintCountApp {
                 .map(format_cents)
                 .unwrap_or_else(|| "N/A".to_string());
 
-            summary = summary
-                .push(self.value_line("Lines per booklet", Some(booklet_lines_label)))
-                .push(self.value_line("Finishers per booklet", Some(booklet_finishers_label)))
-                .push(self.value_line("1 booklet before discount", Some(booklet_subtotal_label)))
-                .push(self.value_line("Discount per booklet", Some(booklet_discount_label)))
-                .push(self.value_line("Price of 1 booklet", Some(price_per_booklet_label)))
-                .push(self.value_line("Multiplier", Some(copies_label)))
-                .push(self.value_line("Booklet total", Some(booklet_total_label)))
-                .push(self.value_line("Final total", Some(total_label)));
+            if manual.legacy_booklet_mode {
+                summary = summary
+                    .push(self.value_line("Lines per booklet", Some(booklet_lines_label)))
+                    .push(self.value_line("Finishers per booklet", Some(booklet_finishers_label)))
+                    .push(self.value_line("1 booklet before discount", Some(booklet_subtotal_label)))
+                    .push(self.value_line("Discount per booklet", Some(booklet_discount_label)))
+                    .push(self.value_line("Price of 1 booklet", Some(price_per_booklet_label)))
+                    .push(self.value_line("Multiplier", Some(copies_label)))
+                    .push(self.value_line("Booklet total", Some(booklet_total_label)))
+                    .push(self.value_line("Final total", Some(total_label)));
+            } else {
+                summary = summary
+                    .push(self.value_line("Lines total", Some(booklet_lines_label)))
+                    .push(self.value_line("Finishers total", Some(booklet_finishers_label)))
+                    .push(self.value_line("Subtotal before discount", Some(booklet_subtotal_label)))
+                    .push(self.value_line("Discount", Some(booklet_discount_label)))
+                    .push(self.value_line("Multiplier", Some(copies_label)))
+                    .push(self.value_line("Avg per booklet", Some(price_per_booklet_label)))
+                    .push(self.value_line("Booklet total", Some(booklet_total_label)))
+                    .push(self.value_line("Final total", Some(total_label)));
+            }
         } else {
             for row_text in self.manual_order_summary_receipt_rows(manual, &totals) {
                 summary = summary.push(

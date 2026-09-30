@@ -765,6 +765,18 @@ impl PrintCountApp {
                 Command::none()
             }
             Message::PricingColorChanged(value) => {
+                self.pricing.color_input = value.clone();
+                self.pricing.color_rest_input = value;
+                self.manual_pricing_dirty = true;
+                Command::none()
+            }
+            Message::PricingColorFirstChanged(value) => {
+                self.pricing.color_first_input = value;
+                self.manual_pricing_dirty = true;
+                Command::none()
+            }
+            Message::PricingColorRestChanged(value) => {
+                self.pricing.color_rest_input = value.clone();
                 self.pricing.color_input = value;
                 self.manual_pricing_dirty = true;
                 Command::none()
@@ -994,6 +1006,11 @@ impl PrintCountApp {
                 if let Some(booklet) = self.active_manual_pricing_mut().booklets.get_mut(index) {
                     booklet.copies_input = value;
                 }
+                Command::none()
+            }
+            Message::ManualPricingLegacyBookletModeToggled(value) => {
+                self.active_manual_pricing_mut().legacy_booklet_mode = value;
+                self.manual_pricing_dirty = true;
                 Command::none()
             }
             Message::ManualPricingBasePriceChanged(size, value) => {

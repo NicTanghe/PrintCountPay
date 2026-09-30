@@ -4,6 +4,8 @@
         bw_next_input: "0.10",
         bw_rest_input: "0.06",
         color_input: "0.50",
+        color_first_input: "0.75",
+        color_rest_input: "0.50",
         round_to_half_euro: true,
     ),
     settings: (
@@ -407,6 +409,7 @@
         finisher_items: [],
         booklets: [],
         cutting_enabled: false,
+        legacy_booklet_mode: false,
         discount_input: "",
         rounding_mode: FiveCents,
     ),
@@ -840,6 +843,7 @@
                 ],
                 booklets: [],
                 cutting_enabled: false,
+                legacy_booklet_mode: false,
                 discount_input: "",
                 rounding_mode: FiveCents,
             ),
@@ -1250,6 +1254,7 @@
                 finisher_items: [],
                 booklets: [],
                 cutting_enabled: true,
+                legacy_booklet_mode: false,
                 discount_input: "",
                 rounding_mode: FiveCents,
             ),
@@ -1668,6 +1673,7 @@
                 finisher_items: [],
                 booklets: [],
                 cutting_enabled: false,
+                legacy_booklet_mode: false,
                 discount_input: "",
                 rounding_mode: FiveCents,
             ),
@@ -2125,6 +2131,7 @@
                     ),
                 ],
                 cutting_enabled: false,
+                legacy_booklet_mode: false,
                 discount_input: "10",
                 rounding_mode: FiveCents,
             ),
@@ -2535,6 +2542,7 @@
                 finisher_items: [],
                 booklets: [],
                 cutting_enabled: true,
+                legacy_booklet_mode: false,
                 discount_input: "",
                 rounding_mode: FiveCents,
             ),
@@ -2542,6 +2550,50 @@
         ),
     ],
     bill_tombstones: [
+        (
+            id: "noble-wind",
+            deleted_at_millis: 1790665963580,
+        ),
+        (
+            id: "cosmic-breeze",
+            deleted_at_millis: 1790665961396,
+        ),
+        (
+            id: "steady-leaf",
+            deleted_at_millis: 1790665958516,
+        ),
+        (
+            id: "paper-trail",
+            deleted_at_millis: 1790585685749,
+        ),
+        (
+            id: "harbor-plume",
+            deleted_at_millis: 1790585683448,
+        ),
+        (
+            id: "pearl-journal",
+            deleted_at_millis: 1790585678194,
+        ),
+        (
+            id: "linen-crest",
+            deleted_at_millis: 1790339017615,
+        ),
+        (
+            id: "lunar-leaf",
+            deleted_at_millis: 1790263382251,
+        ),
+        (
+            id: "dusty-quartz",
+            deleted_at_millis: 1790263314346,
+        ),
+        (
+            id: "cosmic-journal",
+            deleted_at_millis: 1790177244487,
+        ),
+        (
+            id: "cloudy-meadow",
+            deleted_at_millis: 1790090440892,
+        ),
         (
             id: "lilac-dawn",
             deleted_at_millis: 1789992343236,
@@ -3061,10 +3113,6 @@
         (
             id: "stone-cove",
             deleted_at_millis: 1780910968776,
-        ),
-        (
-            id: "harbor-plume",
-            deleted_at_millis: 1780910966744,
         ),
         (
             id: "pearl-garden",
