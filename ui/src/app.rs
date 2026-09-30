@@ -488,14 +488,6 @@ impl PrintCountApp {
                 }
                 Command::none()
             }
-            Message::SelectPrinter(printer_id) => {
-                self.manual_pricing_selected = false;
-                self.selected_manual_bill_id = None;
-                self.selected_manual_booklet_index = None;
-                self.selected_printer = Some(printer_id.clone());
-                self.apply_profile_for_printer(&printer_id, None);
-                self.poll_selected_printer()
-            }
             Message::ToggleStatisticsPrinter(printer_id) => {
                 self.toggle_statistics_printer(printer_id);
                 Command::none()
@@ -630,7 +622,6 @@ impl PrintCountApp {
                 Command::none()
             }
             Message::PollSelectedSnmp => self.poll_selected_printer(),
-            Message::PollPrinterById(printer_id) => self.poll_printer(printer_id),
             Message::PollExportPathChanged(value) => {
                 self.poll_export_path = value;
                 Command::none()
@@ -712,14 +703,6 @@ impl PrintCountApp {
                 self.stop_recording();
                 Command::none()
             }
-            Message::RecordingStartChanged { category, value } => {
-                if let Some(printer_id) = self.selected_printer.clone() {
-                    let session = self.recording_sessions.entry(printer_id).or_default();
-                    session.edits.category_mut(category).start_input = value;
-                    session.touch();
-                }
-                Command::none()
-            }
             Message::RecordingEndChanged { category, value } => {
                 if let Some(printer_id) = self.selected_printer.clone() {
                     let session = self.recording_sessions.entry(printer_id).or_default();
@@ -761,12 +744,6 @@ impl PrintCountApp {
             }
             Message::PricingBwRestChanged(value) => {
                 self.pricing.bw_rest_input = value;
-                self.manual_pricing_dirty = true;
-                Command::none()
-            }
-            Message::PricingColorChanged(value) => {
-                self.pricing.color_input = value.clone();
-                self.pricing.color_rest_input = value;
                 self.manual_pricing_dirty = true;
                 Command::none()
             }

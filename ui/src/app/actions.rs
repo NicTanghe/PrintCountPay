@@ -3296,6 +3296,12 @@ mod tests {
         app.manual_bills.clear();
         app.manual_bill_tombstones.clear();
         app.statistics_store = StatisticsStore::default();
+        let test_stats_dir = temp_test_dir("test-app-stats");
+        let _ = fs::create_dir_all(&test_stats_dir);
+        app.statistics_path = test_stats_dir
+            .join("statistics.ron")
+            .to_string_lossy()
+            .to_string();
         app
     }
 
@@ -5245,8 +5251,8 @@ mod tests {
         let printer_a = printer_record_with_id("printer-a");
         let printer_b = printer_record_with_id("printer-b");
         let captured_at = app.statistics_time_window().start_inclusive;
-        let bw_key = StatisticsPollMetric::new("1.2.3", "Clicks: B/W", 0).series_key;
-        let color_key = StatisticsPollMetric::new("1.2.4", "Clicks: Color", 0).series_key;
+        let bw_key = TOTAL_BW_SERIES_KEY.to_string();
+        let color_key = TOTAL_COLOR_SERIES_KEY.to_string();
 
         app.replace_printers(vec![printer_a.clone(), printer_b.clone()]);
         append_poll_sample(

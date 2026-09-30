@@ -36,6 +36,33 @@ const BUSINESS_START_MINUTES: u16 = 10 * 60 + 45;
 const BUSINESS_END_MINUTES: u16 = 18 * 60 + 45;
 const RECORDING_POINTS_PER_DAY: usize = 4;
 const LEGACY_TOTAL_SERIES_LABEL: &str = "Clicks: Total";
+pub(crate) const TOTAL_BW_SERIES_KEY: &str = "label:Total B/W";
+pub(crate) const TOTAL_COLOR_SERIES_KEY: &str = "label:Total Color";
+pub(crate) const TOTAL_BW_SERIES_LABEL: &str = "Total B/W";
+pub(crate) const TOTAL_COLOR_SERIES_LABEL: &str = "Total Color";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MetricCategory {
+    BwCopies,
+    BwPrints,
+    ColorCopies,
+    ColorPrints,
+    LegacyBw,
+    LegacyColor,
+    Other,
+}
+
+pub(crate) fn classify_metric_label(label: &str) -> MetricCategory {
+    match label.trim() {
+        "Recording: Copies B/W" | "Copy B/W counter" => MetricCategory::BwCopies,
+        "Recording: Prints B/W" | "Print B/W counter" => MetricCategory::BwPrints,
+        "Recording: Copies Color" | "Copy color counter" => MetricCategory::ColorCopies,
+        "Recording: Prints Color" | "Print color counter" => MetricCategory::ColorPrints,
+        "Clicks: B/W" => MetricCategory::LegacyBw,
+        "Clicks: Color" => MetricCategory::LegacyColor,
+        _ => MetricCategory::Other,
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct StatisticsPollMetric {
@@ -168,6 +195,28 @@ impl StatisticsStore {
             .last_mut()
             .expect("statistics entry should exist after insert")
     }
+}
+
+pub(crate) fn printer_has_separate_bw(entry: &PrinterStatisticsEntry) -> bool {
+    entry.poll_samples.iter().any(|sample| {
+        sample.metrics.iter().any(|metric| {
+            matches!(
+                classify_metric_label(&metric.label),
+                MetricCategory::BwPrints | MetricCategory::BwCopies
+            )
+        })
+    })
+}
+
+pub(crate) fn printer_has_separate_color(entry: &PrinterStatisticsEntry) -> bool {
+    entry.poll_samples.iter().any(|sample| {
+        sample.metrics.iter().any(|metric| {
+            matches!(
+                classify_metric_label(&metric.label),
+                MetricCategory::ColorPrints | MetricCategory::ColorCopies
+            )
+        })
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -408,6 +457,29 @@ pub(crate) fn append_poll_sample(
         }
     }
 
+    let has_separate_bw = printer_has_separate_bw(entry)
+        || metrics.iter().any(|metric| {
+            matches!(
+                classify_metric_label(&metric.label),
+                MetricCategory::BwPrints | MetricCategory::BwCopies
+            )
+        });
+    let has_separate_color = printer_has_separate_color(entry)
+        || metrics.iter().any(|metric| {
+            matches!(
+                classify_metric_label(&metric.label),
+                MetricCategory::ColorPrints | MetricCategory::ColorCopies
+            )
+        });
+
+    if has_separate_bw {
+        metrics.retain(|metric| classify_metric_label(&metric.label) != MetricCategory::LegacyBw);
+    }
+    if has_separate_color {
+        metrics
+            .retain(|metric| classify_metric_label(&metric.label) != MetricCategory::LegacyColor);
+    }
+
     metrics
         .retain(|metric| metric.value != 0 || !entry_has_series_history(entry, &metric.series_key));
     if metrics.is_empty() {
@@ -491,6 +563,8 @@ pub(crate) fn available_series(
 ) -> Vec<StatisticsSeriesDefinition> {
     let mut seen = BTreeSet::new();
     let mut series = Vec::new();
+    let mut has_bw_data = false;
+    let mut has_color_data = false;
 
     for entry in store
         .printers
@@ -502,6 +576,20 @@ pub(crate) fn available_series(
                 continue;
             }
             for metric in &sample.metrics {
+                match classify_metric_label(&metric.label) {
+                    MetricCategory::BwCopies
+                    | MetricCategory::BwPrints
+                    | MetricCategory::LegacyBw => {
+                        has_bw_data = true;
+                    }
+                    MetricCategory::ColorCopies
+                    | MetricCategory::ColorPrints
+                    | MetricCategory::LegacyColor => {
+                        has_color_data = true;
+                    }
+                    MetricCategory::Other => {}
+                }
+
                 let Some(label) = display_label_for_metric(metric) else {
                     continue;
                 };
@@ -514,6 +602,19 @@ pub(crate) fn available_series(
                 }
             }
         }
+    }
+
+    if has_bw_data && seen.insert(TOTAL_BW_SERIES_KEY.to_string()) {
+        series.push(StatisticsSeriesDefinition {
+            key: TOTAL_BW_SERIES_KEY.to_string(),
+            label: TOTAL_BW_SERIES_LABEL.to_string(),
+        });
+    }
+    if has_color_data && seen.insert(TOTAL_COLOR_SERIES_KEY.to_string()) {
+        series.push(StatisticsSeriesDefinition {
+            key: TOTAL_COLOR_SERIES_KEY.to_string(),
+            label: TOTAL_COLOR_SERIES_LABEL.to_string(),
+        });
     }
 
     series.sort_by(|left, right| {
@@ -533,6 +634,25 @@ pub(crate) fn aggregate_series_points(
     max_points: usize,
     time_window: Option<StatisticsTimeWindow>,
 ) -> Vec<(u64, u64)> {
+    if series_key == TOTAL_BW_SERIES_KEY {
+        return aggregate_total_series_points(
+            store,
+            selected_printers,
+            max_points,
+            time_window,
+            true,
+        );
+    }
+    if series_key == TOTAL_COLOR_SERIES_KEY {
+        return aggregate_total_series_points(
+            store,
+            selected_printers,
+            max_points,
+            time_window,
+            false,
+        );
+    }
+
     let mut entry_points = Vec::<BTreeMap<u64, AggregatedPoint>>::new();
     for entry in store
         .printers
@@ -560,6 +680,101 @@ pub(crate) fn aggregate_series_points(
 
             upsert_latest_bucket_point(&mut points_by_bucket, sample.captured_at, sample_total);
         }
+        if !points_by_bucket.is_empty() {
+            entry_points.push(points_by_bucket);
+        }
+    }
+
+    aggregate_cumulative_entry_points(entry_points, max_points)
+}
+
+fn aggregate_total_series_points(
+    store: &StatisticsStore,
+    selected_printers: &HashSet<PrinterId>,
+    max_points: usize,
+    time_window: Option<StatisticsTimeWindow>,
+    is_bw: bool,
+) -> Vec<(u64, u64)> {
+    let mut entry_points = Vec::<BTreeMap<u64, AggregatedPoint>>::new();
+
+    for entry in store
+        .printers
+        .iter()
+        .filter(|entry| selected_printers.contains(&entry.printer_id))
+    {
+        let has_separate = if is_bw {
+            printer_has_separate_bw(entry)
+        } else {
+            printer_has_separate_color(entry)
+        };
+
+        let mut points_by_bucket = BTreeMap::<u64, AggregatedPoint>::new();
+        let mut latest_prints: Option<u64> = None;
+        let mut latest_copies: Option<u64> = None;
+        let mut latest_legacy: Option<u64> = None;
+
+        let mut sorted_samples: Vec<&StatisticsPollSample> = entry.poll_samples.iter().collect();
+        sorted_samples.sort_by_key(|s| s.captured_at);
+
+        for sample in sorted_samples {
+            let mut updated = false;
+
+            if has_separate {
+                for metric in &sample.metrics {
+                    match classify_metric_label(&metric.label) {
+                        MetricCategory::BwPrints if is_bw => {
+                            latest_prints = Some(metric.value);
+                            updated = true;
+                        }
+                        MetricCategory::BwCopies if is_bw => {
+                            latest_copies = Some(metric.value);
+                            updated = true;
+                        }
+                        MetricCategory::ColorPrints if !is_bw => {
+                            latest_prints = Some(metric.value);
+                            updated = true;
+                        }
+                        MetricCategory::ColorCopies if !is_bw => {
+                            latest_copies = Some(metric.value);
+                            updated = true;
+                        }
+                        _ => {}
+                    }
+                }
+
+                if updated && timestamp_matches_window(sample.captured_at, time_window) {
+                    let total = latest_prints
+                        .unwrap_or(0)
+                        .saturating_add(latest_copies.unwrap_or(0));
+                    upsert_latest_bucket_point(&mut points_by_bucket, sample.captured_at, total);
+                }
+            } else {
+                for metric in &sample.metrics {
+                    match classify_metric_label(&metric.label) {
+                        MetricCategory::LegacyBw if is_bw => {
+                            latest_legacy = Some(metric.value);
+                            updated = true;
+                        }
+                        MetricCategory::LegacyColor if !is_bw => {
+                            latest_legacy = Some(metric.value);
+                            updated = true;
+                        }
+                        _ => {}
+                    }
+                }
+
+                if updated && timestamp_matches_window(sample.captured_at, time_window) {
+                    if let Some(total) = latest_legacy {
+                        upsert_latest_bucket_point(
+                            &mut points_by_bucket,
+                            sample.captured_at,
+                            total,
+                        );
+                    }
+                }
+            }
+        }
+
         if !points_by_bucket.is_empty() {
             entry_points.push(points_by_bucket);
         }
@@ -639,18 +854,36 @@ fn timestamp_matches_window(captured_at: u64, time_window: Option<StatisticsTime
 
 fn statistics_series_sort_order(label: &str) -> usize {
     match label {
-        "Copies B/W" => 0,
-        "Prints B/W" => 1,
-        "Copies Color" => 2,
-        "Prints Color" => 3,
-        "Total B/W" => 4,
-        "Total Color" => 5,
+        "Total B/W" => 0,
+        "Total Color" => 1,
+        "Copies B/W" => 2,
+        "Prints B/W" => 3,
+        "Copies Color" => 4,
+        "Prints Color" => 5,
         _ => usize::MAX,
     }
 }
 
 pub(crate) fn normalize_statistics_store(store: &mut StatisticsStore) {
     for entry in &mut store.printers {
+        let has_separate_bw = printer_has_separate_bw(entry);
+        let has_separate_color = printer_has_separate_color(entry);
+
+        if has_separate_bw || has_separate_color {
+            for sample in &mut entry.poll_samples {
+                if has_separate_bw {
+                    sample.metrics.retain(|metric| {
+                        classify_metric_label(&metric.label) != MetricCategory::LegacyBw
+                    });
+                }
+                if has_separate_color {
+                    sample.metrics.retain(|metric| {
+                        classify_metric_label(&metric.label) != MetricCategory::LegacyColor
+                    });
+                }
+            }
+        }
+
         for sample in &mut entry.poll_samples {
             sample.normalize();
         }
@@ -987,8 +1220,6 @@ fn canonical_statistics_label(label: &str) -> Option<&'static str> {
         "Recording: Prints B/W" => Some("Prints B/W"),
         "Recording: Copies Color" => Some("Copies Color"),
         "Recording: Prints Color" => Some("Prints Color"),
-        "Clicks: B/W" => Some("Total B/W"),
-        "Clicks: Color" => Some("Total Color"),
         _ => None,
     }
 }
@@ -1462,7 +1693,11 @@ mod tests {
                 poll_samples: vec![
                     StatisticsPollSample {
                         captured_at: 100,
-                        metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: B/W", 10)],
+                        metrics: vec![StatisticsPollMetric::new(
+                            "1.2.3",
+                            "Recording: Prints Color",
+                            10,
+                        )],
                         legacy_total: None,
                     },
                     StatisticsPollSample {
@@ -1489,9 +1724,11 @@ mod tests {
 
         let series = available_series(&store, &selected, &pricing, Some(window));
 
-        assert_eq!(series.len(), 1);
+        assert_eq!(series.len(), 2);
+        assert!(series.iter().any(|entry| entry.label == "Total B/W"));
         assert!(series.iter().any(|entry| entry.label == "Prints B/W"));
-        assert!(!series.iter().any(|entry| entry.label == "Total B/W"));
+        assert!(!series.iter().any(|entry| entry.label == "Prints Color"));
+        assert!(!series.iter().any(|entry| entry.label == "Total Color"));
     }
 
     #[test]
@@ -1786,5 +2023,176 @@ mod tests {
         };
 
         assert_eq!(statistics_store_latest_timestamp(&store), 1_200);
+    }
+
+    #[test]
+    fn normalize_purges_rogue_clicks_bw_when_separate_counters_exist() {
+        let pid = printer_id("konica-minolta");
+        let mut store = StatisticsStore {
+            printers: vec![PrinterStatisticsEntry {
+                printer_id: pid.clone(),
+                poll_samples: vec![
+                    StatisticsPollSample {
+                        captured_at: 100,
+                        metrics: vec![StatisticsPollMetric::new("1.2.3", "Clicks: B/W", 5)],
+                        legacy_total: None,
+                    },
+                    StatisticsPollSample {
+                        captured_at: 200,
+                        metrics: vec![
+                            StatisticsPollMetric::new("1.2.4", "Recording: Prints B/W", 16_500),
+                            StatisticsPollMetric::new("1.2.5", "Recording: Copies B/W", 13_400),
+                        ],
+                        legacy_total: None,
+                    },
+                ],
+                euro_samples: Vec::new(),
+            }],
+        };
+
+        normalize_statistics_store(&mut store);
+        let entry = store.entry(&pid).expect("entry exists");
+        assert_eq!(entry.poll_samples.len(), 1);
+        assert_eq!(entry.poll_samples[0].captured_at, 200);
+        assert_eq!(entry.poll_samples[0].metrics.len(), 2);
+    }
+
+    #[test]
+    fn total_bw_and_total_color_calculated_from_prints_and_copies() {
+        let pid = printer_id("c551i");
+        let pricing = PricingSettings::default();
+        let store = StatisticsStore {
+            printers: vec![PrinterStatisticsEntry {
+                printer_id: pid.clone(),
+                poll_samples: vec![StatisticsPollSample {
+                    captured_at: 900,
+                    metrics: vec![
+                        StatisticsPollMetric::new("1.2.1", "Recording: Copies B/W", 13_400),
+                        StatisticsPollMetric::new("1.2.2", "Recording: Prints B/W", 16_500),
+                        StatisticsPollMetric::new("1.2.3", "Recording: Copies Color", 9_300),
+                        StatisticsPollMetric::new("1.2.4", "Recording: Prints Color", 17_100),
+                    ],
+                    legacy_total: None,
+                }],
+                euro_samples: Vec::new(),
+            }],
+        };
+        let selected = HashSet::from([pid]);
+
+        let series = available_series(&store, &selected, &pricing, None);
+        assert_eq!(series.len(), 6);
+        assert_eq!(series[0].label, "Total B/W");
+        assert_eq!(series[0].key, TOTAL_BW_SERIES_KEY);
+        assert_eq!(series[1].label, "Total Color");
+        assert_eq!(series[1].key, TOTAL_COLOR_SERIES_KEY);
+
+        let bw_points =
+            aggregate_series_points(&store, &selected, &pricing, TOTAL_BW_SERIES_KEY, 10, None);
+        let color_points = aggregate_series_points(
+            &store,
+            &selected,
+            &pricing,
+            TOTAL_COLOR_SERIES_KEY,
+            10,
+            None,
+        );
+
+        assert_eq!(bw_points, vec![(900, 29_900)]);
+        assert_eq!(color_points, vec![(900, 26_400)]);
+    }
+
+    #[test]
+    fn total_bw_carries_forward_unchanged_counter_across_samples() {
+        let pid = printer_id("printer-a");
+        let pricing = PricingSettings::default();
+        let store = StatisticsStore {
+            printers: vec![PrinterStatisticsEntry {
+                printer_id: pid.clone(),
+                poll_samples: vec![
+                    StatisticsPollSample {
+                        captured_at: 900,
+                        metrics: vec![
+                            StatisticsPollMetric::new("1.2.1", "Recording: Prints B/W", 100),
+                            StatisticsPollMetric::new("1.2.2", "Recording: Copies B/W", 50),
+                        ],
+                        legacy_total: None,
+                    },
+                    StatisticsPollSample {
+                        captured_at: 1_800,
+                        metrics: vec![
+                            // Copies B/W unchanged and omitted, only Prints B/W increased
+                            StatisticsPollMetric::new("1.2.1", "Recording: Prints B/W", 110),
+                        ],
+                        legacy_total: None,
+                    },
+                ],
+                euro_samples: Vec::new(),
+            }],
+        };
+        let selected = HashSet::from([pid]);
+
+        let bw_points =
+            aggregate_series_points(&store, &selected, &pricing, TOTAL_BW_SERIES_KEY, 10, None);
+
+        assert_eq!(bw_points, vec![(900, 150), (1_800, 160)]);
+    }
+
+    #[test]
+    fn mono_printer_calculates_total_bw_and_omits_color() {
+        let pid = printer_id("ricoh-pro-8200s");
+        let pricing = PricingSettings::default();
+        let store = StatisticsStore {
+            printers: vec![PrinterStatisticsEntry {
+                printer_id: pid.clone(),
+                poll_samples: vec![StatisticsPollSample {
+                    captured_at: 900,
+                    metrics: vec![StatisticsPollMetric::new(
+                        "1.2.1",
+                        "Recording: Prints B/W",
+                        500,
+                    )],
+                    legacy_total: None,
+                }],
+                euro_samples: Vec::new(),
+            }],
+        };
+        let selected = HashSet::from([pid]);
+
+        let series = available_series(&store, &selected, &pricing, None);
+        assert_eq!(series.len(), 2);
+        assert_eq!(series[0].label, "Total B/W");
+        assert_eq!(series[1].label, "Prints B/W");
+        assert!(!series.iter().any(|s| s.label.contains("Color")));
+
+        let bw_points =
+            aggregate_series_points(&store, &selected, &pricing, TOTAL_BW_SERIES_KEY, 10, None);
+        assert_eq!(bw_points, vec![(900, 500)]);
+    }
+
+    #[test]
+    fn legacy_printer_uses_clicks_bw_for_total() {
+        let pid = printer_id("legacy-mono");
+        let pricing = PricingSettings::default();
+        let store = StatisticsStore {
+            printers: vec![PrinterStatisticsEntry {
+                printer_id: pid.clone(),
+                poll_samples: vec![StatisticsPollSample {
+                    captured_at: 900,
+                    metrics: vec![StatisticsPollMetric::new("1.2.1", "Clicks: B/W", 75)],
+                    legacy_total: None,
+                }],
+                euro_samples: Vec::new(),
+            }],
+        };
+        let selected = HashSet::from([pid]);
+
+        let series = available_series(&store, &selected, &pricing, None);
+        assert_eq!(series.len(), 1);
+        assert_eq!(series[0].label, "Total B/W");
+        assert_eq!(series[0].key, TOTAL_BW_SERIES_KEY);
+
+        let bw_points =
+            aggregate_series_points(&store, &selected, &pricing, TOTAL_BW_SERIES_KEY, 10, None);
+        assert_eq!(bw_points, vec![(900, 75)]);
     }
 }

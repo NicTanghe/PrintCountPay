@@ -1411,7 +1411,6 @@ pub(crate) enum Message {
     SelectManualPricingTab(ManualPricingTab),
     SelectManualSummaryTab(ManualSummaryTab),
     SelectPrinterTab(PrinterTab),
-    SelectPrinter(PrinterId),
     ToggleStatisticsPrinter(PrinterId),
     ToggleStatisticsSeries(String),
     SelectStatisticsRangePreset(StatisticsRangePreset),
@@ -1448,7 +1447,6 @@ pub(crate) enum Message {
     ProfileChoiceChanged(ProfileChoice),
     DeleteSelectedPrinter,
     PollSelectedSnmp,
-    PollPrinterById(PrinterId),
     PollExportPathChanged(String),
     ExportPollData,
     SnmpPolled {
@@ -1468,10 +1466,6 @@ pub(crate) enum Message {
     RecordingOidPrintsColorChanged(String),
     StartRecording,
     StopRecording,
-    RecordingStartChanged {
-        category: RecordingCategory,
-        value: String,
-    },
     RecordingEndChanged {
         category: RecordingCategory,
         value: String,
@@ -1482,7 +1476,6 @@ pub(crate) enum Message {
     PricingBwFirstChanged(String),
     PricingBwNextChanged(String),
     PricingBwRestChanged(String),
-    PricingColorChanged(String),
     PricingColorFirstChanged(String),
     PricingColorRestChanged(String),
     PricingRoundChanged(bool),
