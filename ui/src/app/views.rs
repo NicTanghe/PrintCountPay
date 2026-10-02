@@ -9,8 +9,9 @@ const STATISTICS_CHART_CONTAINER_PAD_LEFT: f32 = 12.0;
 const STATISTICS_CHART_CONTAINER_PAD_RIGHT: f32 = 12.0;
 const STATISTICS_CHART_CONTAINER_PAD_TOP: f32 = 8.0;
 const STATISTICS_CHART_CONTAINER_PAD_BOTTOM: f32 = 8.0;
-const STATISTICS_CHART_DELTAS_HEIGHT: f32 = 18.0;
-const STATISTICS_CHART_DELTAS_GAP: f32 = 6.0;
+const STATISTICS_CHART_DELTA_ROW_HEIGHT: f32 = 14.0;
+const STATISTICS_CHART_DELTA_ROW_GAP: f32 = 2.0;
+const STATISTICS_CHART_DELTAS_BOTTOM_GAP: f32 = 4.0;
 const STATISTICS_DATE_CONTROLS_INLINE_MIN_WIDTH: f32 = 626.0;
 
 impl PrintCountApp {
@@ -3396,8 +3397,15 @@ impl PrintCountApp {
                 Some((series.color, label.to_string(), delta))
             })
             .collect();
+        let deltas_content_height = if !delta_items.is_empty() {
+            let count = delta_items.len() as f32;
+            count * STATISTICS_CHART_DELTA_ROW_HEIGHT
+                + (count - 1.0).max(0.0) * STATISTICS_CHART_DELTA_ROW_GAP
+        } else {
+            0.0
+        };
         let deltas_total_height = if !delta_items.is_empty() {
-            STATISTICS_CHART_DELTAS_HEIGHT + STATISTICS_CHART_DELTAS_GAP
+            deltas_content_height + STATISTICS_CHART_DELTAS_BOTTOM_GAP
         } else {
             0.0
         };
@@ -3422,18 +3430,18 @@ impl PrintCountApp {
             .height(Length::Fixed(STATISTICS_CHART_SVG_HEIGHT))
             .style(|_theme, _status| iced::widget::svg::Style { color: None });
 
-            let mut card_content = column![].spacing(STATISTICS_CHART_DELTAS_GAP);
+            let mut card_content = column![].spacing(STATISTICS_CHART_DELTAS_BOTTOM_GAP);
             if !delta_items.is_empty() {
-                let mut deltas_row = row![horizontal_space()].spacing(16).align_items(Alignment::Center);
+                let mut deltas_col = column![].spacing(STATISTICS_CHART_DELTA_ROW_GAP);
                 for (color, label, delta) in &delta_items {
-                    deltas_row = deltas_row.push(
+                    deltas_col = deltas_col.push(
                         row![
-                            statistics_delta_svg(*color, 11.0),
+                            statistics_delta_svg(*color, 9.5),
                             text(format!("{label}:"))
-                                .size(12)
+                                .size(11)
                                 .style(theme::Text::Color(*color)),
                             text(delta.to_string())
-                                .size(13)
+                                .size(11)
                                 .font(iced::Font {
                                     weight: iced::font::Weight::Semibold,
                                     ..iced::Font::DEFAULT
@@ -3444,10 +3452,17 @@ impl PrintCountApp {
                         .align_items(Alignment::Center),
                     );
                 }
-                deltas_row = deltas_row.push(Space::new().width(Length::Fixed(6.0)));
+
+                let deltas_header = row![
+                    horizontal_space(),
+                    deltas_col,
+                    Space::new().width(Length::Fixed(6.0)),
+                ]
+                .align_items(Alignment::Center);
+
                 card_content = card_content.push(
-                    container(deltas_row)
-                        .height(Length::Fixed(STATISTICS_CHART_DELTAS_HEIGHT))
+                    container(deltas_header)
+                        .height(Length::Fixed(deltas_content_height))
                         .width(Length::Fill)
                         .align_y(iced::alignment::Vertical::Center),
                 );
