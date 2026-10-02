@@ -9,7 +9,7 @@ const STATISTICS_CHART_CONTAINER_PAD_LEFT: f32 = 12.0;
 const STATISTICS_CHART_CONTAINER_PAD_RIGHT: f32 = 12.0;
 const STATISTICS_CHART_CONTAINER_PAD_TOP: f32 = 8.0;
 const STATISTICS_CHART_CONTAINER_PAD_BOTTOM: f32 = 8.0;
-const STATISTICS_CHART_DELTA_ROW_HEIGHT: f32 = 14.0;
+const STATISTICS_CHART_DELTA_ROW_HEIGHT: f32 = 16.0;
 const STATISTICS_CHART_DELTA_ROW_GAP: f32 = 2.0;
 const STATISTICS_CHART_DELTAS_BOTTOM_GAP: f32 = 4.0;
 const STATISTICS_DATE_CONTROLS_INLINE_MIN_WIDTH: f32 = 626.0;
@@ -3436,7 +3436,7 @@ impl PrintCountApp {
                 for (color, label, delta) in &delta_items {
                     deltas_col = deltas_col.push(
                         row![
-                            statistics_delta_svg(*color, 9.5),
+                            statistics_delta_svg(*color, 10.0),
                             text(format!("{label}:"))
                                 .size(11)
                                 .style(theme::Text::Color(*color)),
@@ -3449,6 +3449,7 @@ impl PrintCountApp {
                                 .style(theme::Text::Color(*color)),
                         ]
                         .spacing(4)
+                        .height(Length::Fixed(STATISTICS_CHART_DELTA_ROW_HEIGHT))
                         .align_items(Alignment::Center),
                     );
                 }
@@ -3463,8 +3464,7 @@ impl PrintCountApp {
                 card_content = card_content.push(
                     container(deltas_header)
                         .height(Length::Fixed(deltas_content_height))
-                        .width(Length::Fill)
-                        .align_y(iced::alignment::Vertical::Center),
+                        .width(Length::Fill),
                 );
             }
             card_content = card_content.push(chart);
@@ -5325,7 +5325,7 @@ fn statistics_color_hex(color: Color) -> String {
 fn statistics_delta_svg(color: Color, size: f32) -> iced::widget::Svg<'static, Theme> {
     let hex = statistics_color_hex(color);
     let markup = format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none"><path d="M 8 2.2 L 14.2 13.8 L 1.8 13.8 Z" stroke="{hex}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>"#
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" width="10" height="10" fill="none"><path d="M 5 1.2 L 9 8.8 L 1 8.8 Z" stroke="{hex}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>"#
     );
     iced::widget::svg(iced::widget::svg::Handle::from_memory(markup.into_bytes()))
         .width(Length::Fixed(size))
