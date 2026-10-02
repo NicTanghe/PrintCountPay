@@ -9,6 +9,8 @@ const STATISTICS_CHART_CONTAINER_PAD_LEFT: f32 = 12.0;
 const STATISTICS_CHART_CONTAINER_PAD_RIGHT: f32 = 12.0;
 const STATISTICS_CHART_CONTAINER_PAD_TOP: f32 = 8.0;
 const STATISTICS_CHART_CONTAINER_PAD_BOTTOM: f32 = 8.0;
+const STATISTICS_CHART_DELTAS_HEIGHT: f32 = 18.0;
+const STATISTICS_CHART_DELTAS_GAP: f32 = 6.0;
 const STATISTICS_DATE_CONTROLS_INLINE_MIN_WIDTH: f32 = 626.0;
 
 impl PrintCountApp {
@@ -3381,9 +3383,28 @@ impl PrintCountApp {
         x_bounds: StatisticsChartBounds,
         series_y_bounds: &HashMap<String, StatisticsSeriesYBounds>,
     ) -> Element<'_, Message> {
+        let delta_items: Vec<(Color, String, i128)> = visible_series
+            .iter()
+            .filter_map(|series| {
+                let (first, last) = (series.points.first()?, series.points.last()?);
+                let delta = i128::from(last.1) - i128::from(first.1);
+                let label = match series.key.as_str() {
+                    statistics::TOTAL_BW_SERIES_KEY => "B/W",
+                    statistics::TOTAL_COLOR_SERIES_KEY => "Colour",
+                    _ => series.label.as_str(),
+                };
+                Some((series.color, label.to_string(), delta))
+            })
+            .collect();
+        let deltas_total_height = if !delta_items.is_empty() {
+            STATISTICS_CHART_DELTAS_HEIGHT + STATISTICS_CHART_DELTAS_GAP
+        } else {
+            0.0
+        };
         let chart_height = STATISTICS_CHART_SVG_HEIGHT
             + STATISTICS_CHART_CONTAINER_PAD_TOP
-            + STATISTICS_CHART_CONTAINER_PAD_BOTTOM;
+            + STATISTICS_CHART_CONTAINER_PAD_BOTTOM
+            + deltas_total_height;
         let hover = self.statistics_chart_hover;
         let series = visible_series.to_vec();
         let bounds_by_series = series_y_bounds.clone();
@@ -3401,7 +3422,39 @@ impl PrintCountApp {
             .height(Length::Fixed(STATISTICS_CHART_SVG_HEIGHT))
             .style(|_theme, _status| iced::widget::svg::Style { color: None });
 
-            let chart_card = container(chart)
+            let mut card_content = column![].spacing(STATISTICS_CHART_DELTAS_GAP);
+            if !delta_items.is_empty() {
+                let mut deltas_row = row![horizontal_space()].spacing(16).align_items(Alignment::Center);
+                for (color, label, delta) in &delta_items {
+                    deltas_row = deltas_row.push(
+                        row![
+                            statistics_delta_svg(*color, 11.0),
+                            text(format!("{label}:"))
+                                .size(12)
+                                .style(theme::Text::Color(*color)),
+                            text(delta.to_string())
+                                .size(13)
+                                .font(iced::Font {
+                                    weight: iced::font::Weight::Semibold,
+                                    ..iced::Font::DEFAULT
+                                })
+                                .style(theme::Text::Color(*color)),
+                        ]
+                        .spacing(4)
+                        .align_items(Alignment::Center),
+                    );
+                }
+                deltas_row = deltas_row.push(Space::new().width(Length::Fixed(6.0)));
+                card_content = card_content.push(
+                    container(deltas_row)
+                        .height(Length::Fixed(STATISTICS_CHART_DELTAS_HEIGHT))
+                        .width(Length::Fill)
+                        .align_y(iced::alignment::Vertical::Center),
+                );
+            }
+            card_content = card_content.push(chart);
+
+            let chart_card = container(card_content)
                 .padding(iced::Padding {
                     top: STATISTICS_CHART_CONTAINER_PAD_TOP,
                     right: STATISTICS_CHART_CONTAINER_PAD_RIGHT,
@@ -3420,6 +3473,7 @@ impl PrintCountApp {
                         size.width,
                         x_bounds,
                         &hover_timestamps,
+                        deltas_total_height,
                     )
                     .map(Message::StatisticsChartHoverMoved)
                     .unwrap_or(Message::StatisticsChartHoverCleared)
@@ -4961,13 +5015,18 @@ fn statistics_chart_hover_from_cursor(
     chart_width: f32,
     x_bounds: StatisticsChartBounds,
     timestamps: &[u64],
+    top_inset: f32,
 ) -> Option<StatisticsChartHover> {
+    let top_offset = STATISTICS_CHART_CONTAINER_PAD_TOP + top_inset;
+    let drawable_height = STATISTICS_CHART_SVG_HEIGHT.max(1.0);
+    if cursor.y < top_offset || cursor.y > top_offset + drawable_height {
+        return None;
+    }
     let drawable_width =
         (chart_width - STATISTICS_CHART_CONTAINER_PAD_LEFT - STATISTICS_CHART_CONTAINER_PAD_RIGHT)
             .max(1.0);
-    let drawable_height = STATISTICS_CHART_SVG_HEIGHT.max(1.0);
     let local_x = (cursor.x - STATISTICS_CHART_CONTAINER_PAD_LEFT).clamp(0.0, drawable_width);
-    let local_y = (cursor.y - STATISTICS_CHART_CONTAINER_PAD_TOP).clamp(0.0, drawable_height);
+    let local_y = (cursor.y - top_offset).clamp(0.0, drawable_height);
     let cursor_x = (local_x / drawable_width) * STATISTICS_CHART_SVG_WIDTH;
     let cursor_y = (local_y / drawable_height) * STATISTICS_CHART_SVG_HEIGHT;
     let inferred_timestamp = statistics_timestamp_from_chart_x(x_bounds, cursor_x);
@@ -5246,4 +5305,15 @@ fn statistics_color_hex(color: Color) -> String {
     let green = (color.g.clamp(0.0, 1.0) * 255.0).round() as u8;
     let blue = (color.b.clamp(0.0, 1.0) * 255.0).round() as u8;
     format!("#{red:02X}{green:02X}{blue:02X}")
+}
+
+fn statistics_delta_svg(color: Color, size: f32) -> iced::widget::Svg<'static, Theme> {
+    let hex = statistics_color_hex(color);
+    let markup = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none"><path d="M 8 2.2 L 14.2 13.8 L 1.8 13.8 Z" stroke="{hex}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>"#
+    );
+    iced::widget::svg(iced::widget::svg::Handle::from_memory(markup.into_bytes()))
+        .width(Length::Fixed(size))
+        .height(Length::Fixed(size))
+        .style(|_theme, _status| iced::widget::svg::Style { color: None })
 }
